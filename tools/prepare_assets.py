@@ -192,6 +192,16 @@ def defeat_banner(size):
     return img
 
 
+def minimap_label():
+    """Nombre del deposito para el minimapa, en dos lineas (el minimapa mide 76 px)."""
+    lines = [label("Polvorín", 10, stroke=1), label("Polvoriento", 10, stroke=1)]
+    w = max(l.width for l in lines)
+    img = Image.new("RGBA", (w, lines[0].height + lines[1].height - 3), (0, 0, 0, 0))
+    img.alpha_composite(lines[0], ((w - lines[0].width) // 2, 0))
+    img.alpha_composite(lines[1], ((w - lines[1].width) // 2, lines[0].height - 3))
+    return img
+
+
 def ui_atlas():
     victory = victory_banner()
     logo = alpha_crop(Image.open(RES / "fortnite_PNG25.png").convert("RGBA"))
@@ -204,6 +214,7 @@ def ui_atlas():
         "Controles": label("CONTROLES", 20),
         "Salir": label("SALIR", 20),
         "Mapa": label("POLVORÍN POLVORIENTO", 17),
+        "MapaMinimapa": minimap_label(),
         "IniciarSesion": label("INICIAR SESIÓN", 22),
         "Cargando": label("CARGANDO", 18),
         "Construccion": label("MODO CONSTRUCCIÓN", 13, stroke=1),

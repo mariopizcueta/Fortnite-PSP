@@ -26,7 +26,7 @@ Las coordenadas y los ejes son los de [MUNDO.md](MUNDO.md): 1 unidad = 1 m, +Y a
 | Cruceta ← / →              | Ranura del inventario (en construcción: pieza)              |
 | TRIÁNGULO                  | Sacar / guardar el pico (en la página de depuración: cámara libre) |
 | R                          | Disparar, golpear con el pico o usar un consumible (ver INVENTARIO.md) |
-| CUADRADO                   | Abrir / recoger lo que haya al alcance; si no hay nada, recargar (en construcción: quitar la pared apuntada) |
+| CUADRADO                   | Abrir / recoger lo que haya al alcance; si no hay nada, recargar (en construcción: cambiar de material) |
 | X (autobús / caída libre)  | Saltar del autobús / abrir el ala delta (ver BOTIN.md)      |
 | CÍRCULO                    | Modo construcción (cruceta: pared, suelo o rampa; R la coloca) |
 | L con el francotirador     | Mirilla: primera persona con zoom; el stick apunta más despacio |

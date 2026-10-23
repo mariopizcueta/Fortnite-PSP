@@ -39,7 +39,8 @@ struct PlayerCommands {
     bool buildMode = false;  // modo construccion activo (CIRCULO)
     bool placeWall = false;  // R pulsado en modo construccion: coloca la pieza elegida
     PieceType buildPiece = PieceType::Wall;  // pieza elegida con la cruceta
-    bool removeWall = false; // CUADRADO pulsado en modo construccion
+    bool removeWall = false; // quitar la pieza apuntada (pruebas; en partida se rompe con el pico)
+    bool cycleMaterial = false;  // CUADRADO en construccion: madera -> piedra -> metal
     bool reload = false;     // CUADRADO pulsado en modo combate: abrir / recoger o recargar
     int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
@@ -60,6 +61,7 @@ enum class GameEventType : u8 {
     Eliminated,    // entity = victima, other = quien la elimino
     WallBuilt,
     WallBroken,
+    ObjectDestroyed,  // un objeto del mapa se queda sin vida (other = indice del objeto)
     WallRemoved,
     Reload,        // entity = 0 (el jugador empieza a recargar)
     PickaxeSwing,  // entity = 0, other = 1 si ha golpeado algo
@@ -103,6 +105,7 @@ struct Container {
     math3d::Vec3 position;
     float yaw = 0.0f;
     bool opened = false;
+    float openedAt = 0.0f;  // s de partida en que se abrio (se ve abierto un instante y desaparece)
     bool landed = true;   // airdrop: false mientras baja con el globo
     int claimedBy = -1;
 };
@@ -234,9 +237,15 @@ public:
     ItemType usingItem() const { return m_useSlot >= 0 ? m_inventory.slot(m_useSlot).type : ItemType::None; }
     UseError lastUseError() const { return m_useError; }
     float sinceUseError() const { return m_sinceUseError; }
-    // Material que le queda a un objeto recolectable (indice de world::World::harvestables()).
-    int harvestLeft(int index) const { return m_harvestLeft[index]; }
-    // Objetos que se pueden picar (los del mundo). Se llama una vez; start() repone el material.
+    // Objetos del mapa que se pueden picar y destruir (indices de world::World::harvestables()).
+    float objectHealth(int index) const { return m_objectHealth[index]; }
+    bool objectDestroyed(int index) const { return m_objectDestroyed[index] != 0; }
+    // Para World::draw (no dibuja los destruidos); nullptr si no hay objetos.
+    const u8* destroyedObjects() const { return m_objectDestroyed.empty() ? nullptr : m_objectDestroyed.data(); }
+    int destroyedObjectCount() const;
+    // Quita vida a un objeto; sin vida desaparece (colision y dibujo). true si se destruye.
+    bool damageObject(int index, float amount, const math3d::Vec3& point, int by);
+    // Objetos que se pueden picar (los del mundo). Se llama una vez; start() los repone.
     void setHarvestables(const std::vector<world::Harvestable>* list);
 
     // Autobus y caida.
@@ -265,6 +274,8 @@ public:
     // Arma del bot i (para el HUD de depuracion).
     const char* botWeaponName(int i) const;
     const StructureSystem& structures() const { return m_structures; }
+    // Material elegido para construir (CUADRADO en construccion lo cambia).
+    world::Resource buildMaterial() const { return m_buildMaterial; }
     // Donde iria una pieza ahora mismo (para dibujar la pieza fantasma).
     WallPlacement planWall(float yaw, PieceType type = PieceType::Wall) const;
     // Pared construida bajo la mira y a alcance para quitarla, o -1.
@@ -345,7 +356,12 @@ private:
     Pickup randomWeaponPickup(bool chest);
     Pickup randomConsumablePickup();
     Rarity randomRarity(bool chest);
-    void dropBotWeapon(int bot);
+    void dropBotWeapon(int bot);  // al caer: todo su inventario queda en el suelo
+    // Bots con inventario: que les interesa recoger, que arma sacar y cuando curarse.
+    bool botWants(const Bot& bot, const Pickup& pickup) const;
+    int botReplacedSlot(const Bot& bot, const Pickup& pickup) const;
+    void botEquip(Bot& bot, float distance);
+    void botUpdateHealing(int index, float dt);
     // IA de botin, caza y construccion (match_bots.cpp).
     bool findLoot(int index, float maxDistance);
     void botTakeLoot(int index);
@@ -369,6 +385,8 @@ private:
     // Fuera de la zona siguiente con la tormenta cerca: lo primero es entrar.
     bool botNeedsSafety(const math3d::Vec3& pos, int self) const;
     bool safePoint(math3d::Vec3* out);
+    // Direccion por la que bajar de lo que hay bajo los pies (hacia el apoyo mas bajo).
+    math3d::Vec3 descentDirection(const math3d::Vec3& pos) const;
     bool requestPath(Bot& bot, const math3d::Vec3& to);
     MoveIntent steer(int index, float dt);
     void botShoot(int index);
@@ -392,6 +410,7 @@ private:
     bool m_pendingJump = false;
     bool m_pendingPlace = false;
     PieceType m_buildPiece = PieceType::Wall;
+    world::Resource m_buildMaterial = world::Resource::Wood;
     bool m_pendingRemove = false;
     bool m_pendingReload = false;
     bool m_pendingPickaxe = false;
@@ -407,7 +426,8 @@ private:
     float m_swingCooldown = 0.0f;
     const std::vector<world::Harvestable>* m_harvestables = nullptr;
     std::vector<short> m_harvestByCollider;
-    std::vector<int> m_harvestLeft;
+    std::vector<float> m_objectHealth;
+    std::vector<u8> m_objectDestroyed;
     StructureSystem m_structures;
     unsigned m_seenStructureRevision = 0;
     DamageNumber m_damageNumbers[kMaxDamageNumbers];

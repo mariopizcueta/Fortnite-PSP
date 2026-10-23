@@ -13,13 +13,13 @@ paredes y números grandes) y `src/world/collision.*` (cajas dinámicas).
 | Siempre        | L + stick                 | Apuntar (ver JUGADOR.md); la cámara sigue al andar        |
 | Combate        | Cruceta ← →               | Ranura del inventario (ver INVENTARIO.md)                 |
 | Combate        | TRIÁNGULO                 | Pico                                                      |
-| Construcción   | Cruceta ← →               | Pieza (pared; suelo y rampa aún no se colocan)            |
+| Construcción   | Cruceta ← →               | Pieza: pared, suelo o rampa                               |
 | Siempre        | **CÍRCULO**               | **Activar / desactivar el modo construcción**             |
 | Combate        | R (mantener)              | Disparar la SCAR (cadencia de 5,5 disparos/s)             |
 | Combate        | CUADRADO                  | Recargar                                                  |
 | Combate        | L (mantener)              | Fijar el bot visible más centrado (sin objetivo: centrar la cámara) |
 | Construcción   | R (pulsar)                | Colocar una pared delante (una por pulsación, 10 de madera) |
-| Construcción   | CUADRADO                  | Quitar la pared que tienes en la mira (hasta 7 m)         |
+| Construcción   | CUADRADO                  | Cambiar de material (desde v0.10.0; ver DESTRUCCION.md)   |
 | Construcción   | L + stick                 | Mover la mira (sin fijar objetivo)                        |
 | Depuración     | TRIÁNGULO                 | Cámara libre (dentro: CUADRADO niebla, START VSync)       |
 | Siempre        | SELECT                    | HUD: partida → depuración → controles → oculto            |
@@ -115,8 +115,8 @@ paredes y números grandes) y `src/world/collision.*` (cajas dinámicas).
 Dos paredes perpendiculares que comparten esquina son compatibles: en la rejilla solo
 pueden tocarse por los extremos. Así se pueden cerrar recintos.
 
-**Quitar paredes:** en modo construcción, CUADRADO quita la pared que esté en la mira a
-menos de 7 m.
+**Quitar paredes:** hasta v0.9.1, CUADRADO quitaba la pared de la mira. Desde v0.10.0
+cambia el material y las piezas se rompen con el pico (ver DESTRUCCION.md).
 
 **Vida:** cada pared tiene 150 de vida. La SCAR la rompe en 5 impactos y el fusil de los
 bots en 15.

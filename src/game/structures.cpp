@@ -18,7 +18,7 @@ const char* placementErrorName(PlacementError error) {
         case PlacementError::OverlapsStructure: return "Choca con otra estructura";
         case PlacementError::Blocked: return "Hay un obstaculo en medio";
         case PlacementError::OutOfBounds: return "Fuera del mapa";
-        case PlacementError::NoMaterials: return "Falta madera (10 por pieza)";
+        case PlacementError::NoMaterials: return "Faltan materiales (10 por pieza)";
     }
     return "?";
 }
@@ -267,7 +267,10 @@ int StructureSystem::place(const WallPlacement& placement, int owner) {
         w.alongX = placement.alongX;
         w.dir = placement.dir;
         w.level = placement.level;
-        w.health = w.maxHealth = m_config.wallHealth;
+        w.material = placement.material;
+        w.health = w.maxHealth = placement.material == world::Resource::Metal   ? m_config.metalHealth
+                                 : placement.material == world::Resource::Stone ? m_config.stoneHealth
+                                                                                : m_config.wallHealth;
         w.sinceHit = 99.0f;
         w.owner = owner;
         ++m_count;

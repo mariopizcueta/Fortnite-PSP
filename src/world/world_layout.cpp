@@ -104,28 +104,53 @@ struct Builders {
     SceneBuilder& visual;
     CollisionWorld& collision;
     std::vector<Harvestable>* harvest = nullptr;
+    std::vector<StaticBatch>* out = nullptr;  // lotes de dibujo (los de cada objeto, aparte)
+    int objectCollider = 0;                    // primera caja / lote del objeto en curso
+    int objectBatch = 0;
 };
 
-// Material que da cada objeto al picarlo: por golpe y en total (con 6-8 golpes se agota).
+// Lo que da cada objeto al picarlo (por golpe) y su vida (el pico quita 50 por golpe).
 struct Yield {
     Resource resource;
-    int perHit, total;
+    int perHit;
+    float health;
 };
-constexpr Yield kTreeYield{Resource::Wood, 8, 48};
-constexpr Yield kCrateYield{Resource::Wood, 6, 30};
-constexpr Yield kRockYield{Resource::Stone, 7, 49};
-constexpr Yield kMetalYield{Resource::Metal, 8, 64};
-constexpr Yield kSmallMetalYield{Resource::Metal, 6, 30};
+constexpr Yield kTreeYield{Resource::Wood, 8, 300.0f};
+constexpr Yield kCrateYield{Resource::Wood, 6, 150.0f};
+constexpr Yield kRockYield{Resource::Stone, 7, 300.0f};
+constexpr Yield kMetalYield{Resource::Metal, 8, 400.0f};
+constexpr Yield kSmallMetalYield{Resource::Metal, 6, 200.0f};
+constexpr Yield kPanelYield{Resource::Metal, 6, 300.0f};      // paneles de las naves y tejados
+constexpr Yield kBlockWallYield{Resource::Stone, 6, 250.0f};  // muro de bloques y peldanos
+constexpr Yield kFenceYield{Resource::Metal, 4, 150.0f};      // vallas, farolas, barandillas
 
-// La ultima caja de colision anadida se puede picar.
-void harvestable(Builders& b, const Yield& y) {
-    if (!b.harvest) return;
+// Objeto del mapa que se puede picar y destruir: todo lo que se dibuje y se anada a la
+// colision entre beginObject() y endObject() forma un solo objeto (sus lotes de dibujo
+// van aparte para poder dejar de dibujarlos).
+void beginObject(Builders& b) {
+    if (b.out) b.visual.flushGroup(*b.out);  // lo anterior, en sus propios lotes
+    b.objectCollider = b.collision.count();
+    b.objectBatch = b.out ? static_cast<int>(b.out->size()) : 0;
+}
+
+void endObject(Builders& b, const Yield& y) {
+    if (b.out) b.visual.flushGroup(*b.out);
+    const int colliders = b.collision.count() - b.objectCollider;
+    if (!b.harvest || colliders <= 0) return;
     Harvestable h;
-    h.collider = b.collision.count() - 1;
+    h.collider = b.objectCollider;
+    h.colliderCount = colliders;
+    h.batchBegin = b.objectBatch;
+    h.batchEnd = b.out ? static_cast<int>(b.out->size()) : b.objectBatch;
     h.resource = y.resource;
     h.box = b.collision.collider(h.collider).box;
+    for (int i = 1; i < colliders; ++i) {
+        const Aabb& c = b.collision.collider(h.collider + i).box;
+        h.box.min = {fminf(h.box.min.x, c.min.x), fminf(h.box.min.y, c.min.y), fminf(h.box.min.z, c.min.z)};
+        h.box.max = {fmaxf(h.box.max.x, c.max.x), fmaxf(h.box.max.y, c.max.y), fmaxf(h.box.max.z, c.max.z)};
+    }
     h.perHit = y.perHit;
-    h.total = y.total;
+    h.health = y.health;
     b.harvest->push_back(h);
 }
 
@@ -152,6 +177,14 @@ struct Opening {
     float a0, a1, height;
 };
 
+// Tramos de pared de mas de 4 m: paneles de 4 m como mucho, cada uno un objeto que se
+// puede picar y destruir por separado (como las piezas de Fortnite).
+template <typename Fn>
+void panels(float a, float c, Fn&& panel) {
+    const int n = static_cast<int>(ceilf((c - a) / 4.0f - 0.01f));
+    for (int i = 0; i < n; ++i) panel(a + (c - a) * i / n, a + (c - a) * (i + 1) / n);
+}
+
 // Pared a lo largo de X (grosor en Z [z0, z1]) con huecos. `insideNegZ`: la cara
 // interior (mas oscura) es la que mira a -Z.
 void wallAlongX(Builders& b, const Material& outer, const Material& inner, bool insideNegZ,
@@ -160,8 +193,12 @@ void wallAlongX(Builders& b, const Material& outer, const Material& inner, bool 
                             &outer, &outer, nullptr};
     auto piece = [&](float a, float c, float y0, float y1) {
         if (c - a < 0.01f || y1 - y0 < 0.01f) return;
-        faceBox(b.visual, f, {a, y0, z0}, {c, y1, z1});
-        b.collision.add({{a, y0, z0}, {c, y1, z1}}, kSolid);
+        panels(a, c, [&](float pa, float pc) {
+            beginObject(b);
+            faceBox(b.visual, f, {pa, y0, z0}, {pc, y1, z1});
+            b.collision.add({{pa, y0, z0}, {pc, y1, z1}}, kSolid);
+            endObject(b, kPanelYield);
+        });
     };
     float cursor = x0;
     for (const Opening& op : ops) {
@@ -179,8 +216,12 @@ void wallAlongZ(Builders& b, const Material& outer, const Material& inner, bool 
                             insideNegX ? &inner : &outer, &outer, nullptr};
     auto piece = [&](float a, float c, float y0, float y1) {
         if (c - a < 0.01f || y1 - y0 < 0.01f) return;
-        faceBox(b.visual, f, {x0, y0, a}, {x1, y1, c});
-        b.collision.add({{x0, y0, a}, {x1, y1, c}}, kSolid);
+        panels(a, c, [&](float pa, float pc) {
+            beginObject(b);
+            faceBox(b.visual, f, {x0, y0, pa}, {x1, y1, pc});
+            b.collision.add({{x0, y0, pa}, {x1, y1, pc}}, kSolid);
+            endObject(b, kPanelYield);
+        });
     };
     float cursor = z0;
     for (const Opening& op : ops) {
@@ -201,34 +242,60 @@ void alongSlope(float ax, float ay, float bx, float by, float t, float lift, flo
     oy = ay + dy * t + dx / len * lift * side;
 }
 
-// Cubierta abuhardillada (como en la referencia) + hastiales + lucernarios. Solo visual:
-// nadie puede llegar al tejado.
-void gambrelRoof(SceneBuilder& v, float x0, float x1, float z0, float z1, float wallH,
+// Cubierta abuhardillada (como en la referencia) + hastiales + lucernarios, en cuatro
+// tramos a lo largo de Z: cada tramo es un objeto que se puede picar y destruir.
+// Colision: columnas de 1 m de ancho que siguen el perfil del tejado (losas de 0.5 m), para
+// que quien cae del autobus o planea se pose encima en lugar de atravesarlo.
+void gambrelRoof(Builders& b, float x0, float x1, float z0, float z1, float wallH,
                  const Material& roof, const Material& gable) {
+    SceneBuilder& v = b.visual;
     const float xm = (x0 + x1) * 0.5f;
     const float o = 0.5f;
     const float zs = z0 - o, ze = z1 + o;
     const float eave = wallH - 0.3f, knee = wallH + 3.2f, ridge = wallH + 4.8f;
     const float kx0 = x0 + 3.0f, kx1 = x1 - 3.0f;
-    // Faldones izquierdos (suben hacia +X) y derechos (suben hacia -X).
-    v.quad(roof, {x0 - o, eave, zs}, {x0 - o, eave, ze}, {kx0, knee, ze}, {kx0, knee, zs});
-    v.quad(roof, {kx0, knee, zs}, {kx0, knee, ze}, {xm, ridge, ze}, {xm, ridge, zs});
-    v.quad(roof, {x1 + o, eave, ze}, {x1 + o, eave, zs}, {kx1, knee, zs}, {kx1, knee, ze});
-    v.quad(roof, {kx1, knee, ze}, {kx1, knee, zs}, {xm, ridge, zs}, {xm, ridge, ze});
-    // Hastiales por encima de las paredes.
-    v.quad(gable, {x0, wallH, z1}, {x1, wallH, z1}, {kx1, knee, z1}, {kx0, knee, z1});
-    v.triangle(gable, {kx0, knee, z1}, {kx1, knee, z1}, {xm, ridge, z1});
-    v.quad(gable, {x1, wallH, z0}, {x0, wallH, z0}, {kx0, knee, z0}, {kx1, knee, z0});
-    v.triangle(gable, {kx1, knee, z0}, {kx0, knee, z0}, {xm, ridge, z0});
-    // Lucernarios: rectangulos oscuros sobre el faldon superior, separados 6 cm.
-    for (float zc = z0 + 4.0f; zc < z1 - 3.0f; zc += 8.0f) {
-        float ax, ay, bx, by;
-        alongSlope(kx0, knee, xm, ridge, 0.2f, 0.06f, ax, ay);
-        alongSlope(kx0, knee, xm, ridge, 0.7f, 0.06f, bx, by);
-        v.quad(kGlass, {ax, ay, zc}, {ax, ay, zc + 2.0f}, {bx, by, zc + 2.0f}, {bx, by, zc});
-        alongSlope(kx1, knee, xm, ridge, 0.2f, 0.06f, ax, ay);
-        alongSlope(kx1, knee, xm, ridge, 0.7f, 0.06f, bx, by);
-        v.quad(kGlass, {ax, ay, zc + 2.0f}, {ax, ay, zc}, {bx, by, zc}, {bx, by, zc + 2.0f});
+    auto profile = [&](float x) {
+        const float d = fabsf(x - xm), half = xm - (x0 - o), kneeD = xm - kx0;
+        if (d >= kneeD) return eave + (knee - eave) * (half - d) / (half - kneeD);
+        return knee + (ridge - knee) * (kneeD - d) / kneeD;
+    };
+    constexpr int kSegments = 4;
+    for (int seg = 0; seg < kSegments; ++seg) {
+        const float za = zs + (ze - zs) * seg / kSegments, zb = zs + (ze - zs) * (seg + 1) / kSegments;
+        beginObject(b);
+        // Faldones izquierdos (suben hacia +X) y derechos (suben hacia -X).
+        v.quad(roof, {x0 - o, eave, za}, {x0 - o, eave, zb}, {kx0, knee, zb}, {kx0, knee, za});
+        v.quad(roof, {kx0, knee, za}, {kx0, knee, zb}, {xm, ridge, zb}, {xm, ridge, za});
+        v.quad(roof, {x1 + o, eave, zb}, {x1 + o, eave, za}, {kx1, knee, za}, {kx1, knee, zb});
+        v.quad(roof, {kx1, knee, zb}, {kx1, knee, za}, {xm, ridge, za}, {xm, ridge, zb});
+        // Hastiales por encima de las paredes (con el primer y el ultimo tramo).
+        if (seg == kSegments - 1) {
+            v.quad(gable, {x0, wallH, z1}, {x1, wallH, z1}, {kx1, knee, z1}, {kx0, knee, z1});
+            v.triangle(gable, {kx0, knee, z1}, {kx1, knee, z1}, {xm, ridge, z1});
+        }
+        if (seg == 0) {
+            v.quad(gable, {x1, wallH, z0}, {x0, wallH, z0}, {kx0, knee, z0}, {kx1, knee, z0});
+            v.triangle(gable, {kx1, knee, z0}, {kx0, knee, z0}, {xm, ridge, z0});
+        }
+        // Lucernarios: rectangulos oscuros sobre el faldon superior, separados 6 cm.
+        for (float zc = z0 + 4.0f; zc < z1 - 3.0f; zc += 8.0f) {
+            if (zc < za || zc >= zb) continue;
+            float ax, ay, bx, by;
+            alongSlope(kx0, knee, xm, ridge, 0.2f, 0.06f, ax, ay);
+            alongSlope(kx0, knee, xm, ridge, 0.7f, 0.06f, bx, by);
+            v.quad(kGlass, {ax, ay, zc}, {ax, ay, zc + 2.0f}, {bx, by, zc + 2.0f}, {bx, by, zc});
+            alongSlope(kx1, knee, xm, ridge, 0.2f, 0.06f, ax, ay);
+            alongSlope(kx1, knee, xm, ridge, 0.7f, 0.06f, bx, by);
+            v.quad(kGlass, {ax, ay, zc + 2.0f}, {ax, ay, zc}, {bx, by, zc}, {bx, by, zc + 2.0f});
+        }
+        const int columns = static_cast<int>(ceilf(x1 - x0 + 2.0f * o));
+        const float w = (x1 - x0 + 2.0f * o) / columns;
+        for (int c = 0; c < columns; ++c) {
+            const float cx0 = x0 - o + c * w, cx1 = cx0 + w;
+            const float top = profile((cx0 + cx1) * 0.5f);
+            b.collision.add({{cx0, top - 0.5f, za}, {cx1, top, zb}}, kSolid);
+        }
+        endObject(b, kPanelYield);
     }
 }
 
@@ -238,28 +305,33 @@ void gambrelRoof(SceneBuilder& v, float x0, float x1, float z0, float z1, float 
 void stairs(Builders& b, float x0, float x1, float topZ, float topY) {
     constexpr int kSteps = 10;
     const float rise = topY / kSteps;
+    beginObject(b);  // toda la escalera es un objeto
     for (int i = 0; i < kSteps; ++i) {
         const float zBack = topZ + (kSteps - 1 - i) * 0.5f;
         solid(b, kSteel, kConcrete, {x0, 0.0f, zBack}, {x1, rise * (i + 1), zBack + 0.5f});
     }
+    endObject(b, kSmallMetalYield);
 }
 
 void crate(Builders& b, float x, float z, float y = 0.0f) {
+    beginObject(b);
     solid(b, kWood, kWood, {x - 0.6f, y, z - 0.6f}, {x + 0.6f, y + 1.2f, z + 0.6f});
-    harvestable(b, kCrateYield);
+    endObject(b, kCrateYield);
 }
 
 void shippingContainer(Builders& b, float x, float z, int level, u32 color, bool alongZ) {
     const float len = 6.1f, h = 2.6f, w = 2.5f, y = level * h;
     const Material skin = containerSkin(color);
+    beginObject(b);
     if (alongZ) solid(b, skin, skin, {x, y, z}, {x + w, y + h, z + len});
     else solid(b, skin, skin, {x, y, z}, {x + len, y + h, z + w});
-    harvestable(b, kMetalYield);
+    endObject(b, kMetalYield);
 }
 
 // Estanteria industrial: postes de acero y baldas con cajas (cobertura dentro de la nave).
 // Visual detallada, colision de una sola caja.
 void rack(Builders& b, float x0, float z0, float x1, float z1) {
+    beginObject(b);
     b.collision.add({{x0, 0.0f, z0}, {x1, 2.6f, z1}}, kSolid);
     for (float y : {0.1f, 1.3f, 2.5f}) b.visual.box(kSteel, kSteel, {x0, y, z0}, {x1, y + 0.1f, z1});
     for (float px : {x0, x1 - 0.12f})
@@ -267,6 +339,7 @@ void rack(Builders& b, float x0, float z0, float x1, float z1) {
     const float midX = (x0 + x1) * 0.5f;
     b.visual.box(kWood, kWood, {x0 + 0.1f, 0.2f, z0 + 0.1f}, {midX - 0.1f, 1.2f, z1 - 0.1f});
     b.visual.box(kWood, kWood, {midX + 0.1f, 1.4f, z0 + 0.1f}, {x1 - 0.1f, 2.3f, z1 - 0.1f});
+    endObject(b, kSmallMetalYield);
 }
 
 // Nave con portalon delantero (sur), puerta trasera, puertas laterales, altillo con
@@ -286,32 +359,42 @@ void warehouse(Builders& b, float x0, float x1, u32 color, float backDoorX, int 
     wallAlongZ(b, outer, inner, true, z0 + t, z1 - t, x1 - t, x1, h, {{-12.0f, -8.0f, 2.8f}});
 
     // Persiana medio subida (por encima de la cabeza) y marco claro del portalon.
+    beginObject(b);
     solid(b, kShutter, kShutter, {xm - 4.0f, 4.6f, z1 - 0.3f}, {xm + 4.0f, 6.5f, z1 - 0.15f});
+    endObject(b, kFenceYield);
+    beginObject(b);
     solid(b, kTrim, kTrim, {xm - 4.4f, 0.0f, z1}, {xm - 4.0f, 6.9f, z1 + 0.3f});
     solid(b, kTrim, kTrim, {xm + 4.0f, 0.0f, z1}, {xm + 4.4f, 6.9f, z1 + 0.3f});
     b.visual.box(kTrim, kTrim, {xm - 4.4f, 6.5f, z1}, {xm + 4.4f, 6.9f, z1 + 0.3f});
+    endObject(b, kFenceYield);
     // Zocalo de hormigon exterior en los laterales (solo visual, 5 cm por fuera).
     b.visual.quad(kConcrete, {x0 - 0.05f, 0, z0 + 0.2f}, {x0 - 0.05f, 0, z1 - 0.2f},
                   {x0 - 0.05f, 1.0f, z1 - 0.2f}, {x0 - 0.05f, 1.0f, z0 + 0.2f});
     b.visual.quad(kConcrete, {x1 + 0.05f, 0, z1 - 0.2f}, {x1 + 0.05f, 0, z0 + 0.2f},
                   {x1 + 0.05f, 1.0f, z0 + 0.2f}, {x1 + 0.05f, 1.0f, z1 - 0.2f});
 
-    gambrelRoof(b.visual, x0, x1, z0, z1, h, roofPanels(rgba(96, 100, 106)), outer);
+    gambrelRoof(b, x0, x1, z0, z1, h, roofPanels(rgba(96, 100, 106)), outer);
 
     // Altillo al fondo: suelo a 3.6 m, apoyado en pilares, con barandilla y escalera.
     const float mezzFront = z0 + 6.0f, mezzY = 3.6f;
     const float stairX0 = x0 + t, stairX1 = x0 + t + 1.6f;
+    beginObject(b);
     solid(b, kSteel, kConcrete, {x0 + t, mezzY - 0.3f, z0 + t}, {x1 - t, mezzY, mezzFront});
+    endObject(b, kPanelYield);
     for (float px : {x0 + 4.0f, xm, x1 - 3.0f}) {
+        beginObject(b);
         solid(b, kSteel, kSteel, {px - 0.15f, 0.0f, mezzFront - 0.35f}, {px + 0.15f, mezzY - 0.3f, mezzFront - 0.05f});
+        endObject(b, kFenceYield);
     }
     // Barandilla: bloquea el paso (no caerse) pero no los disparos.
+    beginObject(b);
     b.collision.add({{stairX1, mezzY, mezzFront - 0.08f}, {x1 - t, mezzY + 1.0f, mezzFront}}, kBlocksMovement);
     b.visual.box(kDarkTrim, kDarkTrim, {stairX1, mezzY + 0.9f, mezzFront - 0.08f}, {x1 - t, mezzY + 1.0f, mezzFront});
     b.visual.box(kDarkTrim, kDarkTrim, {stairX1, mezzY + 0.45f, mezzFront - 0.06f}, {x1 - t, mezzY + 0.52f, mezzFront - 0.02f});
     for (float px = stairX1; px < x1 - t; px += 2.0f) {
         b.visual.box(kDarkTrim, kDarkTrim, {px, mezzY, mezzFront - 0.08f}, {px + 0.08f, mezzY + 1.0f, mezzFront});
     }
+    endObject(b, kFenceYield);
     stairs(b, stairX0, stairX1, mezzFront, mezzY);
     // Cajas en el altillo: cobertura para quien suba.
     crate(b, x1 - 2.0f, z0 + 1.8f, mezzY);
@@ -332,7 +415,9 @@ void warehouse(Builders& b, float x0, float x1, u32 color, float backDoorX, int 
             crate(b, xm + 4.0f, -2.8f);
             break;
         default:
+            beginObject(b);
             solid(b, flat(rgba(214, 170, 40)), flat(rgba(214, 170, 40)), {xm + 2.5f, 0, -5.0f}, {xm + 3.7f, 2.2f, -3.0f});
+            endObject(b, kSmallMetalYield);
             rack(b, x0 + 2.4f, -6.0f, x0 + 3.6f, 0.0f);
             crate(b, xm - 1.0f, -15.0f);
             crate(b, xm + 0.4f, -15.4f);
@@ -346,28 +431,33 @@ void warehouse(Builders& b, float x0, float x1, u32 color, float backDoorX, int 
 // --- Recinto ------------------------------------------------------------------------------
 
 // Valla metalica: postes y largueros visuales; bloquea el paso pero no los disparos.
+// En tramos de 4 m como mucho, cada uno un objeto.
 void chainFenceAlongX(Builders& b, float z, float x0, float x1) {
     if (x1 - x0 < 0.1f) return;
-    b.collision.add({{x0, 0.0f, z - 0.05f}, {x1, 2.4f, z + 0.05f}}, kBlocksMovement);
-    for (float x = x0; x <= x1 + 0.01f; x += 3.0f) {
-        b.visual.box(kSteel, kSteel, {x - 0.06f, 0, z - 0.06f}, {x + 0.06f, 2.4f, z + 0.06f});
-    }
-    for (float y : {0.3f, 1.2f, 2.3f}) {
-        b.visual.quad(kSteel, {x0, y, z}, {x1, y, z}, {x1, y + 0.08f, z}, {x0, y + 0.08f, z});
-    }
+    panels(x0, x1, [&](float a, float c) {
+        beginObject(b);
+        b.collision.add({{a, 0.0f, z - 0.05f}, {c, 2.4f, z + 0.05f}}, kBlocksMovement);
+        for (float x : {a, c}) b.visual.box(kSteel, kSteel, {x - 0.06f, 0, z - 0.06f}, {x + 0.06f, 2.4f, z + 0.06f});
+        for (float y : {0.3f, 1.2f, 2.3f}) {
+            b.visual.quad(kSteel, {a, y, z}, {c, y, z}, {c, y + 0.08f, z}, {a, y + 0.08f, z});
+        }
+        endObject(b, kFenceYield);
+    });
 }
 
 void lampPost(Builders& b, float x, float z, float armDirX) {
+    beginObject(b);
     solid(b, kDarkTrim, kDarkTrim, {x - 0.12f, 0, z - 0.12f}, {x + 0.12f, 6.5f, z + 0.12f});
     b.visual.box(kDarkTrim, kDarkTrim, {fminf(x, x + armDirX * 1.6f), 6.3f, z - 0.08f},
                  {fmaxf(x, x + armDirX * 1.6f), 6.45f, z + 0.08f});
     b.visual.box(flat(rgba(240, 236, 200)), kDarkTrim, {x + armDirX * 1.6f - 0.25f, 6.0f, z - 0.15f},
                  {x + armDirX * 1.6f + 0.25f, 6.3f, z + 0.15f});
+    endObject(b, kFenceYield);
 }
 
 void boxTrailer(Builders& b, float x0, float z0, float x1, float z1) {
+    beginObject(b);
     b.collision.add({{x0, 0.0f, z0}, {x1, 3.6f, z1}}, kSolid);
-    harvestable(b, kMetalYield);
     const Material skin = containerSkin(rgba(210, 210, 204));
     b.visual.box(skin, skin, {x0, 1.0f, z0}, {x1, 3.6f, z1}, true);
     b.visual.box(kDarkTrim, kDarkTrim, {x0 + 0.5f, 0.6f, z0 + 0.3f}, {x1 - 0.5f, 1.0f, z1 - 0.3f});
@@ -375,6 +465,7 @@ void boxTrailer(Builders& b, float x0, float z0, float x1, float z1) {
         b.visual.box(kDarkTrim, kDarkTrim, {wx - 0.45f, 0, z0 + 0.1f}, {wx + 0.45f, 0.9f, z0 + 0.4f});
         b.visual.box(kDarkTrim, kDarkTrim, {wx - 0.45f, 0, z1 - 0.4f}, {wx + 0.45f, 0.9f, z1 - 0.1f});
     }
+    endObject(b, kMetalYield);
 }
 
 void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& pois) {
@@ -390,10 +481,20 @@ void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& p
     // Muro de bloques (2.4 m: no se salta) al sur con dos puertas y un tramo de valla.
     const float wallH = 2.4f;
     auto wallX = [&](float x0, float x1, float z) {
-        if (x1 - x0 > 0.01f) solid(b, kBlockWall, kConcrete, {x0, 0, z}, {x1, wallH, z + 0.4f});
+        if (x1 - x0 <= 0.01f) return;
+        panels(x0, x1, [&](float a, float c) {
+            beginObject(b);
+            solid(b, kBlockWall, kConcrete, {a, 0, z}, {c, wallH, z + 0.4f});
+            endObject(b, kBlockWallYield);
+        });
     };
     auto wallZ = [&](float z0, float z1, float x) {
-        if (z1 - z0 > 0.01f) solid(b, kBlockWall, kConcrete, {x, 0, z0}, {x + 0.4f, wallH, z1});
+        if (z1 - z0 <= 0.01f) return;
+        panels(z0, z1, [&](float a, float c) {
+            beginObject(b);
+            solid(b, kBlockWall, kConcrete, {x, 0, a}, {x + 0.4f, wallH, c});
+            endObject(b, kBlockWallYield);
+        });
     };
     wallX(-36.4f, -25.0f, 14.0f);
     wallX(-19.0f, -6.0f, 14.0f);
@@ -422,8 +523,9 @@ void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& p
     lampPost(b, -11.0f, 5.5f, 1.0f);
     lampPost(b, 11.0f, 5.5f, -1.0f);
     lampPost(b, 33.0f, -16.0f, -1.0f);
+    beginObject(b);  // contenedor de basura
     solid(b, flat(rgba(60, 110, 70)), flat(rgba(50, 90, 60)), {6.0f, 0, -30.0f}, {8.5f, 1.4f, -28.6f});
-    harvestable(b, kSmallMetalYield);  // contenedor de basura
+    endObject(b, kSmallMetalYield);
     b.visual.flushGroup(out);
 
     pois.push_back({0.0f, 0.0f, 9.0f});
@@ -435,26 +537,29 @@ void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& p
 // --- Naturaleza ----------------------------------------------------------------------------
 
 void pineTree(Builders& b, float x, float z, float s) {
+    beginObject(b);
     solid(b, kTrunk, kTrunk, {x - 0.3f * s, 0, z - 0.3f * s}, {x + 0.3f * s, 2.2f * s, z + 0.3f * s});
-    harvestable(b, kTreeYield);
     b.visual.cone(flat(rgba(50, 104, 52)), {x, 1.8f * s, z}, 2.6f * s, 4.2f * s, 6);
     b.visual.cone(flat(rgba(62, 124, 60)), {x, 4.4f * s, z}, 1.8f * s, 3.2f * s, 6);
+    endObject(b, kTreeYield);
 }
 
 // Arbol de copa cubica, como los de Recursos/Loadscreen.png. La copa no colisiona.
 void blockTree(Builders& b, float x, float z, float s) {
+    beginObject(b);
     solid(b, kTrunk, kTrunk, {x - 0.3f * s, 0, z - 0.3f * s}, {x + 0.3f * s, 3.0f * s, z + 0.3f * s});
-    harvestable(b, kTreeYield);
     const Material leaves = flat(rgba(72, 132, 52));
     const Material leavesTop = flat(rgba(92, 156, 62));
     b.visual.box(leaves, leavesTop, {x - 2.2f * s, 2.6f * s, z - 2.2f * s}, {x + 2.2f * s, 4.8f * s, z + 2.2f * s}, true);
     b.visual.box(leaves, leavesTop, {x - 1.4f * s, 4.8f * s, z - 1.4f * s}, {x + 1.4f * s, 6.0f * s, z + 1.4f * s});
+    endObject(b, kTreeYield);
 }
 
 void boulder(Builders& b, float x, float z, float w, float d, float h) {
+    beginObject(b);
     solid(b, kRock, kRock, {x - w * 0.5f, 0, z - d * 0.5f}, {x + w * 0.5f, h, z + d * 0.5f});
-    harvestable(b, kRockYield);
     b.visual.box(kRock, kRock, {x - w * 0.3f, h, z - d * 0.25f}, {x + w * 0.2f, h + 0.5f, z + d * 0.3f});
+    endObject(b, kRockYield);
 }
 
 // Meseta de roca: dos troncos de cono de 12 lados con radio irregular, cima de hierba.
@@ -756,7 +861,7 @@ void buildStormCircle(SceneBuilder& b, std::vector<StaticBatch>& out) {
 
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out,
                      std::vector<Vec3>& pois, std::vector<Harvestable>& harvestables) {
-    Builders b{visual, collision, &harvestables};
+    Builders b{visual, collision, &harvestables, &out};
     buildDepot(b, out, pois);
     mesa(b, out);
     lake(b, out);

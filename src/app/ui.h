@@ -22,6 +22,9 @@ public:
     // Igual, centrado horizontalmente en `cx`.
     void drawCentered(const assets::ui::Rect& r, float cx, float y, float scale = 1.0f,
                       u32 color = 0xFFFFFFFF) const;
+    // Sin escalar, recortado al rectangulo [x0, x1) x [y0, y1) (p. ej. el del minimapa).
+    void drawClipped(const assets::ui::Rect& r, float x, float y, float x0, float y0, float x1, float y1,
+                     u32 color = 0xFFFFFFFF) const;
 
 private:
     gfx::Texture m_texture;

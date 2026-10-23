@@ -41,8 +41,14 @@ struct Bot {
     float reaction = 0.0f;       // espera antes del primer disparo
     Weapon weapon;               // mismo sistema de municion/cadencia/recarga que el jugador
     bool armed = false;          // sin arma solo tiene el pico (al aterrizar, va a por botin)
-    ItemType weaponType = ItemType::None;
+    ItemType weaponType = ItemType::None;  // el arma en la mano (una de las de `bag`)
     Rarity weaponRarity = Rarity::Common;
+    // Inventario de 5 ranuras como el del jugador: varias armas (saca la que mejor va a la
+    // distancia del rival) y consumibles (los usa cuando no hay nadie a la vista). La
+    // municion de los bots es infinita.
+    Inventory bag;
+    float healTimer = 0.0f;      // > 0: usando el consumible de la ranura healSlot (quieto)
+    int healSlot = -1;
 
     // Botin: lo que va a recoger (indice de Match::pickups() o de containers()).
     int lootPickup = -1;
@@ -61,6 +67,10 @@ struct Bot {
     float strafeTimer = 0.0f;
     float strafeSign = 1.0f;
     float pathRefresh = 0.0f;    // tiempo hasta poder pedir otro camino hacia el objetivo
+    // Encima de algo (tejado, contenedor, altillo) a donde no llega la navegacion: por
+    // donde bajar (se recalcula cada medio segundo).
+    math3d::Vec3 descent;
+    float descentTimer = 0.0f;
 
     // Camino.
     math3d::Vec3 path[kMaxPathPoints];

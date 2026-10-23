@@ -14,34 +14,42 @@ using math3d::Vec3;
 bool BuildVisuals::build(const game::BuildConfig& config) {
     m_config = config;
     const float g = config.gridSize, h = config.wallHeight, t = config.wallThickness;
-    const world::Material materials[kVariantCount] = {
-        {world::kTexWoodWall, rgba(255, 255, 255), 2.0f},
-        {world::kTexWoodWall, rgba(150, 130, 120), 2.0f},
-        {world::kTexWoodWall, rgba(255, 240, 210), 2.0f},
-        {world::kTexNone, rgba(90, 170, 255, 110), 1.0f},
-        {world::kTexNone, rgba(255, 70, 50, 110), 1.0f},
-    };
+    // Madera (tablones), piedra (bloques) y metal (chapa gris), como en Fortnite.
+    const int textures[kMaterials] = {world::kTexWoodWall, world::kTexBlockWall, world::kTexMetalSiding};
+    const u32 tints[kMaterials] = {rgba(255, 255, 255), rgba(225, 218, 205), rgba(170, 176, 184)};
     world::SceneBuilder b(1.0f);
-    for (int v = 0; v < kVariantCount; ++v) {
-        // Caja local con la esquina minima en el origen.
-        b.box(materials[v], materials[v], {0, 0, 0}, {g, h, t}, true);
-        b.flushGroup(m_meshes[v][0]);
-        b.box(materials[v], materials[v], {0, 0, 0}, {t, h, g}, true);
-        b.flushGroup(m_meshes[v][1]);
-        b.box(materials[v], materials[v], {0, 0, 0}, {g, config.floorThickness, g}, true);
-        b.flushGroup(m_floor[v]);
-        // Rampa: losa inclinada (la superficie pasa por el centro de cada escalon de
-        // colision) de rampThickness de grosor, con sus costados y sus extremos.
-        const float d = config.rampThickness;
-        const Vec3 lowTop{0, 0, 0}, highTop{g, h, 0}, lowBottom{0, -d, 0}, highBottom{g, h - d, 0};
-        const Vec3 side{0, 0, g};
-        b.quad(materials[v], lowTop + side, highTop + side, highTop, lowTop);              // superficie
-        b.quad(materials[v], lowBottom, highBottom, highBottom + side, lowBottom + side);  // debajo
-        b.quad(materials[v], lowBottom, lowTop, highTop, highBottom);                      // costado z = 0
-        b.quad(materials[v], highBottom + side, highTop + side, lowTop + side, lowBottom + side);
-        b.quad(materials[v], highBottom, highTop, highTop + side, highBottom + side);      // extremo alto
-        b.quad(materials[v], lowBottom + side, lowTop + side, lowTop, lowBottom);          // extremo bajo
-        b.flushGroup(m_ramp[v]);
+    for (int m = 0; m < kMaterials; ++m) {
+        const world::Material materials[kVariantCount] = {
+            {textures[m], tints[m], 2.0f},
+            {textures[m], rgba(150, 130, 120), 2.0f},
+            {textures[m], rgba(255, 240, 210), 2.0f},
+            {world::kTexNone, rgba(90, 170, 255, 110), 1.0f},
+            {world::kTexNone, rgba(255, 70, 50, 110), 1.0f},
+        };
+        auto& meshes = m_meshes[m];
+        auto& floors = m_floor[m];
+        auto& ramps = m_ramp[m];
+        for (int v = 0; v < kVariantCount; ++v) {
+            // Caja local con la esquina minima en el origen.
+            b.box(materials[v], materials[v], {0, 0, 0}, {g, h, t}, true);
+            b.flushGroup(meshes[v][0]);
+            b.box(materials[v], materials[v], {0, 0, 0}, {t, h, g}, true);
+            b.flushGroup(meshes[v][1]);
+            b.box(materials[v], materials[v], {0, 0, 0}, {g, config.floorThickness, g}, true);
+            b.flushGroup(floors[v]);
+            // Rampa: losa inclinada (la superficie pasa por el centro de cada escalon de
+            // colision) de rampThickness de grosor, con sus costados y sus extremos.
+            const float d = config.rampThickness;
+            const Vec3 lowTop{0, 0, 0}, highTop{g, h, 0}, lowBottom{0, -d, 0}, highBottom{g, h - d, 0};
+            const Vec3 side{0, 0, g};
+            b.quad(materials[v], lowTop + side, highTop + side, highTop, lowTop);              // superficie
+            b.quad(materials[v], lowBottom, highBottom, highBottom + side, lowBottom + side);  // debajo
+            b.quad(materials[v], lowBottom, lowTop, highTop, highBottom);                      // costado z = 0
+            b.quad(materials[v], highBottom + side, highTop + side, lowTop + side, lowBottom + side);
+            b.quad(materials[v], highBottom, highTop, highTop + side, highBottom + side);      // extremo alto
+            b.quad(materials[v], lowBottom + side, lowTop + side, lowTop, lowBottom);          // extremo bajo
+            b.flushGroup(ramps[v]);
+        }
     }
     return !b.failed();
 }
@@ -51,32 +59,34 @@ void BuildVisuals::destroy() {
         for (world::StaticBatch& batch : list) gfx::destroyMesh(batch.mesh);
         list.clear();
     };
-    for (int v = 0; v < kVariantCount; ++v) {
-        release(m_meshes[v][0]);
-        release(m_meshes[v][1]);
-        release(m_floor[v]);
-        release(m_ramp[v]);
+    for (int m = 0; m < kMaterials; ++m) {
+        for (int v = 0; v < kVariantCount; ++v) {
+            release(m_meshes[m][v][0]);
+            release(m_meshes[m][v][1]);
+            release(m_floor[m][v]);
+            release(m_ramp[m][v]);
+        }
     }
 }
 
-void BuildVisuals::drawBox(const world::Aabb& box, bool alongX, Variant variant,
+void BuildVisuals::drawBox(int material, const world::Aabb& box, bool alongX, Variant variant,
                            const world::TextureLibrary* textures) const {
     // Misma caja que la colision: traslacion a su esquina y escala en Y si esta recortada.
     const float heightScale = (box.max.y - box.min.y) / m_config.wallHeight;
     gfx::setModelMatrix(Mat4::translation(box.min) * Mat4::scale({1.0f, heightScale, 1.0f}));
-    for (const world::StaticBatch& batch : m_meshes[variant][alongX ? 0 : 1]) {
+    for (const world::StaticBatch& batch : m_meshes[material][variant][alongX ? 0 : 1]) {
         gfx::bindTexture(textures ? textures->get(batch.texture) : nullptr);
         gfx::drawMesh(batch.mesh);
     }
 }
 
-void BuildVisuals::drawPiece(game::PieceType type, const world::Aabb& box, bool alongX, int dir, float level,
+void BuildVisuals::drawPiece(int material, game::PieceType type, const world::Aabb& box, bool alongX, int dir, float level,
                              Variant variant, const world::TextureLibrary* textures, float lift) const {
     if (type == game::PieceType::Wall) {
-        drawBox(box, alongX, variant, textures);
+        drawBox(material, box, alongX, variant, textures);
         return;
     }
-    const std::vector<world::StaticBatch>* mesh = &m_floor[variant];
+    const std::vector<world::StaticBatch>* mesh = &m_floor[material][variant];
     Mat4 model = Mat4::translation(box.min + Vec3{0.0f, lift, 0.0f});
     if (type == game::PieceType::Ramp) {
         // La malla sube hacia +X; se gira alrededor del centro de la celda segun `dir`.
@@ -84,7 +94,7 @@ void BuildVisuals::drawPiece(game::PieceType type, const world::Aabb& box, bool 
         const float angles[4] = {0.0f, math3d::kPi, -math3d::kPi * 0.5f, math3d::kPi * 0.5f};
         model = Mat4::translation({box.min.x + half, level + lift, box.min.z + half}) * Mat4::rotationY(angles[dir & 3]) *
                 Mat4::translation({-half, 0.0f, -half});
-        mesh = &m_ramp[variant];
+        mesh = &m_ramp[material][variant];
     }
     gfx::setModelMatrix(model);
     for (const world::StaticBatch& batch : *mesh) {
@@ -100,14 +110,14 @@ void BuildVisuals::drawWalls(const game::StructureSystem& structures,
         if (!w.active) continue;
         Variant v = w.health < w.maxHealth * 0.5f ? kDamaged : kNormal;
         if (w.sinceHit < 0.08f) v = kFlash;
-        drawPiece(w.type, w.box, w.alongX, w.dir, w.level, v, &textures);
+        drawPiece(static_cast<int>(w.material), w.type, w.box, w.alongX, w.dir, w.level, v, &textures);
     }
     gfx::setModelMatrix(Mat4::identity());
 }
 
 void BuildVisuals::drawGhost(const game::WallPlacement& placement) const {
     gfx::setBlend(true);
-    drawPiece(placement.type, placement.box, placement.alongX, placement.dir, placement.level,
+    drawPiece(0, placement.type, placement.box, placement.alongX, placement.dir, placement.level,
               placement.valid ? kGhostValid : kGhostInvalid, nullptr);
     gfx::setBlend(false);
     gfx::setModelMatrix(Mat4::identity());
@@ -117,7 +127,7 @@ void BuildVisuals::drawHighlight(const game::BuiltWall& wall) const {
     if (wall.type != game::PieceType::Wall) {
         // Suelo y rampa: la misma pieza en rojo, un poco por encima (sin z-fighting).
         gfx::setBlend(true);
-        drawPiece(wall.type, wall.box, wall.alongX, wall.dir, wall.level, kGhostInvalid, nullptr, 0.04f);
+        drawPiece(0, wall.type, wall.box, wall.alongX, wall.dir, wall.level, kGhostInvalid, nullptr, 0.04f);
         gfx::setBlend(false);
         gfx::setModelMatrix(Mat4::identity());
         return;
@@ -131,7 +141,7 @@ void BuildVisuals::drawHighlight(const game::BuiltWall& wall) const {
                         Mat4::scale({(box.max.x - box.min.x) / (wall.alongX ? m_config.gridSize : m_config.wallThickness),
                                      (box.max.y - box.min.y) / m_config.wallHeight,
                                      (box.max.z - box.min.z) / (wall.alongX ? m_config.wallThickness : m_config.gridSize)}));
-    for (const world::StaticBatch& batch : m_meshes[kGhostInvalid][wall.alongX ? 0 : 1]) {
+    for (const world::StaticBatch& batch : m_meshes[0][kGhostInvalid][wall.alongX ? 0 : 1]) {
         gfx::bindTexture(nullptr);
         gfx::drawMesh(batch.mesh);
     }

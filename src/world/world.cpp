@@ -31,7 +31,10 @@ bool World::build() {
     m_collision.build(kMapHalfSize);
     m_harvestByCollider.assign(m_collision.count(), -1);
     for (int i = 0; i < static_cast<int>(m_harvestables.size()); ++i) {
-        m_harvestByCollider[m_harvestables[i].collider] = static_cast<short>(i);
+        const Harvestable& h = m_harvestables[i];
+        for (int c = 0; c < h.colliderCount; ++c) m_harvestByCollider[h.collider + c] = static_cast<short>(i);
+        // Los lotes se reordenan abajo: cada uno guarda a que objeto pertenece.
+        for (int k = h.batchBegin; k < h.batchEnd; ++k) m_static[k].object = static_cast<short>(i);
     }
 
     // Agrupa por textura para minimizar cambios de estado al dibujar.
@@ -62,10 +65,11 @@ void World::destroy() {
 }
 
 RenderStats World::draw(const math3d::Frustum& frustum, const math3d::Vec3& eye,
-                        float maxDistance) const {
+                        float maxDistance, const u8* destroyed) const {
     RenderStats stats;
     gfx::setModelMatrix(math3d::Mat4::identity());
     for (const StaticBatch& b : m_static) {
+        if (destroyed && b.object >= 0 && destroyed[b.object]) continue;
         if (math3d::length(b.center - eye) - b.radius > maxDistance) continue;
         if (!frustum.sphereVisible(b.center, b.radius)) continue;
         gfx::bindTexture(m_textures.get(b.texture));

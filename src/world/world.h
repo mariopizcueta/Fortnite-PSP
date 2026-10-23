@@ -26,8 +26,9 @@ public:
     void destroy();
 
     // Dibuja los lotes visibles (frustum + distancia maxima). Requiere gfx::begin3D().
+    // `destroyed[i]` != 0: el objeto i (harvestables()) esta destruido y no se dibuja.
     RenderStats draw(const math3d::Frustum& frustum, const math3d::Vec3& eye,
-                     float maxDistance) const;
+                     float maxDistance, const u8* destroyed = nullptr) const;
     // Muro de la tormenta (translucido): despues de todo lo opaco.
     RenderStats drawStormWall(const math3d::Frustum& frustum, const math3d::Vec3& eye,
                               float maxDistance) const;
@@ -41,7 +42,7 @@ public:
     const TextureLibrary& textures() const { return m_textures; }
     // Lugares a los que tienden los bots al explorar (interiores de las naves, patio...).
     const std::vector<math3d::Vec3>& pointsOfInterest() const { return m_pointsOfInterest; }
-    // Arboles, cajas, rocas y contenedores que se pueden picar.
+    // Todo lo que se puede picar y destruir (ver harvest.h).
     const std::vector<Harvestable>& harvestables() const { return m_harvestables; }
     // Objeto recolectable de una caja fija (RayHit::collider), o -1.
     int harvestableAt(int collider) const {

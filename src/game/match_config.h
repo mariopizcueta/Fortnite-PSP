@@ -77,6 +77,7 @@ struct MatchConfig {
     float pickaxeReach = 2.2f;           // m desde el pecho
     float pickaxeDamage = 20.0f;         // a personajes
     float pickaxeStructureDamage = 50.0f;  // a paredes construidas
+    float pickaxeObjectDamage = 50.0f;     // a los objetos del mapa (world/harvest.h)
 
     // Tormenta que se cierra (game/storm_zone.h): cada stormPhaseSeconds empieza un
     // cierre de stormShrinkSeconds hacia un circulo menor; fuera hace dano (sube por fase).

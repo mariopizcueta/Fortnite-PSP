@@ -3,7 +3,8 @@
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
 **Estado: fase 7 (botín, autobús, ala delta, airdrops, bots que cazan y construyen, tormenta
-que se cierra, suelos, rampas y mirilla de francotirador), v0.9.1.**
+que se cierra, suelos, rampas, mirilla de francotirador, mapa destruible y bots con
+inventario), v0.10.0.**
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +64,19 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**v0.10.0** (detalle en [docs/DESTRUCCION.md](docs/DESTRUCCION.md)):
+- **Mapa destruible:** todo el mapa salvo el suelo y la meseta se pica. Paredes de las naves
+  en paneles de 4 m, tejados, muros, vallas, farolas, contenedores, cajas, árboles y rocas
+  dan material, pierden vida y desaparecen.
+- **Tejados:** las naves tienen colisión en el tejado; ya no se atraviesa al caer del
+  autobús.
+- **Cofres:** desaparecen al abrirse.
+- **Bots:** llevan varias armas y consumibles, sacan la mejor para la distancia del rival y
+  se curan.
+- **Construcción:** CUADRADO cambia el material (madera 150, piedra 300, metal 500 de vida);
+  si no queda del elegido, se usa otro.
+- **Minimapa:** pone "Polvorín Polvoriento" sobre las naves.
 
 **v0.9.1:**
 - **Sonidos de más de 3 s:** la victoria, el salto del autobús o la poción de escudo se
@@ -243,7 +257,7 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 | Siempre       | **CÍRCULO**                            | **Modo construcción on/off**                 |
 | Construcción  | **Cruceta ← →**                        | Elegir pieza (pared; suelo y rampa aún no)   |
 | Construcción  | **R (pulsar)**                         | Colocar una pared delante (10 de madera)     |
-| Construcción  | **CUADRADO**                           | Quitar la pared apuntada                     |
+| Construcción  | **CUADRADO**                           | Cambiar de material (madera / piedra / metal) |
 | Siempre       | **START**                              | Pausa                                        |
 | Siempre       | **SELECT**                             | HUD: partida → depuración → controles → oculto |
 | Depuración    | **TRIÁNGULO**                          | Cámara libre ↔ tercera persona (dentro: □ niebla, START VSync) |
@@ -297,6 +311,7 @@ Makefile                     Build basado en build.mak de PSPSDK
 docs/PRESENTACION.md         Pantallas, HUD, estilo, animaciones, sonido, memoria (fase 6)
 docs/INVENTARIO.md           Inventario, escudo, curas, pico y materiales (fase 7)
 docs/BOTIN.md                Armas, botin, autobus, ala delta, airdrops y bots de la fase 7
+docs/DESTRUCCION.md          Mapa destruible, tejados, materiales de construccion, inventario de los bots
 docs/MUNDO.md                Escala, ejes, plano del mapa, colisiones y texturas
 docs/JUGADOR.md              Controles, movimiento, salto, paso fijo y cámara
 docs/BOTS.md                 IA, disparos, partida, rendimiento y verificación
@@ -359,7 +374,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 85 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 86 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
@@ -375,7 +390,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 122 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 134 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
   escudo, curas, pico, materiales, coste de las paredes, tormenta del límite del mapa, armas,

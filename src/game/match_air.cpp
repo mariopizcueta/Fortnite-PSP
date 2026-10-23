@@ -57,6 +57,9 @@ void Match::chooseLanding(Bot& b) {
             continue;
         }
         if (distXZ(p, bus) > 75.0f || world::stormDepth(p.x, p.z) > -6.0f) continue;
+        // A cielo abierto: los cofres de dentro de las naves se buscan ya a pie (si no,
+        // se aterriza en el tejado).
+        if (m_world->supportHeight(p.x, p.z, 1.0f, 200.0f) > 1.0f) continue;
         b.landingTarget = p;
         return;
     }

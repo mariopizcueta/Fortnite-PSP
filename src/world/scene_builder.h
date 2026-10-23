@@ -32,6 +32,7 @@ struct StaticBatch {
     math3d::Vec3 center;
     float radius = 0.0f;
     int triangles = 0;
+    short object = -1;  // objeto destruible al que pertenece (World::harvestables()), o -1
 };
 
 class SceneBuilder {

@@ -367,7 +367,7 @@ void App::updateGame(const input::Input& in, float dt) {
         if (m_buildMode) {
             commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);  // una pieza por pulsacion
             commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
-            commands.removeWall = in.pressed(PSP_CTRL_SQUARE);
+            commands.cycleMaterial = in.pressed(PSP_CTRL_SQUARE);  // madera -> piedra -> metal
         } else if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
             aim.fire = in.held(PSP_CTRL_RTRIGGER);  // disparar, o golpes seguidos con el pico
             commands.reload = in.pressed(PSP_CTRL_SQUARE);
@@ -398,14 +398,10 @@ void App::updateGame(const input::Input& in, float dt) {
     // 5) Camaras y construccion.
     updateGameCameras(in, dt, control, aimHeld);
     if (m_buildMode) {
-        game::PlayerAim view;
-        view.eye = m_followCamera.eye();
-        view.direction = m_followCamera.lookDirection();
         m_wallPlan = m_match.planWall(m_followCamera.yaw(), static_cast<game::PieceType>(m_buildPiece));
-        m_targetWall = m_match.targetedWall(view);
-    } else {
-        m_targetWall = -1;
     }
+    // Las piezas ya no se quitan con CUADRADO (cambia de material): se rompen con el pico.
+    m_targetWall = -1;
 
     updateStormFog();
     updatePerformance(dt);
@@ -664,6 +660,9 @@ void App::processEvents() {
             case game::GameEventType::WallRemoved:
                 playSfx(audio::Sfx::WallBuild, 0.5f);
                 break;
+            case game::GameEventType::ObjectDestroyed:
+                if (e.entity == 0) playSfx(audio::Sfx::WallBreak, 0.9f);  // lo ha destruido el jugador
+                break;
             case game::GameEventType::WallBroken:
                 if (e.other == 0) playSpatial(audio::Sfx::WallBreak, e.position, 0.9f);  // la rompe el jugador
                 break;
@@ -848,7 +847,7 @@ void App::renderGame(const FrameInfo& frame) {
         gfx::begin3D(projection, view, fog);
         const math3d::Frustum frustum = math3d::Frustum::fromMatrix(projection * view);
         const float drawDistance = m_fog ? m_fogEnd : config::kFarPlane;
-        m_stats = m_world.draw(frustum, cameraEye(), drawDistance);
+        m_stats = m_world.draw(frustum, cameraEye(), drawDistance, m_match.destroyedObjects());
         if (m_buildVisualsReady) m_buildVisuals.drawWalls(m_match.structures(), m_world.textures());
         m_characterTriangles = m_modelsReady ? renderCharacters(frustum, cameraEye()) : 0;
         renderTracers();

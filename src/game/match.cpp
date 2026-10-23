@@ -70,6 +70,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_pendingPickaxe = m_pendingUse = false;
     m_pendingCycle = 0;
     m_buildMode = false;
+    m_buildMaterial = world::Resource::Wood;
     m_inventory.clear();
     for (const MatchConfig::StartItem& item : m_config.startItems) {
         if (item.type != ItemType::None) m_inventory.add(item.type, item.rarity, item.count);
@@ -89,8 +90,16 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_sinceUseError = 99.0f;
     m_swingCooldown = 0.0f;
     if (m_harvestables) {
-        m_harvestLeft.resize(m_harvestables->size());
-        for (size_t i = 0; i < m_harvestables->size(); ++i) m_harvestLeft[i] = (*m_harvestables)[i].total;
+        // Todo vuelve a estar en pie: las cajas de lo destruido colisionan otra vez y la
+        // navegacion de esas zonas se recalcula.
+        for (size_t i = 0; i < m_harvestables->size(); ++i) {
+            const world::Harvestable& h = (*m_harvestables)[i];
+            m_objectHealth[i] = h.health;
+            if (!m_objectDestroyed[i]) continue;
+            m_objectDestroyed[i] = 0;
+            for (int k = 0; k < h.colliderCount; ++k) m_world->setStaticEnabled(h.collider + k, true);
+            m_nav->updateRegion(*m_world, h.box);
+        }
     }
     m_playerAiming = false;
     m_playerKills = 0;
@@ -230,6 +239,10 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (input.jumpPressed) m_pendingJump = true;
     if (commands.placeWall) m_pendingPlace = true;
     m_buildPiece = commands.buildPiece;
+    if (commands.cycleMaterial) {
+        m_buildMaterial = static_cast<world::Resource>((static_cast<int>(m_buildMaterial) + 1) %
+                                                       static_cast<int>(world::Resource::Count));
+    }
     if (commands.removeWall) m_pendingRemove = true;
     if (commands.reload) m_pendingReload = true;
     if (commands.togglePickaxe) m_pendingPickaxe = !m_pendingPickaxe;
@@ -473,14 +486,40 @@ const Weapon& Match::playerWeapon() const {
 void Match::setHarvestables(const std::vector<world::Harvestable>* list) {
     m_harvestables = list;
     m_harvestByCollider.clear();
-    m_harvestLeft.clear();
+    m_objectHealth.clear();
+    m_objectDestroyed.clear();
     if (!list) return;
     for (size_t i = 0; i < list->size(); ++i) {
-        const int c = (*list)[i].collider;
-        if (c >= static_cast<int>(m_harvestByCollider.size())) m_harvestByCollider.resize(c + 1, -1);
-        m_harvestByCollider[c] = static_cast<short>(i);
-        m_harvestLeft.push_back((*list)[i].total);
+        const world::Harvestable& h = (*list)[i];
+        const int last = h.collider + h.colliderCount - 1;
+        if (last >= static_cast<int>(m_harvestByCollider.size())) m_harvestByCollider.resize(last + 1, -1);
+        for (int c = h.collider; c <= last; ++c) m_harvestByCollider[c] = static_cast<short>(i);
+        m_objectHealth.push_back(h.health);
+        m_objectDestroyed.push_back(0);
     }
+}
+
+int Match::destroyedObjectCount() const {
+    int n = 0;
+    for (u8 d : m_objectDestroyed) n += d;
+    return n;
+}
+
+bool Match::damageObject(int index, float amount, const Vec3& point, int by) {
+    if (!m_harvestables || index < 0 || index >= static_cast<int>(m_objectHealth.size()) || m_objectDestroyed[index]) {
+        return false;
+    }
+    m_objectHealth[index] -= amount;
+    if (m_objectHealth[index] > 0.0f) return false;
+    // Sin vida: deja de colisionar y de dibujarse; los bots buscan caminos nuevos.
+    const world::Harvestable& h = (*m_harvestables)[index];
+    m_objectHealth[index] = 0.0f;
+    m_objectDestroyed[index] = 1;
+    for (int k = 0; k < h.colliderCount; ++k) m_world->setStaticEnabled(h.collider + k, false);
+    m_nav->updateRegion(*m_world, h.box);
+    onStructuresChanged();
+    pushEvent(GameEventType::ObjectDestroyed, by, index, point);
+    return true;
 }
 
 void Match::swingPickaxe() {
@@ -526,8 +565,9 @@ void Match::swingPickaxe() {
                 if (d >= best) continue;
                 // Sin nada en medio: lo primero que toca el rayo es el propio objeto.
                 const Vec3 target{center.x, fminf(chest.y, h.box.max.y - 0.2f), center.z};
+                if (m_objectDestroyed[i]) continue;
                 world::RayHit blocker;
-                if (m_world->raycast(chest, target, world::kBlocksShots, &blocker) && blocker.collider != h.collider) {
+                if (m_world->raycast(chest, target, world::kBlocksShots, &blocker) && !h.owns(blocker.collider)) {
                     continue;
                 }
                 best = d;
@@ -552,15 +592,14 @@ void Match::swingPickaxe() {
 }
 
 void Match::harvest(int index, const Vec3& point) {
+    // Cada golpe da material y quita vida al objeto; sin vida, desaparece.
+    if (m_objectDestroyed[index]) return;
     const world::Harvestable& h = (*m_harvestables)[index];
-    int& left = m_harvestLeft[index];
-    if (left <= 0) return;  // agotado
-    const int take = h.perHit < left ? h.perHit : left;
-    left -= take;
-    const int added = m_materials.add(h.resource, take);
+    const int added = m_materials.add(h.resource, h.perHit);
     m_sincePlayerHit = 0.0f;
     pushEvent(GameEventType::Harvest, 0, static_cast<int>(h.resource), point);
     m_events[(m_eventCount - 1) % kMaxEvents].amount = added;
+    damageObject(index, m_config.pickaxeObjectDamage, point, 0);
 }
 
 // --- Combate --------------------------------------------------------------------------------
@@ -724,7 +763,17 @@ WallPlacement Match::planWall(float yaw, PieceType type) const {
         if (alive(id)) bots[n++] = bodyBounds(id);
     }
     WallPlacement p = m_structures.plan(body(0).state().position, yaw, bodyBounds(0), bots, n, 0, type);
-    if (p.valid && m_materials.get(world::Resource::Wood) < m_config.build.wallCost) {
+    // Con el material elegido o, si no queda bastante, con el primero que si haya.
+    const int cost = m_config.build.wallCost;
+    p.material = m_buildMaterial;
+    if (m_materials.get(p.material) < cost) {
+        for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
+            if (m_materials.get(static_cast<world::Resource>(r)) < cost) continue;
+            p.material = static_cast<world::Resource>(r);
+            break;
+        }
+    }
+    if (p.valid && m_materials.get(p.material) < cost) {
         p.valid = false;
         p.error = PlacementError::NoMaterials;
     }
@@ -734,7 +783,7 @@ WallPlacement Match::planWall(float yaw, PieceType type) const {
 int Match::buildWall(float yaw, PieceType type) {
     const int wall = m_structures.place(planWall(yaw, type));
     if (wall >= 0) {
-        m_materials.spend(world::Resource::Wood, m_config.build.wallCost);
+        m_materials.spend(m_structures.wall(wall).material, m_config.build.wallCost);
         ++m_stats.wallsBuilt;
         const world::Aabb& b = m_structures.wall(wall).box;
         pushEvent(GameEventType::WallBuilt, 0, -1, (b.min + b.max) * 0.5f);

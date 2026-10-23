@@ -63,6 +63,7 @@ int CollisionWorld::dynamicCount() const {
 void CollisionWorld::clear() {
     clearDynamic();
     m_colliders.clear();
+    m_baseFlags.clear();
     m_cellStart.clear();
     m_cellItems.clear();
     m_stamp.clear();
@@ -109,6 +110,17 @@ void CollisionWorld::build(float halfExtent) {
     }
     m_stamp.assign(m_colliders.size(), 0);
     m_stampCounter = 0;
+    m_baseFlags.resize(m_colliders.size());
+    for (size_t i = 0; i < m_colliders.size(); ++i) m_baseFlags[i] = m_colliders[i].flags;
+}
+
+void CollisionWorld::setStaticEnabled(int i, bool enabled) {
+    if (i < 0 || i >= count()) return;
+    m_colliders[i].flags = enabled ? m_baseFlags[i] : 0;
+}
+
+void CollisionWorld::enableAllStatic() {
+    for (size_t i = 0; i < m_colliders.size(); ++i) m_colliders[i].flags = m_baseFlags[i];
 }
 
 u32 CollisionWorld::nextStamp() const {

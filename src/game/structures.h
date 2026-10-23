@@ -16,12 +16,16 @@
 
 #include "game/nav_grid.h"
 #include "world/collision.h"
+#include "world/harvest.h"
 
 namespace game {
 
 struct BuildConfig {
     int maxWalls = 20;           // limite de paredes en pie a la vez
-    float wallHealth = 150.0f;   // vida de una pared de madera (los disparos la danan)
+    // Vida de cada pieza segun su material (como en Fortnite): madera, piedra y metal.
+    float wallHealth = 150.0f;
+    float stoneHealth = 300.0f;
+    float metalHealth = 500.0f;
     float gridSize = 4.0f;       // rejilla de construccion (m)
     float wallHeight = 3.0f;
     float wallThickness = 0.25f;
@@ -50,7 +54,7 @@ enum class PlacementError {
     OverlapsStructure,  // choca con el mapa o con otra pared
     Blocked,            // hay un solido entre el jugador y la pared (no se construye a traves)
     OutOfBounds,
-    NoMaterials,        // no hay madera suficiente (la comprueba la partida)
+    NoMaterials,        // no hay material suficiente de ningun tipo (la comprueba la partida)
 };
 
 const char* placementErrorName(PlacementError error);
@@ -64,6 +68,8 @@ struct WallPlacement {
     // Rampa: sube hacia 0 = +X, 1 = -X, 2 = +Z, 3 = -Z; `level` = altura del pie de la rampa.
     int dir = 0;
     float level = 0.0f;
+    // Material con que se construiria: el elegido o, si no hay bastante, otro que si haya.
+    world::Resource material = world::Resource::Wood;
 };
 
 // Cajas de colision de una pieza (devuelve cuantas).
@@ -76,6 +82,7 @@ struct BuiltWall {
     bool alongX = true;
     int dir = 0;
     float level = 0.0f;
+    world::Resource material = world::Resource::Wood;
     int colliders[kMaxPieceBoxes];  // identificadores de las cajas dinamicas
     int colliderCount = 0;
     float health = 0.0f;

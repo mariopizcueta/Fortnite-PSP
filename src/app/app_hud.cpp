@@ -83,7 +83,7 @@ const ControlRow kControlRows[] = {
     {nullptr, {{B::Left, ""}, {B::Right, "objeto"}}, 2, {{B::L, ""}, {B::Stick, "mira"}}, 2},
     {"CONSTRUCCION", {}, 0, {}, 0},
     {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pieza"}}, 1},
-    {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "quitar pared"}}, 1},
+    {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "material"}}, 1},
     {"PARTIDA", {}, 0, {}, 0},
     {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "HUD"}}, 1},
     {nullptr, {{B::L, ""}, {B::R, ""}, {B::Start, "1 s: salir del juego"}}, 3, {}, 0},
@@ -108,8 +108,7 @@ const ui::Hint kBackHint[] = {{B::Circle, "volver al lobby"}};
 const ui::Hint kFreeCameraHint[] = {{B::Triangle, "camara libre"}};
 constexpr int kFreeCameraHintY = 256;
 const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
-const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "quitar esta"}, {B::Circle, "salir"}};
-const ui::Hint kBuildHintsShort[] = {{B::R, "colocar"}, {B::Circle, "combate"}};
+const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "material"}, {B::Circle, "salir"}};
 const ui::Hint kBusHint[] = {{B::Cross, "Saltar del autobus"}};
 const ui::Hint kGliderHint[] = {{B::Cross, "Abrir el ala delta"}};
 constexpr int kPromptY = 180;
@@ -211,13 +210,9 @@ void slotBox(float x, float y, float size, u32 fill, u32 border) {
 // --- HUD: parte dibujada con GU -------------------------------------------------------------
 
 const ui::Hint* App::buildHints(int* count) const {
-    // Ayuda bajo el rotulo de construccion (solo cuando la pared se puede colocar).
-    if (m_targetWall >= 0) {
-        *count = 3;
-        return kBuildHints;
-    }
-    *count = 2;
-    return kBuildHintsShort;
+    // Ayuda bajo el rotulo de construccion (solo cuando la pieza se puede colocar).
+    *count = 3;
+    return kBuildHints;
 }
 
 void App::renderGameHud() const {
@@ -400,6 +395,15 @@ void App::renderMinimap() const {
         circle(storm.center(), storm.radius(), kWhite);
     }
 
+    // Nombre del deposito sobre las tres naves (recortado al minimapa).
+    if (m_atlas.ready()) {
+        const float sx = kMapX + ((0.0f + world::kMapHalfSize) / kMetersPerTexel - u0) * (kMapSize / kMapWindow);
+        const float sy = kMapY + ((-11.0f + world::kMapHalfSize) / kMetersPerTexel - v0) * (kMapSize / kMapWindow);
+        const atlas::Rect& r = atlas::kMapaMinimapa;
+        m_atlas.drawClipped(r, floorf(sx - r.w * 0.5f), floorf(sy - r.h * 0.5f), kMapX, kMapY, kMapX + kMapSize,
+                            kMapY + kMapSize);
+    }
+
     // Flecha del jugador (o de a quien se sigue tras caer), con el norte arriba.
     float px, py;
     if (toMap(followed.position.x, followed.position.z, &px, &py)) {
@@ -437,14 +441,19 @@ void App::renderMinimap() const {
         m_atlas.draw(atlas::kIconVivos, 412, 86);
         m_atlas.draw(atlas::kIconBajas, 448, 86);
     }
-    // Materiales: madera (paredes que quedan), ladrillo y metal (no se usan).
+    // Materiales: madera, piedra y metal. Resaltado, el de construir (CUADRADO lo cambia en
+    // construccion; si no queda bastante se usa otro, y se resalta ese).
+    const int material = static_cast<int>(m_buildMode && m_wallPlan.error != game::PlacementError::NoMaterials
+                                              ? m_wallPlan.material
+                                              : m_match.buildMaterial());
     gfx::fillRect(398, 106, 78, 30, rgba(0, 0, 0, 90));
-    gfx::fillRect(399, 107, 25, 28, rgba(130, 150, 210, 120));
-    gfx::fillRect(425, 109, 1, 24, rgba(255, 255, 255, 120));
+    gfx::fillRect(399 + material * 26, 107, 25, 28, rgba(130, 150, 210, m_buildMode ? 170 : 110));
+    if (m_buildMode) ui::frame(399 + material * 26, 107, 25, 28, 1, kWhite);
     if (m_atlas.ready()) {
-        m_atlas.draw(atlas::kMatMadera, 402, 107);
-        m_atlas.draw(atlas::kMatLadrillo, 428, 107, 1.0f, rgba(255, 255, 255, 170));
-        m_atlas.draw(atlas::kMatMetal, 454, 107, 1.0f, rgba(255, 255, 255, 170));
+        const atlas::Rect* icons[3] = {&atlas::kMatMadera, &atlas::kMatLadrillo, &atlas::kMatMetal};
+        for (int i = 0; i < 3; ++i) {
+            m_atlas.draw(*icons[i], 402 + i * 26, 107, 1.0f, i == material ? kWhite : rgba(255, 255, 255, 170));
+        }
     }
 }
 
@@ -625,17 +634,17 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     // Construccion: paredes y por que no se puede colocar.
     if (m_buildMode) {
         const game::StructureSystem& s = m_match.structures();
-        char banner[48];
-        snprintf(banner, sizeof(banner), "%s  -  Construcciones %d/%d", kBuildPieceNames[m_buildPiece], s.count(),
-                 s.config().maxWalls);
+        static const char* const kMaterialNames[] = {"madera", "piedra", "metal"};
+        char banner[64];
+        snprintf(banner, sizeof(banner), "%s de %s  -  %d/%d", kBuildPieceNames[m_buildPiece],
+                 kMaterialNames[static_cast<int>(m_wallPlan.material)], s.count(), s.config().maxWalls);
         printCenteredShadow(44, kWhite, banner);
         if (!m_wallPlan.valid) {
             printCenteredShadow(55, kErrorRed, game::placementErrorName(m_wallPlan.error));
         } else {
             int n = 0;
             const ui::Hint* hints = buildHints(&n);
-            ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55,
-                           m_targetWall >= 0 ? config::kColorGold : kLightGrey, hints, n);
+            ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55, kLightGrey, hints, n);
         }
     }
     if (!m_match.alive(0)) {
@@ -687,11 +696,10 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     // Materiales: madera, piedra y metal.
     const game::Materials& mats = m_match.materials();
     const int wood = mats.get(world::Resource::Wood);
-    gfx::text::printShadow(wood >= 100 ? 400 : 404, 126, kWhite, "%d", wood);
-    gfx::text::printShadow(mats.get(world::Resource::Stone) >= 10 ? 427 : 431, 126, kLightGrey, "%d",
-                           mats.get(world::Resource::Stone));
-    gfx::text::printShadow(mats.get(world::Resource::Metal) >= 10 ? 453 : 457, 126, kLightGrey, "%d",
-                           mats.get(world::Resource::Metal));
+    const int stone = mats.get(world::Resource::Stone), metal = mats.get(world::Resource::Metal);
+    gfx::text::printShadow(wood >= 100 ? 400 : (wood >= 10 ? 404 : 408), 126, kWhite, "%d", wood);
+    gfx::text::printShadow(stone >= 100 ? 426 : (stone >= 10 ? 430 : 434), 126, kWhite, "%d", stone);
+    gfx::text::printShadow(metal >= 100 ? 452 : (metal >= 10 ? 456 : 460), 126, kWhite, "%d", metal);
 
     // Estado del arma (solo con un arma en la mano).
     const game::Inventory& inv = m_match.inventory();

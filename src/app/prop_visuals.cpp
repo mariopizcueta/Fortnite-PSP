@@ -18,6 +18,7 @@ namespace {
 
 constexpr float kLootDrawDistance = 45.0f;       // objetos del suelo
 constexpr float kContainerDrawDistance = 80.0f;  // cofres, cajas, airdrops
+constexpr float kOpenedVisibleSeconds = 0.4f;     // un cofre abierto se ve asi y desaparece
 
 Material flat(u32 c) { return {world::kTexNone, c, 1.0f}; }
 Material textured(int tex, u32 c, float meters) { return {tex, c, meters}; }
@@ -280,6 +281,8 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
                            float maxDistance, float time, const world::TextureLibrary& textures) const {
     const float containerRange = fminf(maxDistance, kContainerDrawDistance);
     for (const game::Container& c : match.containers()) {
+        // Abierto: se ve un instante con la tapa levantada y desaparece (como en Fortnite).
+        if (c.opened && match.elapsed() - c.openedAt > kOpenedVisibleSeconds) continue;
         if (math3d::length(c.position - eye) > containerRange + 6.0f) continue;
         if (!frustum.sphereVisible(c.position + Vec3{0.0f, 1.5f, 0.0f}, c.kind == game::ContainerKind::Airdrop ? 6.0f : 1.0f)) continue;
         const Mat4 model = Mat4::translation(c.position) * Mat4::rotationY(c.yaw);

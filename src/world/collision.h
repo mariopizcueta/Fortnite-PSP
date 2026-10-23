@@ -63,6 +63,11 @@ public:
 
     int count() const { return static_cast<int>(m_colliders.size()); }
     const Collider& collider(int i) const { return m_colliders[i]; }
+    // Objetos del mapa destruidos con el pico: su caja fija deja de bloquear nada (flags 0)
+    // hasta que se reactiva (cada partida empieza con todo en pie).
+    void setStaticEnabled(int i, bool enabled);
+    bool staticEnabled(int i) const { return m_colliders[i].flags != 0 || m_baseFlags[i] == 0; }
+    void enableAllStatic();
 
     // Cajas dinamicas. addDynamic devuelve un identificador (o -1 si no hay hueco).
     // Una rampa son varias cajas (escalones): hace falta sitio para unas 20 de ellas.
@@ -95,6 +100,7 @@ private:
     u32 nextStamp() const;
 
     std::vector<Collider> m_colliders;
+    std::vector<u8> m_baseFlags;  // flags originales (para reactivar las cajas)
     // Rejilla en formato CSR: los indices de la celda c estan en
     // m_cellItems[m_cellStart[c] .. m_cellStart[c + 1]).
     std::vector<int> m_cellStart;

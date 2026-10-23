@@ -396,7 +396,7 @@ void testNewControls(Sim& sim) {
     int tree = -1;
     for (int i = 0; i < static_cast<int>(world.harvestables().size()) && tree < 0; ++i) {
         const world::Harvestable& h = world.harvestables()[i];
-        if (h.total != 48) continue;
+        if (h.resource != world::Resource::Wood || h.health != 300.0f) continue;  // un arbol
         const Vec3 c = (h.box.min + h.box.max) * 0.5f;
         if (world::stormDepth(c.x, c.z) > -5.0f) continue;  // fuera de la tormenta del borde
         const Vec3 feet{c.x - forward.x * 1.0f, 0.0f, c.z - forward.z * 1.0f};
@@ -457,6 +457,26 @@ void testNewControls(Sim& sim) {
     sim.shot("25b_construccion_rampa");
     check(sim.app().testBuildPiece() == 2 && match.structures().count() == pieces + 2,
           "y con la rampa elegida, R coloca una rampa");
+    // CUADRADO cambia de material; sin bastante del elegido se construye con otro.
+    sim.press(PSP_CTRL_SQUARE);
+    const bool stoneChosen = match.buildMaterial() == world::Resource::Stone;
+    const int woodNow = match.materials().get(world::Resource::Wood);
+    const game::WallPlacement fallback = match.planWall(sim.app().testCameraYaw() + 1.5708f);
+    match.giveMaterials(world::Resource::Stone, 30);
+    const game::WallPlacement withStone = match.planWall(sim.app().testCameraYaw() + 1.5708f);
+    printf("  CUADRADO: material %s; sin piedra la pieza seria de %s (madera %d), con piedra de %s\n",
+           stoneChosen ? "piedra" : "?", fallback.material == world::Resource::Wood ? "madera" : "otro", woodNow,
+           withStone.material == world::Resource::Stone ? "piedra" : "otro");
+    sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_LEFT);  // pared
+    sim.shot("25c_construccion_piedra");
+    check(stoneChosen && (woodNow < 10 || fallback.material == world::Resource::Wood) &&
+              withStone.material == world::Resource::Stone,
+          "CUADRADO cambia el material y sin el elegido se construye con el que haya");
+    sim.press(PSP_CTRL_SQUARE);
+    sim.press(PSP_CTRL_SQUARE);  // de vuelta a la madera
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RIGHT);
     sim.press(PSP_CTRL_LEFT);
     sim.press(PSP_CTRL_LEFT);
     sim.press(PSP_CTRL_CIRCLE);
@@ -606,8 +626,10 @@ int main(int argc, char** argv) {
     sim.shot("08d_cofre");
     sim.press(PSP_CTRL_SQUARE);
     check(match.containers()[chest].opened, "CUADRADO abre el cofre");
-    sim.wait(0.4f);
+    sim.wait(0.2f);
     sim.shot("08e_cofre_abierto");
+    sim.wait(0.8f);
+    sim.shot("08e2_cofre_desaparece");  // abierto, desaparece enseguida (como en Fortnite)
     for (int k = 0; k < 4; ++k) sim.press(PSP_CTRL_SQUARE);
     bool armed = false;
     for (int i = 0; i < game::Inventory::kSlots; ++i) armed |= game::isWeapon(match.inventory().slot(i).type);

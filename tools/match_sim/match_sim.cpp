@@ -990,14 +990,15 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     m.teleport(0, player, 0.0f);
     m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
     const game::Inventory& inv = m.inventory();
-    int trees = 0, rocks = 0, metal = 0;
+    int wood = 0, stone = 0, metal = 0, colliders = 0;
     for (const world::Harvestable& h : world.harvestables()) {
-        trees += h.total == 48 ? 1 : 0;
-        rocks += h.resource == world::Resource::Stone ? 1 : 0;
+        wood += h.resource == world::Resource::Wood ? 1 : 0;
+        stone += h.resource == world::Resource::Stone ? 1 : 0;
         metal += h.resource == world::Resource::Metal ? 1 : 0;
+        colliders += h.colliderCount;
     }
-    printf("  objetos recolectables en el mapa: %d (%d arboles, %d rocas, %d de metal)\n",
-           static_cast<int>(world.harvestables().size()), trees, rocks, metal);
+    printf("  objetos del mapa que se pueden picar: %d (%d de madera, %d de piedra, %d de metal), %d de %d cajas fijas\n",
+           static_cast<int>(world.harvestables().size()), wood, stone, metal, colliders, world.collision().count());
     check(inv.slot(0).type == ItemType::AssaultRifle && inv.selected() == 0 && inv.slot(1).type == ItemType::Bandage &&
               inv.slot(1).count == 5 && inv.slot(2).type == ItemType::SmallShield && inv.slot(2).count == 3 &&
               m.materials().get(world::Resource::Wood) == 30,
@@ -1057,13 +1058,14 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     check(m.materials().get(world::Resource::Wood) == 0 && plan.error == game::PlacementError::NoMaterials,
           "sin madera no se construye (aviso 'Falta madera')");
 
-    // Pico: un arbol da 8 de madera por golpe y se agota tras 48.
+    // Pico: un arbol da 8 de madera por golpe y tiene 300 de vida (6 golpes de 50): al
+    // sexto desaparece.
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
     m.teleport(1, {80.0f, 0.0f, -80.0f}, 0.0f);
     int treeIndex = -1;
     for (int i = 0; i < static_cast<int>(world.harvestables().size()); ++i) {
         const world::Harvestable& h = world.harvestables()[i];
-        if (h.total != 48) continue;
+        if (h.resource != world::Resource::Wood || h.health != 300.0f) continue;
         // Un arbol con hueco al sur para el jugador, fuera de la tormenta del borde.
         const Vec3 c = (h.box.min + h.box.max) * 0.5f;
         if (world::stormDepth(c.x, c.z) > -5.0f) continue;
@@ -1088,14 +1090,28 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     const int woodBefore = m.materials().get(world::Resource::Wood);
     runSteps(m, 61, swing);  // R mantenido 1 s: golpes en 0, 0.5 y 1.0 s
     const int swings = countEvents(m, cursor, game::GameEventType::PickaxeSwing);
-    printf("  1 s con R y el pico frente a un arbol: %d golpes, madera %d -> %d, quedan %d en el arbol\n", swings,
-           woodBefore, m.materials().get(world::Resource::Wood), m.harvestLeft(treeIndex));
+    printf("  1 s con R y el pico frente a un arbol: %d golpes, madera %d -> %d, vida del arbol %.0f\n", swings,
+           woodBefore, m.materials().get(world::Resource::Wood), static_cast<double>(m.objectHealth(treeIndex)));
     check(swings == 3 && m.materials().get(world::Resource::Wood) == woodBefore + 24 &&
               countEvents(m, cursor, game::GameEventType::Harvest) == 3,
           "con R mantenido el pico golpea cada 0.5 s y cada golpe al arbol da 8 de madera");
+    check(m.objectHealth(treeIndex) == 150.0f, "cada golpe quita 50 de vida al arbol");
     runSteps(m, 60 * 3, swing);
-    check(m.harvestLeft(treeIndex) == 0 && m.materials().get(world::Resource::Wood) == woodBefore + 48,
-          "el arbol se agota tras 48 de madera (los golpes siguientes no dan nada)");
+    const bool gone = m.objectDestroyed(treeIndex) && !world.collision().staticEnabled(tree.collider);
+    world::RayHit through;
+    const bool rayPasses = !world.collision().raycast(m.chestOf(0), m.chestOf(0) + Vec3{0.0f, 0.0f, -2.0f},
+                                                      world::kBlocksShots, &through) ||
+                           !tree.owns(through.collider);
+    printf("  tras 4 s: madera %d, arbol %s\n", m.materials().get(world::Resource::Wood), gone ? "destruido" : "en pie");
+    check(gone && rayPasses && m.materials().get(world::Resource::Wood) == woodBefore + 48 &&
+              countEvents(m, cursor, game::GameEventType::ObjectDestroyed) == 1,
+          "al sexto golpe el arbol desaparece (sin colision) tras dar 48 de madera");
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    check(!m.objectDestroyed(treeIndex) && world.collision().staticEnabled(tree.collider) &&
+              m.objectHealth(treeIndex) == 300.0f,
+          "en la partida siguiente el arbol vuelve a estar en pie");
+    m.teleport(1, {80.0f, 0.0f, -80.0f}, 0.0f);
+    runSteps(m, 1, game::PlayerAim{}, pick);
 
     // Roca (piedra) y bot.
     int rockIndex = -1;
@@ -1206,6 +1222,158 @@ int countActive(const Match& m, game::ItemType type) {
     int n = 0;
     for (const game::Pickup& p : m.pickups()) n += p.active && p.kind == game::PickupKind::Item && p.item == type ? 1 : 0;
     return n;
+}
+
+void testMapObjects(world::World& world, game::NavGrid& nav) {
+    printf("\n12b) Objetos del mapa: tejados, paredes que se rompen y materiales de construccion\n");
+    // Tejado de la nave gris: quien cae del autobus o planea se posa encima.
+    game::CharacterBody falling;
+    falling.reset({0.0f, 0.0f, -11.0f}, 0.0f, world.collision());
+    falling.place({0.0f, 40.0f, -11.0f});
+    game::MoveIntent glide;
+    glide.fallSpeed = 20.0f;
+    for (int i = 0; i < 60 * 6; ++i) falling.step(glide, game::FixedTimestep::kStep, world.collision());
+    printf("  cayendo sobre la nave gris desde 40 m: pies a %.1f m (%s)\n",
+           static_cast<double>(falling.state().position.y), falling.state().grounded() ? "apoyado" : "en el aire");
+    check(falling.state().grounded() && falling.state().position.y > 10.0f, "el tejado de las naves no se atraviesa");
+    // Por fuera del tejado, los planeadores bajan resbalando hasta el suelo.
+    falling.place({-5.0f, 40.0f, -11.0f});
+    for (int i = 0; i < 60 * 6; ++i) falling.step(glide, game::FixedTimestep::kStep, world.collision());
+    check(falling.state().position.y > 7.0f, "tambien en el faldon (lejos de la cumbrera)");
+
+    // Pared lateral de la nave gris (x 7.6..8): 6 golpes de pico y se puede pasar.
+    MatchConfig cfg = MatchConfig::classic();
+    cfg.botCount = 1;
+    Match m;
+    m.setHarvestables(&world.harvestables());
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    int panel = -1;
+    for (int i = 0; i < static_cast<int>(world.harvestables().size()); ++i) {
+        const world::Harvestable& h = world.harvestables()[i];
+        if (h.box.min.x >= 7.5f && h.box.max.x <= 8.1f && h.box.min.z <= -18.0f && h.box.max.z >= -18.0f &&
+            h.box.min.y < 0.5f) {
+            panel = i;
+        }
+    }
+    const Vec3 outside{9.2f, 0.0f, -18.0f};
+    m.teleport(0, outside, math3d::kPi * 0.5f);  // mirando al oeste (-X)
+    game::PlayerAim swing;
+    swing.eye = m.eyeOf(0);
+    swing.direction = {-1.0f, 0.0f, 0.0f};
+    m.setPlayerInput(game::PlayerInput{}, swing);
+    const int metalBefore = m.materials().get(world::Resource::Metal);
+    int hits = 0;
+    while (panel >= 0 && !m.objectDestroyed(panel) && hits < 10) {
+        m.swingPickaxe();
+        ++hits;
+    }
+    bool pen = false;
+    const game::CharacterState in = walk(world.collision(), outside, math3d::kPi * 0.5f, 0.0f, -1.0f, 1.0f, &pen);
+    printf("  panel de pared (%s): %d golpes, metal %d -> %d; andando hacia dentro: x %.1f\n",
+           panel >= 0 ? "encontrado" : "no encontrado", hits, metalBefore, m.materials().get(world::Resource::Metal),
+           static_cast<double>(in.position.x));
+    check(panel >= 0 && m.objectDestroyed(panel) && hits == 6 && m.materials().get(world::Resource::Metal) > metalBefore,
+          "las paredes de las naves se pican: dan metal y a los 6 golpes desaparecen");
+    check(in.position.x < 7.0f && !pen, "por el hueco de la pared se entra en la nave");
+    int roofs = 0;
+    for (const world::Harvestable& h : world.harvestables()) roofs += h.colliderCount > 10 ? 1 : 0;
+    check(roofs == 12, "los tejados (4 tramos por nave) tambien son objetos que se pueden romper");
+
+    // Materiales de construccion: CUADRADO elige; cada uno con su vida.
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    m.giveMaterials(world::Resource::Metal, 10);
+    game::PlayerCommands cycle;
+    cycle.cycleMaterial = true;
+    m.setPlayerInput(game::PlayerInput{}, game::PlayerAim{}, cycle);
+    m.setPlayerInput(game::PlayerInput{}, game::PlayerAim{}, cycle);
+    const int metalWall = m.buildWall(0.0f);
+    const bool metalOk = metalWall >= 0 && m.structures().wall(metalWall).material == world::Resource::Metal &&
+                         m.structures().wall(metalWall).maxHealth == 500.0f && m.materials().get(world::Resource::Metal) == 0;
+    // Sin metal: la siguiente se hace con lo que haya (madera).
+    const int woodBefore = m.materials().get(world::Resource::Wood);
+    const int woodWall = m.buildWall(math3d::kPi * 0.5f);
+    const bool fallbackOk = woodWall >= 0 && m.structures().wall(woodWall).material == world::Resource::Wood &&
+                            m.structures().wall(woodWall).maxHealth == 150.0f &&
+                            m.materials().get(world::Resource::Wood) == woodBefore - 10;
+    printf("  pared de metal: %s (vida %.0f); sin metal, la siguiente de madera: %s\n", metalOk ? "si" : "no",
+           metalWall >= 0 ? static_cast<double>(m.structures().wall(metalWall).maxHealth) : 0.0,
+           fallbackOk ? "si" : "no");
+    check(metalOk && m.buildMaterial() == world::Resource::Metal, "CUADRADO elige el metal: pared de 500 de vida");
+    check(fallbackOk, "sin el material elegido se construye con el que haya");
+    // Una partida nueva retira las paredes (la colision es compartida con las pruebas siguientes).
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+}
+
+void testBotInventory(world::World& world, game::NavGrid& nav) {
+    printf("\n14b) Inventario de los bots\n");
+    using game::ItemType;
+    using game::Rarity;
+    MatchConfig cfg;
+    cfg.botCount = 1;
+    cfg.startInBus = false;
+    cfg.loot = true;
+    cfg.chestCount = cfg.floorLootCount = cfg.ammoBoxCount = 0;
+    cfg.airdropTimes[0] = cfg.airdropTimes[1] = 1e9f;
+    cfg.stormCloses = false;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 at{70.0f, 0.0f, 25.0f};
+    m.teleport(1, at, 0.0f);
+    m.teleport(0, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    auto give = [&](ItemType type, Rarity rarity, int count) {
+        game::Pickup p;
+        p.kind = game::PickupKind::Item;
+        p.item = type;
+        p.rarity = rarity;
+        p.count = count;
+        p.position = at;
+        game::Interactable it;
+        it.kind = game::Interactable::Kind::Pickup;
+        it.index = m.dropPickup(p);
+        return m.interact(1, it);
+    };
+    const game::Bot& b = m.bot(0);
+    const bool rifle = give(ItemType::AssaultRifle, Rarity::Common, 1);
+    const bool shotgun = give(ItemType::Shotgun, Rarity::Rare, 1);
+    const bool bandages = give(ItemType::Bandage, Rarity::Common, 5);
+    const bool worseRifle = give(ItemType::AssaultRifle, Rarity::Common, 1);
+    const bool betterRifle = give(ItemType::AssaultRifle, Rarity::Epic, 1);
+    int weapons = 0, items = 0;
+    for (int i = 0; i < game::Inventory::kSlots; ++i) {
+        const ItemType t = b.bag.slot(i).type;
+        weapons += game::isWeapon(t) ? 1 : 0;
+        items += t != ItemType::None && !game::isWeapon(t) ? 1 : 0;
+    }
+    printf("  recoge fusil %s, escopeta %s, vendas %s, otro fusil igual %s, fusil epico %s -> %d armas y %d consumibles; "
+           "en la mano: %s\n", rifle ? "si" : "no", shotgun ? "si" : "no", bandages ? "si" : "no",
+           worseRifle ? "si" : "no", betterRifle ? "si" : "no", weapons, items, m.botWeaponName(0));
+    check(rifle && shotgun && bandages && !worseRifle && betterRifle && weapons == 2 && items == 1 && b.armed,
+          "los bots llevan varias armas y consumibles (y cambian un arma por otra mejor del mismo tipo)");
+
+    // Herido y sin nadie cerca: usa las vendas (3.5 s, +15 de vida).
+    m.applyDamage(1, 50.0f, game::kStormKiller, true);
+    for (int i = 0; i < 60 * 5; ++i) m.step(game::FixedTimestep::kStep);
+    printf("  con 50 de vida y vendas: %.0f de vida a los 5 s, quedan %d vendas\n",
+           static_cast<double>(m.body(1).state().health), b.bag.count(ItemType::Bandage));
+    check(m.body(1).state().health > 50.0f && b.bag.count(ItemType::Bandage) < 5,
+          "un bot herido sin nadie a la vista se cura con lo que lleva");
+
+    // Al caer, todo su inventario queda en el suelo.
+    int before = 0;
+    for (const game::Pickup& p : m.pickups()) before += p.active ? 1 : 0;
+    m.applyDamage(1, 500.0f, 0, true);
+    int weaponsDropped = 0, itemsDropped = 0;
+    for (const game::Pickup& p : m.pickups()) {
+        if (!p.active || p.kind != game::PickupKind::Item) continue;
+        weaponsDropped += game::isWeapon(p.item) ? 1 : 0;
+        itemsDropped += game::isWeapon(p.item) ? 0 : 1;
+    }
+    printf("  al caer: %d armas y %d consumibles en el suelo (antes habia %d objetos)\n", weaponsDropped, itemsDropped,
+           before);
+    check(!m.alive(1) && weaponsDropped >= 2 && itemsDropped >= 1, "al caer suelta todas sus armas y consumibles");
 }
 
 void testLoot(world::World& world, game::NavGrid& nav) {
@@ -1527,9 +1695,11 @@ int main() {
     testFort(world, nav);
     testEvents(world, nav);
     testInventory(world, nav);
+    testMapObjects(world, nav);
     testStorm(world, nav);
     testStormZone(world, nav);
     testLoot(world, nav);
+    testBotInventory(world, nav);
     testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);

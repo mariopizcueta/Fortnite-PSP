@@ -59,6 +59,7 @@ void Match::updateBot(int index, float dt) {
         b.decisionTimer += m_config.aiDecisionInterval;
         if (b.decisionTimer <= 0.0f) b.decisionTimer = m_config.aiDecisionInterval;
     }
+    botUpdateHealing(index, dt);
     const MoveIntent intent = steer(index, dt);
     const u64 t1 = core::nowMicros();
     b.body.step(intent, dt, *m_world);
@@ -147,6 +148,73 @@ void Match::chooseDestination(Bot& b) {
     b.destination = dest;
 }
 
+Vec3 Match::descentDirection(const Vec3& pos) const {
+    // Se prueban 8 direcciones a distancias crecientes; la primera distancia a la que en
+    // alguna el apoyo baja al menos 0.3 m decide (la del apoyo mas bajo). En un tejado
+    // inclinado sale cuesta abajo; en uno plano, hacia el borde mas cercano.
+    for (float d : {1.5f, 3.0f, 5.0f, 8.0f}) {
+        float lowest = pos.y - 0.3f;
+        Vec3 best{0.0f, 0.0f, 0.0f};
+        for (int k = 0; k < 8; ++k) {
+            const float a = k * (math3d::kPi * 0.25f);
+            const Vec3 dir{cosf(a), 0.0f, sinf(a)};
+            const Vec3 p = pos + dir * d;
+            const float support = m_world->supportHeight(p.x, p.z, kFootRadius, pos.y + kStepHeight);
+            if (support < lowest) {
+                lowest = support;
+                best = dir;
+            }
+        }
+        if (math3d::length(best) > 0.5f) return best;
+    }
+    return {0.0f, 0.0f, 0.0f};
+}
+
+void Match::botUpdateHealing(int index, float dt) {
+    // Consumibles de su inventario cuando no hay nadie a la vista: botiquin o vendas si le
+    // falta vida, pociones de escudo si le falta escudo. Tardan lo mismo que al jugador y
+    // ver a alguien los interrumpe (sin gastarlos).
+    Bot& b = m_bots[index];
+    CharacterState& s = b.body.state();
+    const bool threatened = b.state == BotState::Attack || (b.target >= 0 && b.targetVisible);
+    if (b.healTimer > 0.0f) {
+        if (threatened || b.healSlot < 0) {
+            b.healTimer = 0.0f;
+            b.healSlot = -1;
+            return;
+        }
+        b.healTimer -= dt;
+        if (b.healTimer > 0.0f) return;
+        const ItemType type = b.bag.slot(b.healSlot).type;
+        const ItemDef& def = itemDef(type);
+        if (def.health > 0.0f && s.health < def.healthCap) s.health = fminf(def.healthCap, s.health + def.health);
+        if (def.shield > 0.0f && s.shield < def.shieldCap) s.shield = fminf(def.shieldCap, s.shield + def.shield);
+        b.bag.consumeOne(b.healSlot);
+        b.healSlot = -1;
+        b.healTimer = 0.0f;
+        return;
+    }
+    if (threatened || b.state == BotState::Loot || m_air[index + 1] != AirState::Ground) return;
+    int best = -1;
+    float bestGain = 0.0f;
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const ItemType type = b.bag.slot(i).type;
+        if (type == ItemType::None || isWeapon(type)) continue;
+        const ItemDef& def = itemDef(type);
+        const float health = def.health > 0.0f ? fminf(def.health, fmaxf(0.0f, def.healthCap - s.health)) : 0.0f;
+        const float shield = def.shield > 0.0f ? fminf(def.shield, fmaxf(0.0f, def.shieldCap - s.shield)) : 0.0f;
+        // Solo si se aprovecha bien (no una venda para curar 2 puntos); la vida, antes.
+        const float gain = health * 1.5f + shield;
+        if (gain >= fminf(def.health * 1.5f + def.shield, 20.0f) * 0.6f && gain > bestGain) {
+            bestGain = gain;
+            best = i;
+        }
+    }
+    if (best < 0) return;
+    b.healSlot = best;
+    b.healTimer = fmaxf(itemDef(b.bag.slot(best).type).useSeconds, 0.05f);
+}
+
 bool Match::botNeedsSafety(const Vec3& pos, int self) const {
     // Fuera de la zona siguiente cuando la tormenta ya se cierra o falta poco (o ya dentro
     // de ella): hay que entrar. Con margen, para no quedarse justo en el borde.
@@ -200,6 +268,9 @@ void Match::decide(int index) {
     // Percepcion: rango + campo de vision + linea de vision (raycast). Sin arma solo se
     // pelea si el rival esta encima (pico); si no, sigue buscando botin.
     int seen = perceive(index);
+    // Con inventario: el arma que mejor va a la distancia del rival (o la mejor).
+    botEquip(b, seen >= 0 ? distXZ(pos, body(seen).state().position)
+                          : (b.target >= 0 ? distXZ(pos, b.lastSeen) : 20.0f));
     if (seen >= 0 && !b.armed && distXZ(pos, body(seen).state().position) > 4.0f) seen = -1;
     if (seen >= 0) {
         if (b.state == BotState::Loot) {
@@ -445,6 +516,25 @@ MoveIntent Match::steer(int index, float dt) {
             break;
     }
 
+    // Curandose: quieto hasta terminar (o hasta ver a alguien).
+    if (b.healTimer > 0.0f) desired = {0.0f, 0.0f, 0.0f};
+
+    // Encima de algo (tejado de una nave, contenedor, altillo) tras caer del autobus: la
+    // navegacion solo llega al suelo, asi que primero hay que bajar.
+    if (s.grounded() && pos.y > 1.2f) {
+        b.descentTimer -= dt;
+        if (b.descentTimer <= 0.0f) {
+            b.descent = descentDirection(pos);
+            b.descentTimer = 0.5f;
+        }
+        if (math3d::length(b.descent) > 0.5f) {
+            desired = b.descent;
+            speed = 0.9f;
+        }
+    } else {
+        b.descentTimer = 0.0f;
+    }
+
     // Atascado: moverse de lado un momento.
     if (b.sidestepTimer > 0.0f) {
         const Vec3 base = math3d::length(desired) > 0.01f ? desired : forwardFromYaw(s.yaw);
@@ -555,7 +645,7 @@ bool Match::findLoot(int index, float maxDistance) {
         const Container& c = m_containers[i];
         if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox) continue;
         if (c.claimedBy >= 0 && c.claimedBy != self) continue;
-        if (b.armed && c.kind != ContainerKind::Airdrop) continue;
+        if (b.armed && c.kind != ContainerKind::Airdrop && b.bag.full()) continue;
         const float d = distXZ(c.position, pos);
         const float limit = c.kind == ContainerKind::Airdrop ? maxDistance * 3.0f : maxDistance;
         if (d > limit || stormDepthAt(c.position.x, c.position.z) > -4.0f) continue;
@@ -568,9 +658,11 @@ bool Match::findLoot(int index, float maxDistance) {
     }
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
-        if (!p.active || p.kind != PickupKind::Item || !isWeapon(p.item)) continue;
+        if (!p.active || p.kind != PickupKind::Item) continue;
         if (p.claimedBy >= 0 && p.claimedBy != self) continue;
-        if (b.armed && static_cast<int>(p.rarity) <= static_cast<int>(b.weaponRarity)) continue;
+        // Sin arma, primero un arma; despues, lo que le sirva (otra arma, una mejor o curas).
+        if (!b.armed && !isWeapon(p.item)) continue;
+        if (!botWants(b, p)) continue;
         const float d = distXZ(p.position, pos);
         if (d > maxDistance || d >= best || fabsf(p.position.y - pos.y) > 3.0f) continue;
         best = d;
@@ -605,12 +697,12 @@ void Match::botTakeLoot(int index) {
         if (b.lootPickup >= 0) m_pickups[b.lootPickup].claimedBy = -1;
     }
     b.lootPickup = b.lootContainer = -1;
-    // Tras abrir un cofre, el arma esta justo al lado: a por ella en la siguiente decision.
+    // Tras abrir un cofre, lo que ha soltado esta justo al lado: a por ello.
     b.state = b.armed ? BotState::Explore : BotState::Search;
     b.stateTime = 0.0f;
     b.searchDuration = 0.3f;
     b.searchYaw = b.body.state().yaw;
-    if (!b.armed && findLoot(index, 6.0f)) b.state = BotState::Loot;
+    if (findLoot(index, 6.0f)) b.state = BotState::Loot;
 }
 
 void Match::botBuildCover(int index, int attacker) {

@@ -283,6 +283,7 @@ bool Match::interact(int id, const Interactable& target) {
     Container& c = m_containers[target.index];
     if (c.opened || !c.landed) return false;
     c.opened = true;
+    c.openedAt = m_time;
     c.claimedBy = -1;
     pushEvent(GameEventType::ContainerOpened, id, static_cast<int>(c.kind), c.position);
     spawnContainerLoot(target.index, id);
@@ -294,22 +295,31 @@ bool Match::pickUp(int id, int index) {
     Pickup& p = m_pickups[index];
     if (!p.active) return false;
     if (id > 0) {
-        // Bot: solo armas (municion infinita) y solo si mejora la suya.
+        // Bot: armas y consumibles a su inventario (la municion no: la suya es infinita).
         Bot& b = m_bots[id - 1];
-        if (p.kind != PickupKind::Item || !isWeapon(p.item)) return false;
-        if (b.armed && weaponScore(p.item, p.rarity) <= weaponScore(b.weaponType, b.weaponRarity)) {
+        if (!botWants(b, p)) {
             p.claimedBy = -1;
             return false;
         }
         const Pickup taken = p;
-        p.active = false;
-        if (b.armed) dropBotWeapon(id - 1);
-        b.armed = true;
-        b.weaponType = taken.item;
-        b.weaponRarity = taken.rarity;
-        WeaponConfig w = weaponConfig(taken.item, taken.rarity);
-        w.reserveAmmo = -1;
-        b.weapon.reset(w);
+        const int vacate = isWeapon(taken.item) ? botReplacedSlot(b, taken) : -1;
+        if (vacate >= 0) {
+            // Un arma mejor del mismo tipo, o lleno: suelta la que sustituye.
+            const InventorySlot dropped = b.bag.take(vacate);
+            Pickup out;
+            out.kind = PickupKind::Item;
+            out.item = dropped.type;
+            out.rarity = dropped.rarity;
+            out.count = dropped.count;
+            dropAround(b.body.state().position, out, 0, 1);
+        }
+        const int left = b.bag.add(taken.item, taken.rarity, taken.count);
+        Pickup& now = m_pickups[index];  // dropAround puede haber movido el vector
+        now.count = left;
+        if (left <= 0) now.active = false;
+        now.claimedBy = -1;
+        botEquip(b, b.target >= 0 && alive(b.target) ? distXZ(body(b.target).state().position, b.body.state().position)
+                                                      : 20.0f);
         pushEvent(GameEventType::PickedUp, id, static_cast<int>(taken.item), taken.position);
         return true;
     }
@@ -406,19 +416,99 @@ void Match::updateAirdrops(float dt) {
 }
 
 void Match::dropBotWeapon(int index) {
+    // Todo su inventario queda en el suelo, cada arma con un paquete de su municion.
     Bot& b = m_bots[index];
-    if (!b.armed) return;
-    Pickup w;
-    w.kind = PickupKind::Item;
-    w.item = b.weaponType;
-    w.rarity = b.weaponRarity;
-    w.count = 1;
     const Vec3 pos = b.body.state().position;
-    if (b.weaponType != ItemType::None) {
-        dropAround(pos, w, 0, 2);
-        dropAround(pos, ammoPickup(static_cast<AmmoType>(weaponConfig(b.weaponType, b.weaponRarity).ammoType)), 1, 2);
+    int total = 0;
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const ItemType t = b.bag.slot(i).type;
+        total += t == ItemType::None ? 0 : (isWeapon(t) ? 2 : 1);
+    }
+    int slot = 0;
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const InventorySlot s = b.bag.take(i);
+        if (s.type == ItemType::None) continue;
+        Pickup w;
+        w.kind = PickupKind::Item;
+        w.item = s.type;
+        w.rarity = s.rarity;
+        w.count = s.count;
+        dropAround(pos, w, slot++, total);
+        if (isWeapon(s.type)) {
+            dropAround(pos, ammoPickup(static_cast<AmmoType>(weaponConfig(s.type, s.rarity).ammoType)), slot++, total);
+        }
     }
     b.armed = false;
+    b.weaponType = ItemType::None;
+}
+
+bool Match::botWants(const Bot& b, const Pickup& p) const {
+    if (!p.active || p.kind != PickupKind::Item) return false;
+    if (!isWeapon(p.item)) {
+        // Consumibles: si caben (en un monton suyo o en una ranura libre).
+        if (!b.bag.full()) return true;
+        for (int i = 0; i < Inventory::kSlots; ++i) {
+            const InventorySlot& s = b.bag.slot(i);
+            if (s.type == p.item && s.count < itemDef(p.item).maxStack) return true;
+        }
+        return false;
+    }
+    // Armas: un tipo que no lleva (si cabe), o mejor que la que sustituiria.
+    const int slot = botReplacedSlot(b, p);
+    if (slot < 0) return !b.bag.full();
+    const InventorySlot& s = b.bag.slot(slot);
+    return !isWeapon(s.type) || weaponScore(p.item, p.rarity) > weaponScore(s.type, s.rarity);
+}
+
+int Match::botReplacedSlot(const Bot& b, const Pickup& p) const {
+    // Ranura que dejaria un arma nueva: la del mismo tipo (no lleva dos iguales); si no y
+    // esta lleno, la peor (un consumible cuenta menos que cualquier arma). -1: hay hueco.
+    int worst = -1;
+    float worstScore = 1e9f;
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const InventorySlot& s = b.bag.slot(i);
+        if (isWeapon(s.type) && s.type == p.item) return i;
+        const float score = isWeapon(s.type) ? weaponScore(s.type, s.rarity) : 5.0f;
+        if (score < worstScore) {
+            worstScore = score;
+            worst = i;
+        }
+    }
+    return b.bag.full() ? worst : -1;
+}
+
+void Match::botEquip(Bot& b, float distance) {
+    // El arma que mejor va a esa distancia: escopeta de cerca, francotirador de lejos y,
+    // si no, la mejor (rareza y tipo).
+    int best = -1;
+    float bestScore = -1e9f;
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        const InventorySlot& s = b.bag.slot(i);
+        if (!isWeapon(s.type)) continue;
+        float score = weaponScore(s.type, s.rarity);
+        if (s.type == ItemType::Shotgun) score += distance < 9.0f ? 25.0f : (distance > 16.0f ? -20.0f : 0.0f);
+        if (s.type == ItemType::Sniper) score += distance > 28.0f ? 25.0f : (distance < 14.0f ? -20.0f : 0.0f);
+        if (s.type == ItemType::Smg && distance < 14.0f) score += 6.0f;
+        if (score > bestScore) {
+            bestScore = score;
+            best = i;
+        }
+    }
+    if (best < 0) {
+        // Sin armas en el inventario: las reglas clasicas dan un arma fija sin inventario.
+        if (b.weaponType != ItemType::None) b.armed = false;
+        return;
+    }
+    const InventorySlot& s = b.bag.slot(best);
+    if (b.armed && b.weaponType == s.type && b.weaponRarity == s.rarity) return;
+    const bool switching = b.armed;
+    b.armed = true;
+    b.weaponType = s.type;
+    b.weaponRarity = s.rarity;
+    WeaponConfig w = weaponConfig(s.type, s.rarity);
+    w.reserveAmmo = -1;
+    b.weapon.reset(w);
+    if (switching && b.reaction < 0.3f) b.reaction = 0.3f;  // sacar otra arma lleva un momento
 }
 
 const char* Match::botWeaponName(int i) const {

@@ -22,6 +22,15 @@ void Atlas::drawCentered(const assets::ui::Rect& r, float cx, float y, float sca
     draw(r, cx - r.w * scale * 0.5f, y, scale, color);
 }
 
+void Atlas::drawClipped(const assets::ui::Rect& r, float x, float y, float x0, float y0, float x1, float y1,
+                        u32 color) const {
+    const float left = x < x0 ? x0 : x, top = y < y0 ? y0 : y;
+    const float right = x + r.w > x1 ? x1 : x + r.w, bottom = y + r.h > y1 ? y1 : y + r.h;
+    if (right <= left || bottom <= top) return;
+    gfx::drawTextureRect(m_texture, r.x + (left - x), r.y + (top - y), right - left, bottom - top, left, top,
+                         right - left, bottom - top, color);
+}
+
 const assets::ui::Rect& buttonRect(Button button) {
     namespace a = assets::ui;
     switch (button) {
