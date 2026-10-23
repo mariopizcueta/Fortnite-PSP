@@ -73,6 +73,13 @@ const u32 kGun = rgba(204, 170, 104);      // tostado del SCAR (Referencias/Arma
 const u32 kGunDark = rgba(52, 50, 46);
 const u32 kHandle = rgba(110, 76, 44);     // mango del pico
 const u32 kPickHead = rgba(120, 150, 200); // cabeza azulada (Recursos/HUD/Pico.png)
+// Escopeta de corredera, subfusil con silenciador y francotirador de cerrojo (Referencias/Armas).
+const u32 kShotgunWood = rgba(150, 96, 52);
+const u32 kShotgunMetal = rgba(70, 74, 80);
+const u32 kSmgBody = rgba(88, 92, 98);
+const u32 kSmgBlack = rgba(34, 34, 36);
+const u32 kSniperWood = rgba(128, 84, 46);
+const u32 kSniperMetal = rgba(46, 48, 52);
 
 // --- Textura de detalle (64x64) ---------------------------------------------------------
 // Se tine con el color de cada vertice: el blanco deja el color tal cual y lo gris lo
@@ -489,6 +496,37 @@ void buildForearm(MeshBuilder& b, const CharacterPalette& p, float side, HeldIte
         b.box({x0 + 0.008f, -0.43f, 0.034f}, {x1 - 0.008f, -0.35f, 0.14f}, kGunDark); // cargador
         b.box({x0 + 0.01f, -0.50f, -0.074f}, {x1 - 0.01f, -0.30f, -0.034f}, kGunDark); // mira
         b.box({x0 + 0.01f, -0.25f, 0.034f}, {x1 - 0.01f, -0.20f, 0.10f}, kGun);       // empunadura
+    } else if (held == HeldItem::Shotgun) {
+        // Corredera: canon largo con el tubo del cargador debajo, guardamanos de madera
+        // (la corredera) y culata de madera.
+        const float x0 = -0.074f, x1 = -0.026f;
+        b.box({x0, -0.50f, -0.032f}, {x1, -0.14f, 0.032f}, kShotgunMetal);                // cajon
+        b.box({-0.060f, -0.98f, -0.030f}, {-0.040f, -0.50f, -0.006f}, kShotgunMetal);      // canon
+        b.box({-0.058f, -0.88f, -0.004f}, {-0.042f, -0.50f, 0.018f}, kSmgBlack);           // tubo
+        b.box({-0.068f, -0.80f, -0.010f}, {-0.032f, -0.58f, 0.036f}, kShotgunWood);        // corredera
+        b.box({x0 + 0.006f, -0.14f, -0.024f}, {x1 - 0.006f, 0.08f, 0.064f}, kShotgunWood); // culata
+        b.box({x0 + 0.01f, -0.23f, 0.032f}, {x1 - 0.01f, -0.17f, 0.10f}, kShotgunWood);    // empunadura
+        b.box({-0.054f, -0.96f, -0.040f}, {-0.046f, -0.93f, -0.030f}, kSmgBlack);          // punto de mira
+    } else if (held == HeldItem::Smg) {
+        // Subfusil compacto: cuerpo corto, silenciador largo y cargador recto.
+        const float x0 = -0.072f, x1 = -0.028f;
+        b.box({x0, -0.44f, -0.030f}, {x1, -0.14f, 0.034f}, kSmgBody);                      // cuerpo
+        b.box({-0.064f, -0.80f, -0.020f}, {-0.036f, -0.44f, 0.010f}, kSmgBlack);           // silenciador
+        b.box({x0 + 0.008f, -0.38f, 0.034f}, {x1 - 0.008f, -0.31f, 0.16f}, kSmgBlack);     // cargador
+        b.box({x0 + 0.01f, -0.23f, 0.034f}, {x1 - 0.01f, -0.18f, 0.10f}, kSmgBlack);       // empunadura
+        b.box({-0.056f, -0.14f, -0.012f}, {-0.044f, 0.02f, 0.020f}, kSmgBlack);            // culata plegada
+        b.box({x0 + 0.01f, -0.38f, -0.052f}, {x1 - 0.01f, -0.26f, -0.030f}, kSmgBlack);    // mira
+    } else if (held == HeldItem::Sniper) {
+        // Cerrojo: culata de madera larga, canon muy largo y mira telescopica grande.
+        const float x0 = -0.074f, x1 = -0.026f;
+        b.box({x0, -0.56f, -0.020f}, {x1, 0.06f, 0.050f}, kSniperWood);                   // madera
+        b.box({x0 + 0.004f, -0.08f, 0.050f}, {x1 - 0.004f, 0.06f, 0.090f}, kSniperWood);   // talon de la culata
+        b.box({-0.058f, -1.12f, -0.026f}, {-0.042f, -0.56f, -0.008f}, kSniperMetal);       // canon
+        b.box({-0.066f, -0.48f, -0.100f}, {-0.034f, -0.22f, -0.060f}, kSniperMetal);       // mira telescopica
+        b.box({-0.072f, -0.52f, -0.108f}, {-0.028f, -0.46f, -0.052f}, kSniperMetal);       // objetivo
+        b.box({-0.066f, -0.38f, -0.060f}, {-0.034f, -0.34f, -0.020f}, kSniperMetal);       // anillas
+        b.box({-0.026f, -0.24f, -0.040f}, {0.004f, -0.20f, -0.022f}, kSniperMetal);        // palanca del cerrojo
+        b.box({x0 + 0.01f, -0.19f, 0.050f}, {x1 - 0.01f, -0.13f, 0.11f}, kSniperWood);     // empunadura
     } else if (held == HeldItem::Pickaxe) {
         b.box({-0.022f, -0.80f, -0.022f}, {0.022f, -0.10f, 0.022f}, kHandle);
         b.box({-0.032f, -0.86f, -0.30f}, {0.032f, -0.75f, 0.13f}, kPickHead);
@@ -650,6 +688,12 @@ bool CharacterModel::buildLod(const CharacterPalette& palette, int sides, Lod& o
     ok &= b.finish(out.parts[kForearmPickaxe]);
     buildForearm(b, palette, 1.0f, HeldItem::Empty);
     ok &= b.finish(out.parts[kForearmEmpty]);
+    buildForearm(b, palette, 1.0f, HeldItem::Shotgun);
+    ok &= b.finish(out.parts[kForearmShotgun]);
+    buildForearm(b, palette, 1.0f, HeldItem::Smg);
+    ok &= b.finish(out.parts[kForearmSmg]);
+    buildForearm(b, palette, 1.0f, HeldItem::Sniper);
+    ok &= b.finish(out.parts[kForearmSniper]);
     tris = withRifle;
     buildThigh(b, palette, -1.0f);
     finish(kThighL);
@@ -769,7 +813,16 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
                            Mat4::rotationZ(side * spread);
         part(s == 0 ? kUpperArmL : kUpperArmR, upper);
         PartId fore = kForearmL;
-        if (s == 1) fore = held == HeldItem::Pickaxe ? kForearmPickaxe : (held == HeldItem::Empty ? kForearmEmpty : kForearmRifle);
+        if (s == 1) {
+            switch (held) {
+                case HeldItem::Rifle: fore = kForearmRifle; break;
+                case HeldItem::Pickaxe: fore = kForearmPickaxe; break;
+                case HeldItem::Empty: fore = kForearmEmpty; break;
+                case HeldItem::Shotgun: fore = kForearmShotgun; break;
+                case HeldItem::Smg: fore = kForearmSmg; break;
+                case HeldItem::Sniper: fore = kForearmSniper; break;
+            }
+        }
         part(fore, upper * Mat4::translation({0.0f, -kElbowDrop, 0.0f}) * Mat4::rotationX(elbow));
     }
     gfx::setModelMatrix(Mat4::identity());

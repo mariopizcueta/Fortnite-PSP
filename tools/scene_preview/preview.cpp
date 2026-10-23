@@ -244,9 +244,9 @@ int main(int argc, char** argv) {
             fog.color = config::kColorSky;
             gfx::begin3D(proj, view, fog);
             w.draw(math3d::Frustum::fromMatrix(proj * view), c.eye, config::kFogEnd);
-            // Jugador apuntando, comando corriendo, naranja con el pico y ranger quieto.
-            const game::HeldItem held[4] = {game::HeldItem::Rifle, game::HeldItem::Rifle, game::HeldItem::Pickaxe,
-                                            game::HeldItem::Rifle};
+            // Jugador apuntando con el fusil y los otros con escopeta, subfusil y francotirador.
+            const game::HeldItem held[4] = {game::HeldItem::Rifle, game::HeldItem::Shotgun, game::HeldItem::Smg,
+                                            game::HeldItem::Sniper};
             for (int i = 0; i < c.count; ++i) {
                 game::CharacterState s;
                 s.position = {c.count == 1 ? 0.15f : -1.65f + 1.1f * i, 0.0f, 30.0f};

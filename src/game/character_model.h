@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "game/character.h"
+#include "game/inventory.h"
 #include "gfx/mesh.h"
 #include "gfx/texture.h"
 #include "world/scene_builder.h"
@@ -67,9 +68,21 @@ struct CharacterAnim {
 };
 
 // Lo que lleva en la mano derecha.
-enum class HeldItem : u8 { Rifle, Pickaxe, Empty };
+// Lo que se lleva en la mano derecha: Rifle = fusil de asalto (SCAR).
+enum class HeldItem : u8 { Rifle, Pickaxe, Empty, Shotgun, Smg, Sniper };
 // Postura del cuerpo: normal, caida libre (tumbado boca abajo, brazos y piernas abiertos)
 // o colgado del ala delta (brazos arriba).
+// Modelo en la mano para cada tipo de arma (los consumibles no se ven en la mano).
+inline HeldItem heldItemFor(ItemType type) {
+    switch (type) {
+        case ItemType::AssaultRifle: return HeldItem::Rifle;
+        case ItemType::Shotgun: return HeldItem::Shotgun;
+        case ItemType::Smg: return HeldItem::Smg;
+        case ItemType::Sniper: return HeldItem::Sniper;
+        default: return HeldItem::Empty;
+    }
+}
+
 enum class BodyPose : u8 { Normal, Skydive, Glide };
 
 class CharacterModel {
@@ -92,6 +105,7 @@ public:
 private:
     enum PartId {
         kBody, kUpperArmL, kUpperArmR, kForearmL, kForearmRifle, kForearmPickaxe, kForearmEmpty,
+        kForearmShotgun, kForearmSmg, kForearmSniper,
         kThighL, kThighR, kShinL, kShinR, kPartCount
     };
     struct Lod {

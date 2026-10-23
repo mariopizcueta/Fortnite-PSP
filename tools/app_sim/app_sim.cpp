@@ -841,6 +841,18 @@ int main(int argc, char** argv) {
     }
     check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
 
+    // Sonidos de mas de 3 s (pocion de escudo, 6.6 s): suenan una vez y acaban (con la
+    // posicion en 16.16 se desbordaba a las 65536 muestras y se repetian sin fin).
+    audio::mixer().stopAll();
+    sim.wait(0.1f);
+    audio::mixer().play(audio::Sfx::DrinkShieldPotion, 1.0f, 0.0f);
+    sim.wait(1.0f);
+    const int playing = audio::mixer().activeVoices();
+    sim.wait(6.5f);
+    printf("  pocion de escudo (6.6 s): voces activas %d al segundo, %d a los 7.5 s\n", playing,
+           audio::mixer().activeVoices());
+    check(playing == 1 && audio::mixer().activeVoices() == 0, "un sonido largo suena una vez y termina (no se repite)");
+
     printf("\n7) Salir desde el lobby\n");
     sim.press(PSP_CTRL_DOWN);
     sim.press(PSP_CTRL_DOWN);

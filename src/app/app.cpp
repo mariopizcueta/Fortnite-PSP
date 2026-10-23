@@ -907,9 +907,8 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
     if (m_match.airState(0) != game::AirState::Bus && !sniperScoped() && visible(player.position)) {
         // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
         const game::Inventory& inv = m_match.inventory();
-        const game::HeldItem held = inv.pickaxe()        ? game::HeldItem::Pickaxe
-                                    : inv.activeWeapon() ? game::HeldItem::Rifle
-                                                         : game::HeldItem::Empty;
+        const game::HeldItem held =
+            inv.pickaxe() ? game::HeldItem::Pickaxe : game::heldItemFor(inv.activeType());
         m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0));
         if (m_propsReady && m_match.airState(0) == game::AirState::Glide) m_props.drawGlider(player.position, player.yaw);
         triangles += m_models[0].triangles();
@@ -925,7 +924,10 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         // Mas alla de kCharacterLodDistance, la version de pocos poligonos.
         const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
-        const game::HeldItem held = b.armed ? game::HeldItem::Rifle : game::HeldItem::Pickaxe;
+        // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
+        const game::HeldItem held = !b.armed ? game::HeldItem::Pickaxe
+                                    : b.weaponType == game::ItemType::None ? game::HeldItem::Rifle
+                                                                           : game::heldItemFor(b.weaponType);
         model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id));
         if (m_propsReady && m_match.airState(id) == game::AirState::Glide) m_props.drawGlider(s.position, s.yaw);
         triangles += far ? model.lowDetailTriangles() : model.triangles();

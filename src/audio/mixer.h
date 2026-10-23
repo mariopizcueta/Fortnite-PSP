@@ -53,11 +53,14 @@ private:
         u8 volume;  // 0..255
         s8 pan;     // -127..127
     };
+    static constexpr int kFracBits = 12;  // parte fraccionaria de la posicion de las voces
     struct Voice {
         const s16* samples = nullptr;
         int count = 0;
-        u32 position = 0;  // 16.16
-        u32 step = 0;      // 16.16
+        // 20.12: con 16.16 la posicion se desbordaba a las 65536 muestras (~3 s a 22 kHz)
+        // y los sonidos largos (victoria, autobus, pocion) volvian a empezar sin fin.
+        u32 position = 0;  // 20.12 (hasta ~47 s a 22050 Hz)
+        u32 step = 0;      // 20.12
         int volumeLeft = 0, volumeRight = 0;  // Q8
         u32 age = 0;
     };

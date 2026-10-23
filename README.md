@@ -3,7 +3,7 @@
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
 **Estado: fase 7 (botín, autobús, ala delta, airdrops, bots que cazan y construyen, tormenta
-que se cierra, suelos, rampas y mirilla de francotirador), v0.9.0.**
+que se cierra, suelos, rampas y mirilla de francotirador), v0.9.1.**
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +63,14 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**v0.9.1:**
+- **Sonidos de más de 3 s:** la victoria, el salto del autobús o la poción de escudo se
+  repetían sin parar. La posición de cada voz del mezclador (16.16 en 32 bits) se desbordaba
+  a las 65536 muestras y volvía a 0. Ahora es 20.12 (hasta ~47 s) y hay una prueba en
+  `app-sim`.
+- **Armas en la mano:** cada tipo tiene su modelo 3D (SCAR, escopeta de corredera, subfusil
+  con silenciador y francotirador con mira); los bots llevan el arma que han cogido.
 
 **Fase 7, tormenta, construcción completa y mirilla (v0.9.0):**
 - **Tormenta que se cierra:** cada 40 s empieza un cierre de 20 s hacia un círculo menor
@@ -351,7 +359,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 84 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 85 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.

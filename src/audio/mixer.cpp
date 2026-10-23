@@ -86,7 +86,7 @@ void Mixer::startVoice(const Command& c) {
     target->samples = clip.samples;
     target->count = clip.count;
     target->position = 0;
-    target->step = static_cast<u32>((static_cast<u64>(clip.rate) << 16) / kOutputRate);
+    target->step = static_cast<u32>((static_cast<u64>(clip.rate) << kFracBits) / kOutputRate);
     // Panorama de potencia aproximadamente constante con dos rectas.
     const int volume = c.volume + 1;  // 1..256
     const int pan = c.pan;            // -127..127
@@ -113,7 +113,7 @@ void Mixer::mix(s16* out, int frames) {
         int left = 0, right = 0;
         for (Voice& v : m_voices) {
             if (!v.samples) continue;
-            const int index = static_cast<int>(v.position >> 16);
+            const int index = static_cast<int>(v.position >> kFracBits);
             if (index >= v.count) {
                 v.samples = nullptr;
                 continue;
