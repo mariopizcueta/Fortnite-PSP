@@ -129,13 +129,14 @@ Desde la fase 5 las dos armas usan la clase `Weapon`, con cargador, cadencia y r
   - **Si es el jugador:** "#1 VICTORIA MAGISTRAL", con sus bajas y el tiempo.
   - **Si el jugador cae antes:** queda en fase `Spectating` ("ELIMINADO - Puesto #N").
     La partida sigue entre bots hasta que queda uno ("Ganador: Bot N").
-- **Nueva partida:** X, al terminar.
+- **Al terminar (fase 6):** pantalla de victoria o de derrota; X vuelve al lobby y □
+  empieza otra partida (docs/PRESENTACION.md).
 - **Registro:** las 4 últimas eliminaciones se muestran durante 6 s.
 
 ## Número de bots y rendimiento
 
 - **Por defecto:** 10 bots (`kDefaultBots`). Capacidad máxima de 30 (`kMaxBots`).
-- **Cambiar el número:** en la portada, con ← →, de 5 en 5. Por encima de 10 aparece un
+- **Cambiar el número:** en el lobby, con ← → sobre JUGAR, de 5 en 5. Por encima de 10 aparece un
   aviso: primero hay que medir.
 - **Medir en la PSP:**
   - **HUD "Depuración"** (SELECT): muestra cada segundo los ms por frame de IA y de

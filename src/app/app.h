@@ -58,6 +58,7 @@ public:
     int testBotSetting() const { return m_botCount; }
     game::Match& testMatch() { return m_match; }
     const world::World& testWorld() const { return m_world; }
+    int testNavWalkable() const { return m_nav.walkableCount(); }
 #endif
 
 private:

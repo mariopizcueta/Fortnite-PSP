@@ -20,7 +20,8 @@ paredes y números grandes) y `src/world/collision.*` (cajas dinámicas).
 | Construcción   | L                         | Centrar la cámara detrás del jugador                      |
 | Siempre        | TRIÁNGULO                 | Cámara libre de depuración (dentro: CUADRADO niebla, START VSync) |
 | Siempre        | SELECT                    | HUD: partida → depuración → controles → oculto            |
-| Fin de partida | X                         | Jugar otra vez                                            |
+| Siempre        | START                     | Pausa                                                     |
+| Resultados     | X / CUADRADO / CÍRCULO    | Lobby / otra partida / seguir mirando (solo en derrota)   |
 | Siempre        | L + R + START (1 s)       | Salir al XMB                                              |
 
 **Cambios respecto a la fase 4:**
@@ -81,14 +82,15 @@ paredes y números grandes) y `src/world/collision.*` (cajas dinámicas).
 **HUD de combate:**
 - **Retícula:** cruz con hueco y punto central, roja si hay objetivo.
 - **Impacto:** marcador en X al acertar.
-- **Panel de munición:** "SCAR Legendaria", balas del cargador en grande y "/ reserva".
-  Durante la recarga muestra una barra dorada y "RECARGA"; "SIN BALAS" si no queda nada.
+- **Munición (fase 6, como `Referencias/Referencia gameplay.png`):** "30 | 120" en grande
+  abajo a la izquierda; durante la recarga, barra dorada y "RECARGANDO"; "SIN BALAS" si no
+  queda nada. La SCAR ocupa la ranura dorada de la fila de armas. Ver docs/PRESENTACION.md.
 
 ## Construcción
 
 **Pared:**
 - **Medidas:** 4 m de ancho, 3 m de alto y 0,25 m de grosor, de madera marrón (textura
-  procedural de tablones).
+  `Recursos/Texturas/15_madera_pared.png`).
 - **Posición:** se ajusta a una rejilla de 4 m. Va sobre la primera línea de la rejilla
   que quede al menos 1 m por delante, perpendicular a la dirección cardinal más cercana a
   la de la cámara.

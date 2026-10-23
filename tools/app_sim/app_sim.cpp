@@ -487,12 +487,14 @@ int main(int argc, char** argv) {
 
     printf("\n6) Estabilidad: 8 partidas mas alternando victoria, derrota, reinicio y abandono\n");
     unsigned heapFirst = 0, heapLast = 0, heapMax = 0;
-    bool flowOk = true;
+    bool flowOk = true, navOk = true;
+    const int walkable = sim.app().testNavWalkable();
     for (int round = 0; round < 8; ++round) {
         sim.wait(0.3f);
         sim.press(PSP_CTRL_CROSS);  // JUGAR
         flowOk &= sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
         flowOk &= match.aliveCount() == 11 && sim.app().testWorld().collision().dynamicCount() == 0;
+        navOk &= sim.app().testNavWalkable() == walkable;
         // Algo de construccion y disparos en cada partida.
         sim.press(PSP_CTRL_CIRCLE);
         for (int w = 0; w < 3; ++w) {
@@ -541,6 +543,7 @@ int main(int argc, char** argv) {
                static_cast<double>(sim.seconds()));
     }
     check(flowOk, "todas las transiciones funcionan en todas las rondas");
+    check(navOk, "cada partida empieza con la rejilla de navegacion intacta (las paredes anteriores se retiran)");
     check(heapLast <= heapFirst + 64 * 1024 && heapMax <= heapFirst + 256 * 1024,
           "la memoria no crece entre partidas (tolerancia 64 KB)");
     check(audio::mixer().droppedCommands() == 0, "no se ha perdido ningun sonido por la cola llena");

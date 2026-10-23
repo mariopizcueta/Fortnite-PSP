@@ -9,7 +9,6 @@
     extern "C" const unsigned char asset_##name##_end[];
 
 FORTNITEPSP_ASSET(loadscreen_png)
-FORTNITEPSP_ASSET(logo_png)
 FORTNITEPSP_ASSET(login_png)
 FORTNITEPSP_ASSET(ui_atlas_png)
 FORTNITEPSP_ASSET(textures_png)
@@ -38,8 +37,6 @@ struct Blob {
 
 // Pantalla de carga de partida (Recursos/Loadscreen - match.png, 480x272).
 FORTNITEPSP_BLOB(loadscreenPng, loadscreen_png)
-// Logotipo de Recursos/fortnite_PNG25.png: 256 px de ancho, RGBA.
-FORTNITEPSP_BLOB(logoPng, logo_png)
 // Inicio de sesion (Recursos/loginscreen.png, 480x272).
 FORTNITEPSP_BLOB(loginPng, login_png)
 // Atlas de interfaz: iconos, rotulos y banners (rectangulos en assets/ui_atlas.h).

@@ -13,7 +13,6 @@ asset_\name\()_end:
 .endm
 
     ASSET loadscreen_png, "assets/images/loadscreen.png"
-    ASSET logo_png, "assets/images/logo.png"
     ASSET login_png, "assets/images/login.png"
     ASSET ui_atlas_png, "assets/images/ui_atlas.png"
     ASSET textures_png, "assets/images/textures.png"

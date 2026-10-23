@@ -30,7 +30,6 @@ FONT = "/System/Library/Fonts/Supplemental/Impact.ttf"  # la mas parecida a la d
 
 SCREEN_SIZE = (480, 272)  # resolucion nativa de la PSP
 ICON0_SIZE = (144, 80)    # icono del XMB
-LOGO_WIDTH = 256
 
 
 def cover(img, size):
@@ -68,9 +67,6 @@ def screens():
     crop = match.crop((int(w * 0.22), int(h * 0.02), int(w * 0.78), int(h * 0.98)))
     save(cover(crop, ICON0_SIZE), ASSETS / "pbp" / "ICON0.PNG")
 
-    logo = alpha_crop(Image.open(RES / "fortnite_PNG25.png").convert("RGBA"))
-    height = round(logo.height * LOGO_WIDTH / logo.width)
-    save(logo.resize((LOGO_WIDTH, height), Image.LANCZOS), ASSETS / "images" / "logo.png")
 
 
 # --- Atlas de interfaz ------------------------------------------------------------------------

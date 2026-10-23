@@ -30,7 +30,8 @@ Las coordenadas y los ejes son los de [MUNDO.md](MUNDO.md): 1 unidad = 1 m, +Y a
 | CÍRCULO                    | Modo construcción (R coloca paredes)                        |
 | TRIÁNGULO                  | Cámara libre de depuración (dentro: CUADRADO niebla, START VSync) |
 | SELECT                     | HUD: partida → depuración → controles → oculto              |
-| X (partida terminada)      | Jugar otra partida                                          |
+| START                      | Pausa (CONTINUAR / VOLVER AL LOBBY)                         |
+| Resultados                 | X lobby, CUADRADO otra partida, CÍRCULO seguir mirando (derrota) |
 | L + R + START (1 s)        | Salir                                                       |
 
 El stick solo mueve al jugador; la cámara se maneja con la cruceta y los gatillos
@@ -152,7 +153,7 @@ casco).
   la cadera.
 - **Brazos:** piel, brazalete rojo en el brazo derecho y guantes oscuros. El derecho
   lleva un rifle de prismas del color tostado de `Referencias/Armas`.
-- **Piernas:** pantalón de camuflaje (textura procedural 32×32), correas oscuras y botas
+- **Piernas:** pantalón de camuflaje (textura `10_camuflaje.png` de 32×32), correas oscuras y botas
   con rodilleras oliva.
 
 Hay cinco piezas: cuerpo, dos piernas y dos brazos. Piernas y brazos giran sobre la
