@@ -34,6 +34,7 @@ OBJS = src/main.o \
        src/app/app_menus.o \
        src/app/build_visuals.o \
        src/app/lobby_scene.o \
+       src/app/prop_visuals.o \
        src/app/ui.o \
        src/audio/audio_system.o \
        src/audio/mixer.o \
@@ -45,6 +46,9 @@ OBJS = src/main.o \
        src/game/character_model.o \
        src/game/inventory.o \
        src/game/match.o \
+       src/game/match_air.o \
+       src/game/match_bots.o \
+       src/game/match_loot.o \
        src/game/nav_grid.o \
        src/game/player.o \
        src/game/structures.o \

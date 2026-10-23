@@ -38,7 +38,7 @@ struct PlayerCommands {
     bool buildMode = false;  // modo construccion activo (CIRCULO)
     bool placeWall = false;  // R pulsado en modo construccion
     bool removeWall = false; // CUADRADO pulsado en modo construccion
-    bool reload = false;     // CUADRADO pulsado en modo combate
+    bool reload = false;     // CUADRADO pulsado en modo combate: abrir / recoger o recargar
     int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
     bool useItem = false;    // R pulsado con un consumible en la mano
@@ -66,6 +66,48 @@ enum class GameEventType : u8 {
     UseStarted,    // entity = 0, other = ItemType (empieza a usarse un consumible)
     UseCanceled,   // entity = 0, other = ItemType (se interrumpe sin gastarlo)
     StormEnter,    // entity = quien entra en la tormenta del limite del mapa
+    BusJump,       // entity = quien salta del autobus
+    GliderOpen,    // entity = quien abre el ala delta
+    Landed,        // entity = quien llega al suelo
+    ContainerOpened,  // entity = quien lo abre, other = ContainerKind
+    PickedUp,      // entity = quien recoge, other = ItemType (o -1: municion)
+    AirdropIncoming,  // position = donde caera
+    AirdropLanded,
+};
+
+// Fase de la caida desde el autobus de cada personaje.
+enum class AirState : u8 { Bus, Freefall, Glide, Ground };
+const char* airStateName(AirState state);
+
+// --- Botin (docs/BOTIN.md) ----------------------------------------------------------------
+
+// Objeto en el suelo: un arma o consumible (con su rareza) o municion.
+enum class PickupKind : u8 { Item, Ammo };
+struct Pickup {
+    bool active = false;
+    PickupKind kind = PickupKind::Item;
+    ItemType item = ItemType::None;
+    Rarity rarity = Rarity::Common;
+    AmmoType ammo = AmmoType::Medium;
+    int count = 0;
+    math3d::Vec3 position;
+    int claimedBy = -1;  // bot que va a por el
+};
+
+enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop };
+struct Container {
+    ContainerKind kind = ContainerKind::Chest;
+    math3d::Vec3 position;
+    float yaw = 0.0f;
+    bool opened = false;
+    bool landed = true;   // airdrop: false mientras baja con el globo
+    int claimedBy = -1;
+};
+
+// Lo que hay al alcance para abrir o recoger con CUADRADO.
+struct Interactable {
+    enum class Kind : u8 { None, Pickup, Container } kind = Kind::None;
+    int index = -1;
 };
 
 // "Atacante" del dano de la tormenta (registro de eliminaciones, quien elimino al jugador).
@@ -175,6 +217,8 @@ public:
     bool buildMode() const { return m_buildMode; }
     // Arma en la mano o, si se lleva otra cosa, la primera del inventario (para el HUD).
     const Weapon& playerWeapon() const;
+    // Municion de reserva del arma que se lleva (o de la primera del inventario).
+    int playerReserve() const;
     const Inventory& inventory() const { return m_inventory; }
     const Materials& materials() const { return m_materials; }
     // Consumible en uso: progreso 0..1 (o -1 si no se esta usando nada) y que objeto es.
@@ -186,6 +230,32 @@ public:
     int harvestLeft(int index) const { return m_harvestLeft[index]; }
     // Objetos que se pueden picar (los del mundo). Se llama una vez; start() repone el material.
     void setHarvestables(const std::vector<world::Harvestable>* list);
+
+    // Autobus y caida.
+    AirState airState(int id) const { return m_air[id]; }
+    const math3d::Vec3& busPosition() const { return m_config.busPosition; }
+    float busTimeLeft() const { return m_config.busSeconds - m_time; }
+    // Metros sobre el suelo (caida libre: para el HUD).
+    float heightAboveGround(int id) const;
+
+    // Botin.
+    const std::vector<Pickup>& pickups() const { return m_pickups; }
+    const std::vector<Container>& containers() const { return m_containers; }
+    // Lo que el jugador abriria / recogeria ahora con CUADRADO.
+    Interactable playerInteractable() const { return interactableFor(0); }
+    Interactable interactableFor(int id) const;
+    // Abre o recoge (pruebas y bots; el jugador lo hace con CUADRADO).
+    bool interact(int id, const Interactable& target);
+    // Da un objeto al jugador (pruebas; en partida, el botin).
+    int giveItem(ItemType type, int count, Rarity rarity = Rarity::Common) {
+        return m_inventory.add(type, rarity, count);
+    }
+    void giveAmmo(AmmoType type, int n) { m_inventory.addAmmo(type, n); }
+    // Deja un objeto en el suelo (pruebas).
+    int dropPickup(const Pickup& pickup);
+    int addContainer(ContainerKind kind, const math3d::Vec3& position, float yaw);
+    // Arma del bot i (para el HUD de depuracion).
+    const char* botWeaponName(int i) const;
     const StructureSystem& structures() const { return m_structures; }
     // Donde iria una pared ahora mismo (para dibujar la pared fantasma).
     WallPlacement planWall(float yaw) const;
@@ -214,7 +284,11 @@ public:
     ShotResult fireShot(int shooter, const math3d::Vec3& origin, const math3d::Vec3& direction,
                         float range, float damage);
     // Disparo del jugador: rayo desde la camara por la mira, comprobado desde el arma.
-    ShotResult playerShot(const PlayerAim& aim, float damage, float range);
+    // `spreadDegrees`: dispersion aplicada tras la ayuda de punteria; `weapon`: caida del
+    // dano con la distancia y tipo para el sonido (nullptr: sin caida). `emitShot`: false
+    // en los perdigones 2..N de la escopeta (un solo sonido).
+    ShotResult playerShot(const PlayerAim& aim, float damage, float range, float spreadDegrees = 0.0f,
+                          const WeaponConfig* weapon = nullptr, bool emitShot = true, int weaponType = -1);
     // `ignoreShield`: el dano va directo a la vida (la tormenta, como en Fortnite).
     void applyDamage(int victim, float amount, int attacker, bool ignoreShield = false);
     bool lineOfSight(const math3d::Vec3& from, const math3d::Vec3& to) const;
@@ -231,8 +305,6 @@ public:
     // Pico y consumibles (publico para las pruebas): como si el jugador pulsara R.
     void swingPickaxe();
     bool startUse();
-    // Da objetos al jugador (pruebas; mas adelante, el botin).
-    int giveItem(ItemType type, int count) { return m_inventory.add(type, count, &m_config.playerWeapon); }
     void giveMaterials(world::Resource r, int n) { m_materials.add(r, n); }
 
     // Construccion (publico para las pruebas): coloca / quita como haria el jugador.
@@ -243,7 +315,35 @@ public:
 
 private:
     CharacterBody& mutableBody(int id);
-    ShotResult resolveShot(int shooter, const math3d::Vec3& origin, const math3d::Vec3& end, float damage);
+    ShotResult resolveShot(int shooter, const math3d::Vec3& origin, const math3d::Vec3& end, float damage,
+                           const WeaponConfig* weapon = nullptr, bool emitShot = true, int weaponType = -1);
+    void fireWeapon(int shooter, const math3d::Vec3& origin, const math3d::Vec3& direction,
+                    const WeaponConfig& weapon, float spreadDegrees, float damageScale, int weaponType);
+    void playerFire(Weapon& weapon);
+    float playerSpread(const WeaponConfig& weapon) const;
+    // Autobus, caida y aterrizaje (match_air.cpp).
+    void startBus();
+    MoveIntent airIntent(int id, const math3d::Vec3& wish, bool openGlider);
+    void updateAirState(int id, bool jump);
+    void chooseLanding(Bot& bot);
+    // Botin (match_loot.cpp).
+    void spawnLoot();
+    math3d::Vec3 lootSpot(float minSpacing, bool nearPoi);
+    void spawnContainerLoot(int container, int opener);
+    void dropAround(const math3d::Vec3& center, const Pickup& pickup, int index, int total);
+    void updateAirdrops(float dt);
+    void autoPickupAmmo(int id);
+    bool pickUp(int id, int pickup);
+    Pickup randomWeaponPickup(bool chest);
+    Pickup randomConsumablePickup();
+    Rarity randomRarity(bool chest);
+    void dropBotWeapon(int bot);
+    // IA de botin, caza y construccion (match_bots.cpp).
+    bool findLoot(int index, float maxDistance);
+    void botTakeLoot(int index);
+    void botBuildCover(int index, int attacker);
+    void hearShot(int shooter, const math3d::Vec3& origin);
+    float botAttackRange(const Bot& bot) const;
     void damageWall(int wall, float amount, int attacker, const math3d::Vec3& point);
     void addDamageNumber(const math3d::Vec3& position, float amount, bool structure);
     void onStructuresChanged();
@@ -324,6 +424,11 @@ private:
     MatchStats m_stats;
     bool m_inStorm[kMaxBots + 1] = {};
     float m_stormTimer[kMaxBots + 1] = {};
+    AirState m_air[kMaxBots + 1] = {};
+    std::vector<Pickup> m_pickups;
+    std::vector<Container> m_containers;
+    int m_nextAirdrop = 0;
+    std::vector<math3d::Vec3> m_lootSpots;  // usados al repartir (separacion minima)
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
 };

@@ -15,6 +15,7 @@
 #include <math.h>
 #include <stdio.h>
 
+#include <string>
 #include <vector>
 
 #include "game/fixed_timestep.h"
@@ -128,7 +129,7 @@ void testMapCollisions(world::World& world) {
 
 void testShots(world::World& world, game::NavGrid& nav) {
     printf("\n3) Disparos (raycast) y obstaculos\n");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -163,7 +164,7 @@ void testShots(world::World& world, game::NavGrid& nav) {
     // jugador), mira desviada 4 grados del bot, R mantenido 0.5 s (cadencia 0.22 s).
     auto playerFires = [&](const Vec3& player, const Vec3& bot, float offsetDegrees) {
         Match fresh;
-        MatchConfig one;
+        MatchConfig one = MatchConfig::classic();
         one.botCount = 1;
         fresh.start(one, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
         fresh.teleport(0, player, 0.0f);
@@ -193,7 +194,7 @@ void testShots(world::World& world, game::NavGrid& nav) {
 
 void testEliminations(world::World& world, game::NavGrid& nav) {
     printf("\n4) Vida, eliminaciones, contador de vivos y victoria\n");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 5;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -233,6 +234,8 @@ struct SimContext {
     const world::CollisionWorld* world;
     int hits = 0;
     int hitsThroughWalls = 0;
+    game::ShotRecord firstBad;  // primer impacto que atraviesa algo (diagnostico)
+    world::RayHit badHit;
 };
 
 void onShot(void* ctx, const game::ShotRecord& shot) {
@@ -244,7 +247,13 @@ void onShot(void* ctx, const game::ShotRecord& shot) {
     const float len = math3d::length(d);
     if (len < 0.05f) return;
     const Vec3 end = shot.origin + d * ((len - 0.02f) / len);
-    if (c.world->raycast(shot.origin, end, world::kBlocksShots, nullptr)) ++c.hitsThroughWalls;
+    world::RayHit hit;
+    if (c.world->raycast(shot.origin, end, world::kBlocksShots, &hit)) {
+        if (++c.hitsThroughWalls == 1) {
+            c.firstBad = shot;
+            c.badHit = hit;
+        }
+    }
 }
 
 struct SimResult {
@@ -260,10 +269,16 @@ struct SimResult {
     double physicsMicrosPerStep = 0.0;
     game::MatchStats stats;
     SimContext shots;
+    int armedAt60 = 0;       // bots con arma (o ya eliminados) al minuto de partida
+    int chestsOpened = 0;
+    int airdropsOpened = 0;
 };
 
-SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, float maxSeconds) {
-    MatchConfig cfg;
+SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, float maxSeconds,
+                   bool realRules = false) {
+    // realRules: las reglas de la fase 7 (autobus, botin, bots que buscan armas, cazan y
+    // construyen); si no, las de las fases 4-6.
+    MatchConfig cfg = realRules ? MatchConfig{} : MatchConfig::classic();
     cfg.botCount = bots;
     cfg.seed = seed;
     Match m;
@@ -301,8 +316,9 @@ SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, 
                 lastSample[i + 1] = p;
                 if (b.state == game::BotState::Eliminated) continue;
                 meters += moved;
-                const bool wantsToMove = b.state == game::BotState::Travel ||
-                                         (b.state == game::BotState::Attack && b.pathIndex < b.pathLength);
+                const bool wantsToMove = m.airState(i + 1) == game::AirState::Ground &&
+                                         (b.state == game::BotState::Travel || b.state == game::BotState::Loot ||
+                                          (b.state == game::BotState::Attack && b.pathIndex < b.pathLength));
                 if (!wantsToMove) {
                     stuckRun[i + 1] = 0;
                     continue;
@@ -316,10 +332,16 @@ SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, 
                 }
             }
         }
+        if (step == 60 * 60) {
+            for (int i = 0; i < bots; ++i) r.armedAt60 += m.bot(i).armed || !m.alive(i + 1) ? 1 : 0;
+        }
         if (m.phase() == game::MatchPhase::Finished) {
             r.finished = true;
             break;
         }
+    }
+    for (const game::Container& c : m.containers()) {
+        if (c.opened) ++(c.kind == game::ContainerKind::Airdrop ? r.airdropsOpened : r.chestsOpened);
     }
     r.duration = m.elapsed();
     r.winner = m.winner();
@@ -464,7 +486,7 @@ Vec3 cameraEyeBehind(const Vec3& player) { return player + Vec3{0.0f, 2.89f, 4.8
 
 void testCameraShots(world::World& world, game::NavGrid& nav) {
     printf("\n7) Disparo desde la camara (raycast por la mira)\n");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 2;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -493,7 +515,7 @@ void testCameraShots(world::World& world, game::NavGrid& nav) {
 
     // La camara ve por encima de un murete de 1.6 m, pero el arma (a la altura del
     // pecho) no: el disparo termina en el murete.
-    MatchConfig one;
+    MatchConfig one = MatchConfig::classic();
     one.botCount = 1;
     m.start(one, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
     m.teleport(0, player, 0.0f);
@@ -538,7 +560,7 @@ game::CharacterState walkOn(const world::World& world, Vec3 start, float yaw, fl
 void testBuilding(world::World& world, game::NavGrid& nav) {
     printf("\n8) Construccion de paredes\n");
     const float pi = math3d::kPi;
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     cfg.build.maxWalls = 3;
     Match m;
@@ -638,7 +660,7 @@ bool crossesBarrier(const Vec3& p, const Vec3& q) {
 
 void testBotsRespectWalls(world::World& world, game::NavGrid& nav) {
     printf("\n9) La IA respeta las paredes construidas\n");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -692,7 +714,7 @@ void testBotsRespectWalls(world::World& world, game::NavGrid& nav) {
 
 void testFort(world::World& world, game::NavGrid& nav) {
     printf("\n10) Combate: un bot dispara al jugador y este se encierra con paredes\n");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     cfg.seed = 3;
     cfg.startMaterials[0] = 100;  // 4 paredes de 10 de madera
@@ -745,7 +767,7 @@ void testFort(world::World& world, game::NavGrid& nav) {
 void testEvents(world::World& world, game::NavGrid& nav) {
     printf("\n11) Sucesos de la partida (de ellos salen los sonidos y las reacciones de las animaciones)\n");
     using game::GameEventType;
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 2;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -833,7 +855,7 @@ int countEvents(const Match& m, u32 from, game::GameEventType type) {
 void testInventory(world::World& world, game::NavGrid& nav) {
     printf("\n12) Inventario, escudo, curas, pico y materiales\n");
     using game::ItemType;
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     Match m;
     m.setHarvestables(&world.harvestables());
@@ -850,7 +872,7 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     }
     printf("  objetos recolectables en el mapa: %d (%d arboles, %d rocas, %d de metal)\n",
            static_cast<int>(world.harvestables().size()), trees, rocks, metal);
-    check(inv.slot(0).type == ItemType::Scar && inv.selected() == 0 && inv.slot(1).type == ItemType::Bandage &&
+    check(inv.slot(0).type == ItemType::AssaultRifle && inv.selected() == 0 && inv.slot(1).type == ItemType::Bandage &&
               inv.slot(1).count == 5 && inv.slot(2).type == ItemType::SmallShield && inv.slot(2).count == 3 &&
               m.materials().get(world::Resource::Wood) == 30,
           "inventario inicial: SCAR en la mano, 5 vendas, 3 minipociones y 30 de madera");
@@ -979,7 +1001,7 @@ void testStorm(world::World& world, game::NavGrid& nav) {
     check(world::stormDepth(88.0f, 0.0f) == 0.0f && world::stormDepth(100.0f, 0.0f) == 12.0f &&
               world::stormDepth(70.0f, 70.0f) < 0.0f && world::stormDepth(88.0f, 88.0f) > 0.0f,
           "zona segura: cuadrado de 176 m con esquinas redondeadas (tormenta a partir de 88 m)");
-    MatchConfig cfg;
+    MatchConfig cfg = MatchConfig::classic();
     cfg.botCount = 1;
     Match m;
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
@@ -1001,7 +1023,7 @@ void testStorm(world::World& world, game::NavGrid& nav) {
 
     m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
     m.teleport(1, {0.0f, 0.0f, -60.0f}, 0.0f);
-    m.giveItem(game::ItemType::ShieldPotion, 1);
+    m.giveItem(game::ItemType::ShieldPotion, 1, game::Rarity::Rare);
     m.teleport(0, {80.0f, 0.0f, 0.0f}, 0.0f);
     runSteps(m, 180);
     check(m.body(0).state().health == 100.0f && !m.inStorm(0), "a 8 m del borde no hay dano");
@@ -1052,6 +1074,309 @@ void testStorm(world::World& world, game::NavGrid& nav) {
     check(m.body(0).state().position.x <= world::kWorldExtent, "al final del suelo exterior (144 m) hay un tope");
 }
 
+// --- 14) Botin, armas, autobus y bots de la fase 7 ---------------------------------------------
+
+int countActive(const Match& m, game::ItemType type) {
+    int n = 0;
+    for (const game::Pickup& p : m.pickups()) n += p.active && p.kind == game::PickupKind::Item && p.item == type ? 1 : 0;
+    return n;
+}
+
+void testLoot(world::World& world, game::NavGrid& nav) {
+    printf("\n14) Armas, botin, autobus y bots (fase 7)\n");
+    using game::ItemType;
+    using game::Rarity;
+    // Catalogo de armas.
+    check(game::weaponConfig(ItemType::AssaultRifle, Rarity::Common).damage == 30.0f &&
+              game::weaponConfig(ItemType::AssaultRifle, Rarity::Legendary).damage == 36.0f &&
+              std::string(game::weaponConfig(ItemType::AssaultRifle, Rarity::Epic).name) == "SCAR" &&
+              game::weaponConfig(ItemType::Shotgun, Rarity::Rare).pellets == 10 &&
+              game::weaponConfig(ItemType::Sniper, Rarity::Legendary).damage == 116.0f &&
+              !game::weaponHasRarity(ItemType::Sniper, Rarity::Common) &&
+              !game::weaponHasRarity(ItemType::Shotgun, Rarity::Common),
+          "armas con dano por rareza (fusil 30-36, escopeta de 10 perdigones, francotirador 105-116)");
+
+    // Reparto del botin.
+    MatchConfig cfg;  // reglas de la fase 7
+    cfg.botCount = 4;
+    cfg.startInBus = false;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    int chests = 0, boxes = 0, unsafe = 0;
+    for (const game::Container& c : m.containers()) {
+        chests += c.kind == game::ContainerKind::Chest ? 1 : 0;
+        boxes += c.kind == game::ContainerKind::AmmoBox ? 1 : 0;
+        unsafe += world::stormDepth(c.position.x, c.position.z) > -5.0f ? 1 : 0;
+    }
+    int weapons = 0, items = 0;
+    for (const game::Pickup& p : m.pickups()) {
+        if (!p.active) continue;
+        ++items;
+        weapons += game::isWeapon(p.item) && p.kind == game::PickupKind::Item ? 1 : 0;
+        unsafe += world::stormDepth(p.position.x, p.position.z) > -5.0f ? 1 : 0;
+    }
+    printf("  reparto: %d cofres, %d cajas de municion, %d objetos en el suelo (%d armas)\n", chests, boxes, items, weapons);
+    check(chests == cfg.chestCount && boxes == cfg.ammoBoxCount && items >= cfg.floorLootCount && unsafe == 0,
+          "cofres, cajas de municion y botin de suelo repartidos fuera de la tormenta");
+    check(m.inventory().pickaxe() && m.inventory().slot(0).type == ItemType::None,
+          "se empieza solo con el pico (como en Fortnite)");
+
+    // Abrir un cofre con CUADRADO y recoger lo que suelta.
+    const game::Container chest = m.containers()[0];
+    const Vec3 front = chest.position + game::forwardFromYaw(chest.yaw) * 1.3f;
+    m.teleport(0, front, game::yawTowards(front, chest.position));
+    for (int b = 1; b <= 4; ++b) m.teleport(b, {-80.0f, 0.0f, 80.0f - b * 3.0f}, 0.0f);
+    game::PlayerInput look;
+    look.cameraYaw = game::yawTowards(front, chest.position);
+    m.setPlayerInput(look, game::PlayerAim{});
+    const game::Interactable target = m.playerInteractable();
+    u32 cursor = m.eventCount();
+    game::PlayerCommands square;
+    square.reload = true;  // CUADRADO
+    m.setPlayerInput(look, game::PlayerAim{}, square);
+    m.step(game::FixedTimestep::kStep);
+    check(target.kind == game::Interactable::Kind::Container && m.containers()[0].opened &&
+              countEvents(m, cursor, game::GameEventType::ContainerOpened) == 1,
+          "CUADRADO junto a un cofre lo abre");
+    int picked = 0;
+    for (int k = 0; k < 6; ++k) {
+        m.setPlayerInput(look, game::PlayerAim{}, square);
+        m.step(game::FixedTimestep::kStep);
+        m.setPlayerInput(look, game::PlayerAim{});
+        m.step(game::FixedTimestep::kStep);
+    }
+    for (int i = 0; i < game::Inventory::kSlots; ++i) picked += game::isWeapon(m.inventory().slot(i).type) ? 1 : 0;
+    // La municion se recoge sola al pasar por encima.
+    for (const game::Pickup& p : m.pickups()) {
+        if (p.active && p.kind == game::PickupKind::Ammo && distXZ(p.position, chest.position) < 2.0f) {
+            m.teleport(0, p.position, look.cameraYaw);
+            m.setPlayerInput(look, game::PlayerAim{});
+            m.step(game::FixedTimestep::kStep);
+        }
+    }
+    const game::Weapon& got = m.playerWeapon();
+    printf("  del cofre: %s %s, municion de reserva %d\n", got.config().name, got.config().rarity, m.playerReserve());
+    check(picked == 1 && m.playerReserve() > 0, "el cofre suelta un arma y su municion; CUADRADO la recoge y la municion se coge sola");
+
+    // Inventario lleno: se cambia por lo de la ranura seleccionada (que cae al suelo).
+    m.giveItem(ItemType::Bandage, 5);
+    m.giveItem(ItemType::SmallShield, 3, Rarity::Uncommon);
+    m.giveItem(ItemType::Medkit, 1, Rarity::Uncommon);
+    m.giveItem(ItemType::ShieldPotion, 1, Rarity::Rare);
+    game::Pickup sniper;
+    sniper.kind = game::PickupKind::Item;
+    sniper.item = ItemType::Sniper;
+    sniper.rarity = Rarity::Legendary;
+    sniper.count = 1;
+    sniper.position = m.body(0).state().position + game::forwardFromYaw(look.cameraYaw) * 0.8f;
+    m.dropPickup(sniper);
+    const ItemType held = m.inventory().slot(m.inventory().selected()).type;
+    const int before = countActive(m, held);
+    m.setPlayerInput(look, game::PlayerAim{}, square);
+    m.step(game::FixedTimestep::kStep);
+    check(m.inventory().full() && m.inventory().slot(m.inventory().selected()).type == ItemType::Sniper &&
+              countActive(m, held) == before + 1,
+          "con el inventario lleno, recoger cambia lo que se lleva en la mano (que queda en el suelo)");
+
+    // Escopeta: dano segun la distancia.
+    MatchConfig dummy = MatchConfig::classic();
+    dummy.botCount = 1;
+    dummy.startItems[0] = {ItemType::Shotgun, 1, Rarity::Legendary};
+    dummy.startAmmo[static_cast<int>(game::AmmoType::Shells)] = 20;
+    dummy.weaponSpread = true;
+    dummy.aimAssistDegrees = 0.0f;
+    float closeDamage = 0.0f, farDamage = 0.0f;
+    for (float distance : {3.0f, 20.0f}) {
+        Match s;
+        s.start(dummy, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        const Vec3 p{70.0f, 0.0f, 25.0f};
+        s.teleport(0, p, 0.0f);
+        s.teleport(1, {70.0f, 0.0f, 25.0f - distance}, 0.0f);
+        game::PlayerAim aim;
+        aim.eye = s.chestOf(0) + Vec3{0.0f, 0.0f, 0.3f};
+        aim.direction = math3d::normalize(s.chestOf(1) - aim.eye);
+        aim.fire = true;
+        game::PlayerInput in;
+        in.cameraYaw = 0.0f;
+        s.setPlayerInput(in, aim);
+        s.step(game::FixedTimestep::kStep);
+        (distance < 5.0f ? closeDamage : farDamage) = 100.0f - s.body(1).state().health;
+    }
+    printf("  escopeta legendaria (105): %.0f de dano a 3 m, %.0f a 20 m\n", static_cast<double>(closeDamage),
+           static_cast<double>(farDamage));
+    check(closeDamage >= 70.0f && farDamage < closeDamage * 0.5f, "la escopeta pega fuerte de cerca y poco de lejos");
+
+    // Dispersion: a 30 m, disparando sin apuntar se fallan balas; apuntando quieto, el
+    // primer disparo (cada 0.5 s) va exacto.
+    MatchConfig spreadCfg = MatchConfig::classic();
+    spreadCfg.botCount = 1;
+    spreadCfg.weaponSpread = true;
+    spreadCfg.aimAssistDegrees = 0.0f;
+    spreadCfg.invulnerablePlayer = true;
+    int hipHits = 0, aimHits = 0;
+    for (int mode = 0; mode < 2; ++mode) {
+        for (int shot = 0; shot < 10; ++shot) {
+            // Una partida por disparo: el bot no muere y cada disparo es el primero.
+            Match s;
+            spreadCfg.seed = 100 + static_cast<u32>(shot);
+            s.start(spreadCfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+            s.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+            s.teleport(1, {70.0f, 0.0f, -5.0f}, 0.0f);
+            const float hp = s.body(1).state().health;
+            game::PlayerAim aim;
+            aim.eye = s.chestOf(0) + Vec3{0.0f, 0.0f, 0.3f};
+            aim.direction = math3d::normalize(s.chestOf(1) - aim.eye);
+            aim.fire = true;
+            game::PlayerInput in;
+            in.aiming = mode == 1;
+            s.setPlayerInput(in, aim);
+            s.step(game::FixedTimestep::kStep);
+            (mode == 0 ? hipHits : aimHits) += s.body(1).state().health < hp ? 1 : 0;
+        }
+    }
+    printf("  fusil a 30 m: %d/10 impactos sin apuntar, %d apuntando quieto\n", hipHits, aimHits);
+    check(hipHits < 10 && aimHits >= 9, "sin apuntar hay dispersion; apuntando quieto, el primer disparo es preciso");
+
+    // Autobus y caida.
+    MatchConfig busCfg;
+    busCfg.botCount = 6;
+    Match bus;
+    bus.start(busCfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    bool allInBus = true;
+    for (int id = 0; id <= 6; ++id) allInBus &= bus.airState(id) == game::AirState::Bus;
+    bus.setPlayerInput(game::PlayerInput{}, game::PlayerAim{});
+    for (int k = 0; k < 60; ++k) bus.step(game::FixedTimestep::kStep);
+    check(allInBus && bus.airState(0) == game::AirState::Bus &&
+              math3d::length(bus.body(0).state().position - busCfg.busPosition) < 0.01f,
+          "todos empiezan en el autobus, quieto en el cielo");
+    cursor = bus.eventCount();
+    game::PlayerInput jump;
+    jump.jumpPressed = true;
+    jump.moveY = -1.0f;
+    bus.setPlayerInput(jump, game::PlayerAim{});
+    bus.step(game::FixedTimestep::kStep);
+    const bool jumped = countEvents(bus, cursor, game::GameEventType::BusJump) >= 1 && bus.airState(0) == game::AirState::Freefall;
+    const float jumpedAt = bus.elapsed();
+    float glideAt = -1.0f, landedAt = -1.0f, glideHeight = 0.0f;
+    for (int k = 0; k < 60 * 30 && landedAt < 0.0f; ++k) {
+        game::PlayerInput fly;
+        fly.moveY = -1.0f;
+        bus.setPlayerInput(fly, game::PlayerAim{});
+        bus.step(game::FixedTimestep::kStep);
+        if (glideAt < 0.0f && bus.airState(0) == game::AirState::Glide) {
+            glideAt = bus.elapsed();
+            glideHeight = bus.heightAboveGround(0);
+        }
+        if (bus.airState(0) == game::AirState::Ground) landedAt = bus.elapsed();
+    }
+    printf("  salto: caida libre %.1f s, ala delta abierta a %.0f m, en el suelo a los %.1f s; %.0f m del autobus\n",
+           static_cast<double>(glideAt - jumpedAt), static_cast<double>(glideHeight),
+           static_cast<double>(landedAt - jumpedAt), static_cast<double>(distXZ(bus.body(0).state().position, busCfg.busPosition)));
+    check(jumped && glideAt > 0.0f && landedAt > 0.0f && glideHeight < 30.0f && landedAt - jumpedAt < 15.0f,
+          "X salta del autobus, el ala delta se abre sola cerca del suelo y se aterriza");
+    check(distXZ(bus.body(0).state().position, busCfg.busPosition) > 30.0f, "en el aire se dirige la caida (avanza en horizontal)");
+    for (int k = 0; k < 60 * 25; ++k) {
+        bus.setPlayerInput(game::PlayerInput{}, game::PlayerAim{});
+        bus.step(game::FixedTimestep::kStep);
+    }
+    int landedBots = 0;
+    for (int id = 1; id <= 6; ++id) landedBots += bus.airState(id) == game::AirState::Ground || !bus.alive(id) ? 1 : 0;
+    check(landedBots == 6, "los bots saltan solos en momentos distintos y aterrizan");
+
+    // Bots que se cubren con una pared al recibir disparos.
+    MatchConfig coverCfg = MatchConfig::classic();
+    coverCfg.botCount = 1;
+    coverCfg.botsBuild = true;
+    Match cover;
+    cover.start(coverCfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    int botWalls = 0;
+    for (int attempt = 0; attempt < 20 && botWalls == 0; ++attempt) {
+        cover.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+        cover.teleport(1, {70.0f, 0.0f, 10.0f}, math3d::kPi);
+        game::PlayerAim aim;
+        aim.eye = cover.chestOf(0);
+        aim.direction = math3d::normalize(cover.chestOf(1) - aim.eye);
+        cover.playerShot(aim, 1.0f, 80.0f);
+        for (int k = 0; k < 150; ++k) {
+            cover.setPlayerInput(game::PlayerInput{}, game::PlayerAim{});
+            cover.step(game::FixedTimestep::kStep);
+        }
+        botWalls = cover.structures().countOwnedBy(1);
+    }
+    check(botWalls > 0 && cover.structures().count() == 0,
+          "un bot al que disparan se cubre con una pared (que no cuenta en el limite del jugador)");
+
+    // Airdrop: cae con el globo y trae armas legendarias.
+    MatchConfig dropCfg;
+    dropCfg.botCount = 1;
+    dropCfg.startInBus = false;
+    dropCfg.airdropTimes[0] = 1.0f;
+    dropCfg.invulnerablePlayer = true;
+    Match drop;
+    drop.start(dropCfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    drop.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    int airdrop = -1;
+    float landedTime = -1.0f;
+    for (int k = 0; k < 60 * 30; ++k) {
+        drop.setPlayerInput(game::PlayerInput{}, game::PlayerAim{});
+        drop.step(game::FixedTimestep::kStep);
+        for (size_t c = 0; c < drop.containers().size(); ++c) {
+            if (drop.containers()[c].kind == game::ContainerKind::Airdrop) airdrop = static_cast<int>(c);
+        }
+        if (airdrop >= 0 && landedTime < 0.0f && drop.containers()[airdrop].landed) landedTime = drop.elapsed();
+    }
+    int legendaries = 0;
+    if (airdrop >= 0) {
+        game::Interactable it;
+        it.kind = game::Interactable::Kind::Container;
+        it.index = airdrop;
+        drop.interact(0, it);
+        for (const game::Pickup& p : drop.pickups()) {
+            legendaries += p.active && game::isWeapon(p.item) && p.rarity == Rarity::Legendary &&
+                                   distXZ(p.position, drop.containers()[airdrop].position) < 2.5f
+                               ? 1
+                               : 0;
+        }
+    }
+    printf("  airdrop: tarda %.0f s en caer; trae %d armas legendarias\n", static_cast<double>(landedTime - 1.0f), legendaries);
+    check(airdrop >= 0 && landedTime > 10.0f && legendaries == 2, "el airdrop baja con su globo y trae dos armas legendarias");
+}
+
+void testRealMatches(world::World& world, game::NavGrid& nav) {
+    printf("\n15) Partidas completas con las reglas de la fase 7 (autobus, botin, bots que cazan y construyen)\n");
+    printf("  bots semilla  fin  duracion ganador  armados_1min cofres airdrops paredes atascos max_atasco\n");
+    struct Case {
+        int bots;
+        u32 seed;
+    };
+    const Case cases[] = {{10, 11}, {10, 12}, {10, 13}, {30, 11}};
+    bool allFinished = true, noPenetration = true, noWallHits = true, armedOk = true, stuckOk = true, builds = false;
+    for (const Case& c : cases) {
+        const SimResult r = simulate(world, nav, c.bots, c.seed, 20.0f * 60.0f, true);
+        printf("  %4d %6u %4s %6.0f s %-8d %8d/%-3d %6d %8d %7d %7d %8d s  (dentro de solidos %d, a traves %d)\n",
+               c.bots, static_cast<unsigned>(c.seed), r.finished ? "si" : "NO", static_cast<double>(r.duration), r.winner,
+               r.armedAt60, c.bots, r.chestsOpened, r.airdropsOpened, r.stats.wallsBuilt, r.stats.stuckEvents,
+               r.maxStuckSeconds, r.penetrations, r.shots.hitsThroughWalls);
+        if (r.shots.hitsThroughWalls > 0) {
+            const game::ShotRecord& b = r.shots.firstBad;
+            printf("    primer caso: tirador %d (%.1f %.1f %.1f) -> victima %d (%.1f %.1f %.1f); caja %d dinamica %d en t=%.2f\n",
+                   b.shooter, b.origin.x, b.origin.y, b.origin.z, b.victim, b.end.x, b.end.y, b.end.z,
+                   r.shots.badHit.collider, r.shots.badHit.dynamicHandle, static_cast<double>(r.shots.badHit.t));
+        }
+        allFinished &= r.finished;
+        noPenetration &= r.penetrations == 0;
+        noWallHits &= r.shots.hitsThroughWalls == 0;
+        armedOk &= r.armedAt60 * 10 >= c.bots * 7;
+        stuckOk &= r.maxStuckSeconds <= 8;
+        builds |= r.stats.wallsBuilt > 0;
+    }
+    check(allFinished, "todas las partidas terminan (como mucho 20 min)");
+    check(armedOk, "al minuto, al menos el 70 % de los bots ha encontrado un arma (o ya ha caido)");
+    check(builds, "los bots construyen paredes para cubrirse");
+    check(noPenetration && noWallHits, "nadie queda dentro de un solido y ningun disparo atraviesa paredes");
+    check(stuckOk, "ningun bot se queda atascado mas de 8 s seguidos");
+}
+
 }  // namespace
 
 int main() {
@@ -1076,6 +1401,8 @@ int main() {
     testEvents(world, nav);
     testInventory(world, nav);
     testStorm(world, nav);
+    testLoot(world, nav);
+    testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

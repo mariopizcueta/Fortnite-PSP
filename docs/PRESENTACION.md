@@ -145,10 +145,12 @@ Todas las referencias a controles se dibujan con los iconos de `Recursos/Textura
     | `Fortnite Running Sound Effect.wav`    | Pasos: se extrae un único paso (0,22 s) y suena en cada pisada |
 
   - **`avisotormenta`:** suena al entrar en la tormenta del límite del mapa (v0.7.3).
-  - **Sin usar todavía:** `Chestopening`, `Fortnite Chest(sin abrir)`, `Opertura ala
-    delta`, `Saltar del autobus`, `Fortnite bailemp3` y `Fortnite fusil de tirador de
-    cerrojo`. Se quedan en Recursos y no se empaquetan hasta que exista su mecánica
-    (cofres, ala delta, autobús, bailes, francotirador).
+  - **v0.8.0:**
+    - **Cofre:** `Chestopening` al abrir; `Fortnite Chest(sin abrir)` es el zumbido
+      cerca de un cofre (5 s).
+    - **Autobús y caída:** `Saltar del autobus` (4,5 s) y `Opertura ala delta`.
+    - **Francotirador:** `Fortnite fusil de tirador de cerrojo`.
+  - **Sin usar todavía:** `Fortnite bailemp3` (no hay bailes).
   - **Sonidos sintetizados** (`tools/generate_sounds.py`): impacto, herido, eliminación,
     pared, pared rota, recarga, menú (mover y aceptar), derrota, pico y curación (vendas
     y botiquín).

@@ -129,6 +129,33 @@ BUTTONS = {
 }
 
 
+# Fondos de rareza de Fortnite (arriba, abajo): comun, poco comun, rara, epica, legendaria.
+RARITY_COLORS = [((150, 156, 162), (92, 98, 104)), ((104, 196, 62), (40, 120, 22)),
+                 ((70, 170, 240), (26, 92, 186)), ((186, 96, 236), (104, 40, 166)),
+                 ((246, 172, 54), (192, 104, 20))]
+# Rarezas en las que existe cada arma (mismo criterio que game::weaponHasRarity).
+WEAPON_SLOTS = {
+    "AR": ("fusil.png", [0, 1, 2, 3]),        # la legendaria es Recursos/Weapons/AssaultRiffleLegendary.png
+    "Shotgun": ("escopeta.png", [1, 2, 3, 4]),
+    "Smg": ("subfusil.png", [0, 1, 2, 3, 4]),
+    "Sniper": ("francotirador.png", [2, 3, 4]),
+}
+
+
+def weapon_slot(icon_name, rarity, size=32):
+    """Ranura de arma: degradado de la rareza y la silueta (Recursos/HUD/Armas) encima."""
+    top, bottom = RARITY_COLORS[rarity]
+    slot = Image.new("RGBA", (size, size))
+    draw = ImageDraw.Draw(slot)
+    for y in range(size):
+        t = y / (size - 1)
+        draw.line((0, y, size, y), fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,))
+    icon = Image.open(RES / "HUD" / "Armas" / icon_name).convert("RGBA").resize((size - 2, size - 2), Image.LANCZOS)
+    icon.putalpha(icon.getchannel("A").point(lambda v: 255 if v > 100 else 0))
+    slot.alpha_composite(icon, (1, 1))
+    return slot
+
+
 def victory_banner():
     banner = alpha_crop(Image.open(RES / "HUD" / "Victory_Royale_Old_-_Fortnite.webp").convert("RGBA"))
     return banner.resize((round(banner.width * 1.5), round(banner.height * 1.5)), Image.NEAREST)
@@ -182,6 +209,10 @@ def ui_atlas():
         "IconEscudo": Image.open(RES / "HUD" / "icono_escudo.png").convert("RGBA"),
         "IconVida": Image.open(RES / "HUD" / "icono_vida.png").convert("RGBA"),
     }
+    # Ranuras de armas por rareza.
+    for key, (icon_name, rarities) in WEAPON_SLOTS.items():
+        for r in rarities:
+            items[f"Slot{key}{r}"] = weapon_slot(icon_name, r)
     # Botones de la PSP (Recursos/Texturas PSP) para las ayudas de controles.
     for name, (source, height) in BUTTONS.items():
         items[name] = button(source, height)
@@ -307,15 +338,20 @@ def read_wav(path):
 
 
 # Sonidos de Recursos/Sonidos/Sonidos Limpios que ya tienen uso en el juego -> nombre en
-# assets/sounds. Los demas (cofre, ala delta, autobus, baile, francotirador) se conservan
-# en Recursos pero no se empaquetan hasta que exista su mecanica.
+# assets/sounds. El baile se conserva en Recursos pero no se empaqueta (aun no hay bailes).
 CLEAN_SOUNDS = {
-    "disparo": "scardisparo.wav",                       # sustituye al disparo sintetizado
-    "victoria": "Fortnite Victory Royale.mp3",          # sustituye a la sintonia sintetizada
-    "muerte_jugador": "muertejugadorfortnite.wav",
-    "miniescudo": "miniescudo.wav",
-    "pocion_escudo": "pociondeescudogrande.wav",
-    "aviso_tormenta": "avisotormenta.wav",              # al entrar en la tormenta del borde
+    # nombre en assets/sounds: (fichero, segundos maximos o None)
+    "disparo": ("scardisparo.wav", None),                       # fusil de asalto / SCAR
+    "victoria": ("Fortnite Victory Royale.mp3", None),
+    "muerte_jugador": ("muertejugadorfortnite.wav", None),
+    "miniescudo": ("miniescudo.wav", None),
+    "pocion_escudo": ("pociondeescudogrande.wav", None),
+    "aviso_tormenta": ("avisotormenta.wav", None),              # al entrar en la tormenta del borde
+    "cofre_abrir": ("Chestopening.wav", None),                  # abrir cofres, cajas y airdrops
+    "cofre_cerca": ("Fortnite Chest(sin abrir).mp3", 5.0),      # zumbido de un cofre cercano
+    "salto_autobus": ("Saltar del autobus.mp3", 4.5),
+    "ala_delta": ("Opertura ala delta.wav", None),
+    "francotirador": ("Fortnite fusil de tirador de cerrojomp3.mp3", None),
 }
 STEP_SOURCE = "Fortnite Running Sound Effect.wav"
 
@@ -367,9 +403,15 @@ def sounds():
     out = ASSETS / "sounds"
     out.mkdir(parents=True, exist_ok=True)
     clean = RES / "Sonidos" / "Sonidos Limpios"
-    for name, source in CLEAN_SOUNDS.items():
+    for name, (source, max_seconds) in CLEAN_SOUNDS.items():
         x, rate = to_mono_22050(clean / source)
         x = trim_start(x)
+        if max_seconds and len(x) > max_seconds * rate:
+            # Recortado con una caida suave al final (los sonidos largos ocupan mucho).
+            x = x[:int(max_seconds * rate)].astype(np.float64)
+            fade = int(0.4 * rate)
+            x[-fade:] *= np.linspace(1.0, 0.0, fade)
+            x = x.astype(np.int32)
         write_wav(out / f"{name}.wav", x, rate)
         print(f"  assets/sounds/{name}.wav  {len(x) / rate:.2f} s  (de Sonidos Limpios/{source})")
     x, rate = to_mono_22050(clean / STEP_SOURCE)

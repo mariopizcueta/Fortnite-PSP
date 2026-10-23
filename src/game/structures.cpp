@@ -35,8 +35,22 @@ void StructureSystem::reset(world::CollisionWorld& world, NavGrid& nav, const Bu
     m_count = 0;
 }
 
+int StructureSystem::countOwnedBy(int owner) const {
+    int n = 0;
+    for (const BuiltWall& w : m_walls) {
+        if (w.active && (owner < 0 ? w.owner > 0 : w.owner == owner)) ++n;
+    }
+    return n;
+}
+
+bool StructureSystem::limitReached(int owner) const {
+    if (owner == 0) return countOwnedBy(0) >= m_config.maxWalls;
+    return countOwnedBy(-1) >= m_config.maxBotWalls || countOwnedBy(owner) >= m_config.maxWallsPerBot ||
+           m_count >= kMaxWallCapacity;
+}
+
 WallPlacement StructureSystem::plan(const Vec3& feet, float yaw, const world::Aabb& player,
-                                    const world::Aabb* bots, int botCount) const {
+                                    const world::Aabb* bots, int botCount, int owner) const {
     WallPlacement p;
     const float g = m_config.gridSize;
     const float half = m_config.wallThickness * 0.5f;
@@ -75,7 +89,7 @@ WallPlacement StructureSystem::plan(const Vec3& feet, float yaw, const world::Aa
     // Caja algo encogida: tocar una pared vecina por el canto no cuenta como choque.
     const world::Aabb shrunk{{p.box.min.x + 0.02f, p.box.min.y + 0.02f, p.box.min.z + 0.02f},
                              {p.box.max.x - 0.02f, p.box.max.y - 0.02f, p.box.max.z - 0.02f}};
-    if (m_count >= m_config.maxWalls) {
+    if (limitReached(owner)) {
         p.error = PlacementError::LimitReached;
     } else if (p.box.min.x < -limit || p.box.max.x > limit || p.box.min.z < -limit || p.box.max.z > limit) {
         p.error = PlacementError::OutOfBounds;
@@ -121,8 +135,8 @@ bool StructureSystem::duplicates(const WallPlacement& p) const {
     return false;
 }
 
-int StructureSystem::place(const WallPlacement& placement) {
-    if (!placement.valid || m_count >= m_config.maxWalls) return -1;
+int StructureSystem::place(const WallPlacement& placement, int owner) {
+    if (!placement.valid || limitReached(owner)) return -1;
     for (int i = 0; i < kMaxWallCapacity; ++i) {
         BuiltWall& w = m_walls[i];
         if (w.active) continue;
@@ -134,6 +148,7 @@ int StructureSystem::place(const WallPlacement& placement) {
         w.collider = collider;
         w.health = w.maxHealth = m_config.wallHealth;
         w.sinceHit = 99.0f;
+        w.owner = owner;
         ++m_count;
         changed(w.box);
         return i;

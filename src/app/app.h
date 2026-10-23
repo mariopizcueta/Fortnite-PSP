@@ -11,6 +11,7 @@
 
 #include "app/build_visuals.h"
 #include "app/lobby_scene.h"
+#include "app/prop_visuals.h"
 #include "app/ui.h"
 #include "audio/mixer.h"
 #include "camera/orbit_camera.h"
@@ -88,6 +89,7 @@ private:
     void updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld);
     void processEvents();
     void playFootsteps();
+    void updateChestHum(float dt);
     void playSfx(audio::Sfx sfx, float volume = 1.0f, float pan = 0.0f) const;
     // Efecto con volumen por distancia (hasta 60 m) y panoramica respecto a la camara.
     void playSpatial(audio::Sfx sfx, const math3d::Vec3& position, float maxVolume) const;
@@ -128,6 +130,8 @@ private:
     // --- app_hud.cpp ------------------------------------------------------------------
     void renderGameHud() const;
     const ui::Hint* buildHints(int* count) const;
+    const ui::Hint* interactionHint(int* count) const;
+    void renderAirHud() const;
     void renderDebugPage() const;
     void renderCrosshair() const;
     void renderMinimap() const;
@@ -182,6 +186,11 @@ private:
     // Ultimo material conseguido con el pico (aviso "+8" junto a la mira).
     int m_harvestResource = 0, m_harvestAmount = 0;
     float m_harvestAge = 99.0f;
+    PropVisuals m_props;  // botin, autobus, ala delta
+    bool m_propsReady = false;
+    float m_chestHumTimer = 0.0f;
+    bool m_chestHumOn = false;
+    float m_airdropMessage = 0.0f;  // s que queda el aviso "airdrop en camino"
     BuildVisuals m_buildVisuals;
     bool m_buildVisualsReady = false;
     math3d::Mat4 m_viewProjection = math3d::Mat4::identity();  // para proyectar numeros de dano

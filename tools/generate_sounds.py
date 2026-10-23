@@ -165,11 +165,40 @@ def curacion():
     return normalize(arpeggio([523.3, 659.3, 784.0, 1046.5], 0.07, 0.18, 0.55), 0.45)
 
 
+def escopeta():
+    # Escopeta de corredera: golpe grave y largo con ruido, y el "clac" de la corredera.
+    out = np.zeros(int(0.85 * RATE))
+    tt = t(0.45)
+    boom = lowpass(rng.uniform(-1, 1, len(tt)), 0.22) * env(len(tt), 0.001, 0.09)
+    thump = np.sin(2 * math.pi * (70 - 30 * tt / 0.45) * tt) * env(len(tt), 0.001, 0.12)
+    out[:len(tt)] += boom * 1.0 + thump * 0.9
+    for start, freq in ((0.55, 700), (0.66, 480)):
+        ct = t(0.06)
+        click = (square(freq, ct) * 0.5 + rng.uniform(-1, 1, len(ct))) * env(len(ct), 0.0005, 0.012)
+        i = int(start * RATE)
+        out[i:i + len(click)] += click * 0.5
+    return normalize(out, 0.85)
+
+
+def subfusil():
+    # Subfusil con silenciador: disparo corto y apagado ("pff").
+    tt = t(0.12)
+    puff = lowpass(rng.uniform(-1, 1, len(tt)), 0.18) * env(len(tt), 0.0008, 0.025)
+    tick = np.sin(2 * math.pi * 1400 * tt) * env(len(tt), 0.0005, 0.006)
+    return normalize(puff + tick * 0.35, 0.6)
+
+
+def recoger():
+    # Recoger un objeto: dos notas cortas ascendentes.
+    return normalize(arpeggio([880.0, 1318.5], 0.05, 0.05, 0.16), 0.4)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
     "menu_aceptar": menu_aceptar, "victoria": victoria, "derrota": derrota,
     "pico": pico, "curacion": curacion,  # al final: los anteriores salen identicos
+    "escopeta": escopeta, "subfusil": subfusil, "recoger": recoger,
 }
 
 

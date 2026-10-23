@@ -148,8 +148,9 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         wish = wish * (1.0f / amount);
         amount = 1.0f;
     }
-    const Vec3 target = wish * (kRunSpeed * intent.speedScale);
-    const float accel = wasGrounded ? (amount > 0.0f ? kGroundAccel : kGroundBrake) : kAirAccel;
+    const bool flying = !wasGrounded && intent.airSpeed > 0.0f;
+    const Vec3 target = wish * (flying ? intent.airSpeed : kRunSpeed * intent.speedScale);
+    const float accel = wasGrounded ? (amount > 0.0f ? kGroundAccel : kGroundBrake) : (flying ? 16.0f : kAirAccel);
     const float dvx = target.x - s.velocity.x;
     const float dvz = target.z - s.velocity.z;
     const float dv = sqrtf(dvx * dvx + dvz * dvz);
@@ -162,9 +163,10 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         s.velocity.z += dvz / dv * maxChange;
     }
     const float hs = s.horizontalSpeed();
-    if (hs > kRunSpeed) {
-        s.velocity.x *= kRunSpeed / hs;
-        s.velocity.z *= kRunSpeed / hs;
+    const float maxSpeed = flying ? intent.airSpeed : kRunSpeed;
+    if (hs > maxSpeed) {
+        s.velocity.x *= maxSpeed / hs;
+        s.velocity.z *= maxSpeed / hs;
     }
 
     // --- Orientacion -----------------------------------------------------------------------
@@ -221,6 +223,10 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
     }
     if (!s.grounded()) {
         s.velocity.y -= kGravity * dt;
+        if (intent.fallSpeed > 0.0f && s.velocity.y < -intent.fallSpeed) {
+            // Ala delta (o caida libre): frena hasta su velocidad de caida en ~0.5 s.
+            s.velocity.y += fminf(-intent.fallSpeed - s.velocity.y, 30.0f * dt + kGravity * dt);
+        }
         if (s.velocity.y < -kMaxFallSpeed) s.velocity.y = -kMaxFallSpeed;
         s.position.y += s.velocity.y * dt;
 

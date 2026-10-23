@@ -29,6 +29,10 @@ cada impacto resta el daño del arma. Las que llegan a 0 quedan eliminadas:
 | `progressAnchor`, `stuckCount`, `sidestepTimer` | Detección y salida de atascos      |
 | `fireCooldown`, `reaction`, `strafeSign` | Combate                                   |
 
+> **Fase 7:** el estado **Botín**, el autobús y la caída, la caza del rival más cercano, el
+> oído y las paredes de cobertura están en [BOTIN.md](BOTIN.md#bots-botín-caza-y-construcción).
+> Con `MatchConfig::classic()` los bots se comportan como se describe aquí (fases 4-6).
+
 ## Estados de la IA
 
 | Estado          | En el HUD     | Qué hace                                                       |

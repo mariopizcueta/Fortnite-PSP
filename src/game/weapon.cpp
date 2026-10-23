@@ -12,10 +12,12 @@ void Weapon::reset(const WeaponConfig& config) {
     m_reserve = config.reserveAmmo;
     m_cooldown = 0.0f;
     m_reloadTimer = 0.0f;
+    m_sinceShot = 99.0f;
     m_shotsFired = 0;
 }
 
 void Weapon::update(float dt) {
+    m_sinceShot += dt;
     if (m_cooldown > 0.0f) m_cooldown -= dt;
     if (m_reloadTimer > 0.0f) {
         m_reloadTimer -= dt;
@@ -37,6 +39,7 @@ bool Weapon::tryFire() {
     }
     --m_ammo;
     ++m_shotsFired;
+    m_sinceShot = 0.0f;
     // Siguiente disparo dentro de un intervalo. Se arrastra como mucho 20 ms de sobrante
     // (para que la media sea la cadencia exacta con pasos de 1/60 s), nunca mas: aunque el
     // gatillo lleve rato pulsado o haya habido un tiron, no se acumulan disparos.

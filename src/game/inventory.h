@@ -1,10 +1,12 @@
-// Inventario del jugador: 5 ranuras (armas y consumibles apilables), el pico aparte y los
-// materiales de construccion.
+// Inventario del jugador: 5 ranuras (armas y consumibles), el pico aparte, la municion por
+// tipo y los materiales de construccion.
 //
-// Cada ranura de arma guarda su propio Weapon (cargador, reserva, recarga), asi que el
-// sistema de armas de la fase 5 se reutiliza tal cual. Los consumibles siguen los valores
-// de Fortnite: vendas (+15 de vida hasta 75), botiquin (vida al maximo), minipocion (+25
-// de escudo hasta 50) y pocion de escudo (+50 hasta 100).
+// Cada ranura de arma guarda su propio Weapon (cargador y recarga); la reserva es la
+// municion comun del inventario (ligera, media, pesada, cartuchos), como en Fortnite.
+// Cada objeto tiene su rareza: en las armas cambia el dano, la recarga y el nombre (el
+// fusil de asalto epico o legendario es la SCAR). Los consumibles siguen los valores de
+// Fortnite: vendas (+15 de vida hasta 75), botiquin (vida al maximo), minipocion (+25 de
+// escudo hasta 50) y pocion de escudo (+50 hasta 100).
 #pragma once
 
 #include <psptypes.h>
@@ -14,15 +16,18 @@
 
 namespace game {
 
-enum class ItemType : u8 { None, Scar, Bandage, Medkit, SmallShield, ShieldPotion, Count };
+enum class ItemType : u8 {
+    None, AssaultRifle, Shotgun, Smg, Sniper, Bandage, Medkit, SmallShield, ShieldPotion, Count
+};
 enum class ItemKind : u8 { Empty, Weapon, Consumable };
-// Rareza (color del fondo de la ranura).
-enum class Rarity : u8 { Common, Uncommon, Rare, Epic, Legendary };
+// Rareza (color del fondo de la ranura y del haz de luz del botin).
+enum class Rarity : u8 { Common, Uncommon, Rare, Epic, Legendary, Count };
+enum class AmmoType : u8 { Light, Medium, Heavy, Shells, Count };
 
 struct ItemDef {
     const char* name;
     ItemKind kind;
-    Rarity rarity;
+    Rarity rarity;     // rareza habitual (los consumibles tienen una fija)
     int maxStack;
     float useSeconds;  // consumibles: tiempo de uso
     float health;      // vida que da
@@ -32,9 +37,19 @@ struct ItemDef {
 };
 
 const ItemDef& itemDef(ItemType type);
+const char* rarityName(Rarity rarity);
+const char* ammoName(AmmoType type);
+bool isWeapon(ItemType type);
+// Estadisticas de un arma segun su rareza (dano, recarga, nombre). Ver docs/BOTIN.md.
+WeaponConfig weaponConfig(ItemType type, Rarity rarity);
+// Rarezas en las que existe cada arma (p. ej. el francotirador de cerrojo, de rara arriba).
+bool weaponHasRarity(ItemType type, Rarity rarity);
+// Municion que trae un arma o una caja (por recogida).
+int ammoPerPickup(AmmoType type);
 
 struct InventorySlot {
     ItemType type = ItemType::None;
+    Rarity rarity = Rarity::Common;
     int count = 0;
     Weapon weapon;  // solo si type es un arma
 };
@@ -53,14 +68,21 @@ struct Materials {
 class Inventory {
 public:
     static constexpr int kSlots = 5;
+    static constexpr int kMaxAmmo = 999;
 
     void clear();
-    // Anade `count` unidades (apila en ranuras del mismo tipo y luego usa huecos libres).
-    // Las armas ocupan una ranura cada una y se crean con `weapon`. Devuelve lo que no cupo.
-    int add(ItemType type, int count, const WeaponConfig* weapon = nullptr);
+    // Anade `count` unidades (apila consumibles del mismo tipo y luego usa huecos libres;
+    // cada arma ocupa una ranura con su cargador lleno). Devuelve lo que no cupo.
+    int add(ItemType type, Rarity rarity, int count);
+    // Coloca un objeto en la ranura seleccionada sustituyendo lo que hubiera; deja en
+    // `dropped` lo que se ha soltado (para dejarlo en el suelo).
+    void replaceSelected(ItemType type, Rarity rarity, int count, InventorySlot* dropped);
+    // Quita y devuelve el contenido de una ranura.
+    InventorySlot take(int index);
 
     const InventorySlot& slot(int i) const { return m_slots[i]; }
     InventorySlot& mutableSlot(int i) { return m_slots[i]; }
+    bool full() const;
 
     // Ranura seleccionada (0..4) y si se lleva el pico en la mano en su lugar.
     int selected() const { return m_selected; }
@@ -81,8 +103,14 @@ public:
     // Gasta una unidad de la ranura; si se vacia, queda libre.
     void consumeOne(int index);
 
+    // Municion comun por tipo.
+    int ammo(AmmoType type) const { return m_ammo[static_cast<int>(type)]; }
+    int addAmmo(AmmoType type, int n);
+    void setAmmo(AmmoType type, int n) { m_ammo[static_cast<int>(type)] = n; }
+
 private:
     InventorySlot m_slots[kSlots];
+    int m_ammo[static_cast<int>(AmmoType::Count)] = {0, 0, 0, 0};
     int m_selected = 0;
     bool m_pickaxe = false;
 };

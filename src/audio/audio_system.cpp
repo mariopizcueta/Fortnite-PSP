@@ -43,6 +43,14 @@ bool init() {
     load(Sfx::DrinkShieldPotion, assets::sfxPocionEscudo());
     load(Sfx::Footstep, assets::sfxPaso());
     load(Sfx::StormWarning, assets::sfxAvisoTormenta());
+    load(Sfx::ChestOpen, assets::sfxCofreAbrir());
+    load(Sfx::ChestHum, assets::sfxCofreCerca());
+    load(Sfx::BusJump, assets::sfxSaltoAutobus());
+    load(Sfx::GliderOpen, assets::sfxAlaDelta());
+    load(Sfx::SniperShot, assets::sfxFrancotirador());
+    load(Sfx::ShotgunShot, assets::sfxEscopeta());
+    load(Sfx::SmgShot, assets::sfxSubfusil());
+    load(Sfx::Pickup, assets::sfxRecoger());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

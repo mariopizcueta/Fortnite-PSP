@@ -682,9 +682,9 @@ void CharacterModel::destroy() {
 
 void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim,
                           const world::TextureLibrary& /*textures*/, bool eliminated, HeldItem held,
-                          bool lowDetail) const {
+                          bool lowDetail, BodyPose pose) const {
     const Vec3& pos = state.position;
-    if (!eliminated) {
+    if (!eliminated && pose == BodyPose::Normal) {
         // Sombra circular bajo los pies: encoge al subir, para leer la altura del salto.
         // Se apoya en la altura real de los pies al tocar suelo (cajas, altillo).
         const float groundY = state.grounded() ? pos.y : world::groundHeightAt(pos.x, pos.z);
@@ -703,6 +703,13 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         const float t = anim.deathSeconds > 0.0f ? math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f) : 1.0f;
         const float fall = t * t;
         root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) * Mat4::rotationX(math3d::kPi * 0.5f * fall);
+    } else if (pose == BodyPose::Skydive) {
+        // Caida libre: boca abajo (la cabeza hacia delante), girando sobre la cadera.
+        root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-1.35f) *
+               Mat4::translation({0.0f, -kHipY, 0.0f});
+    } else if (pose == BodyPose::Glide) {
+        root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-0.18f) *
+               Mat4::translation({0.0f, -kHipY, 0.0f});
     } else {
         // Respiracion (muy leve) y sacudida hacia atras al recibir un impacto.
         const float breath = 0.012f * sinf(anim.idleTime * 2.4f) * (state.horizontalSpeed() < 0.5f ? 1.0f : 0.0f);
@@ -718,23 +725,48 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     part(kBody, root);
     const bool still = eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f);
     // Piernas: rotationX(+a) lleva el extremo hacia delante (-Z); la rodilla se dobla hacia atras.
+    const bool skydive = pose == BodyPose::Skydive, glide = pose == BodyPose::Glide;
     for (int s = 0; s < 2; ++s) {
         const float side = s == 0 ? -1.0f : 1.0f;
-        const float hip = still ? 0.0f : (s == 0 ? anim.leftLeg : anim.rightLeg);
-        const float knee = still ? 0.1f : (s == 0 ? anim.leftKnee : anim.rightKnee);
-        const Mat4 thigh = root * Mat4::translation({side * kHipX, kHipY, 0.0f}) * Mat4::rotationX(hip);
+        float hip = still ? 0.0f : (s == 0 ? anim.leftLeg : anim.rightLeg);
+        float knee = still ? 0.1f : (s == 0 ? anim.leftKnee : anim.rightKnee);
+        float legSpread = 0.0f;
+        if (skydive) {
+            hip = -0.15f;
+            knee = 0.55f;
+            legSpread = 0.28f;
+        } else if (glide) {
+            hip = s == 0 ? 0.25f : 0.05f;
+            knee = 0.35f;
+        }
+        const Mat4 thigh = root * Mat4::translation({side * kHipX, kHipY, 0.0f}) * Mat4::rotationX(hip) *
+                           Mat4::rotationZ(side * legSpread);
         part(s == 0 ? kThighL : kThighR, thigh);
         part(s == 0 ? kShinL : kShinR, thigh * Mat4::translation({0.0f, -kKneeDrop, 0.0f}) * Mat4::rotationX(-knee));
     }
     // Brazos: separacion lateral, giro hacia delante, giro hacia el centro y codo.
     for (int s = 0; s < 2; ++s) {
         const float side = s == 0 ? -1.0f : 1.0f;
-        const float shoulder = still ? (s == 0 ? 0.2f : -0.2f) : (s == 0 ? anim.leftArm : anim.rightArm);
-        const float elbow = still ? 0.15f : (s == 0 ? anim.leftElbow : anim.rightElbow);
-        const float inward = still ? 0.0f : (s == 0 ? anim.leftArmIn : anim.rightArmIn);
+        float shoulder = still ? (s == 0 ? 0.2f : -0.2f) : (s == 0 ? anim.leftArm : anim.rightArm);
+        float elbow = still ? 0.15f : (s == 0 ? anim.leftElbow : anim.rightElbow);
+        float inward = still ? 0.0f : (s == 0 ? anim.leftArmIn : anim.rightArmIn);
+        float spread = kArmSpread;
+        if (skydive) {
+            // Brazos abiertos en cruz, algo adelantados.
+            shoulder = 0.35f;
+            elbow = 0.45f;
+            inward = 0.0f;
+            spread = 1.25f;
+        } else if (glide) {
+            // Agarrado a la barra del ala delta, por encima de la cabeza.
+            shoulder = 2.85f;
+            elbow = 0.25f;
+            inward = 0.0f;
+            spread = 0.3f;
+        }
         const Mat4 upper = root * Mat4::translation({side * kShoulderX, kShoulderY, 0.0f}) *
                            Mat4::rotationY(side * inward) * Mat4::rotationX(shoulder) *
-                           Mat4::rotationZ(side * kArmSpread);
+                           Mat4::rotationZ(side * spread);
         part(s == 0 ? kUpperArmL : kUpperArmR, upper);
         PartId fore = kForearmL;
         if (s == 1) fore = held == HeldItem::Pickaxe ? kForearmPickaxe : (held == HeldItem::Empty ? kForearmEmpty : kForearmRifle);

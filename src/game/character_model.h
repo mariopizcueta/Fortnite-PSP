@@ -68,6 +68,9 @@ struct CharacterAnim {
 
 // Lo que lleva en la mano derecha.
 enum class HeldItem : u8 { Rifle, Pickaxe, Empty };
+// Postura del cuerpo: normal, caida libre (tumbado boca abajo, brazos y piernas abiertos)
+// o colgado del ala delta (brazos arriba).
+enum class BodyPose : u8 { Normal, Skydive, Glide };
 
 class CharacterModel {
 public:
@@ -79,7 +82,8 @@ public:
     // pocos poligonos para personajes lejanos. Requiere gfx::begin3D().
     void draw(const CharacterState& state, const CharacterAnim& anim,
               const world::TextureLibrary& textures, bool eliminated,
-              HeldItem held = HeldItem::Rifle, bool lowDetail = false) const;
+              HeldItem held = HeldItem::Rifle, bool lowDetail = false,
+              BodyPose pose = BodyPose::Normal) const;
 
     // Triangulos del nivel de detalle alto / bajo (con el rifle).
     int triangles() const { return m_triangles[0]; }

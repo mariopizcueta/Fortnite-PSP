@@ -22,11 +22,12 @@ Las coordenadas y los ejes son los de [MUNDO.md](MUNDO.md): 1 unidad = 1 m, +Y a
 |----------------------------|-------------------------------------------------------------|
 | Stick analógico            | Andar/correr (la velocidad depende de cuánto se incline); la cámara se coloca detrás |
 | X                          | Saltar (mantener = salto completo, tocar = salto corto)     |
-| L (mantener)               | Apuntar: fija el bot visible más centrado (cono de 35°, 45 m) y el stick mueve de lado; sin objetivo, recoloca la cámara detrás y el stick mueve la mira |
+| L (mantener)               | Apuntar: gira la cámara hacia el bot visible más centrado (cono de 22°, 40 m; giro limitado a 1,6 rad/s) y el stick mueve de lado; sin objetivo, recoloca la cámara detrás y el stick mueve la mira |
 | Cruceta ← / →              | Ranura del inventario (en construcción: pieza)              |
 | TRIÁNGULO                  | Sacar / guardar el pico (en la página de depuración: cámara libre) |
 | R                          | Disparar, golpear con el pico o usar un consumible (ver INVENTARIO.md) |
-| CUADRADO                   | Recargar (en construcción: quitar la pared apuntada)        |
+| CUADRADO                   | Abrir / recoger lo que haya al alcance; si no hay nada, recargar (en construcción: quitar la pared apuntada) |
+| X (autobús / caída libre)  | Saltar del autobús / abrir el ala delta (ver BOTIN.md)      |
 | CÍRCULO                    | Modo construcción (R coloca paredes)                        |
 | SELECT                     | HUD: partida → depuración → controles → oculto              |
 | START                      | Pausa (CONTINUAR / VOLVER AL LOBBY)                         |

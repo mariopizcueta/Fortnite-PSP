@@ -2,8 +2,8 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales) + personaje nuevo +
-recursos del usuario + tormenta en el límite del mapa, v0.7.3.** Se juega
+**Estado: fase 7 (botín, autobús, ala delta, airdrops y bots que buscan, cazan y construyen),
+v0.8.0.**
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +63,22 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, botín y autobús (v0.8.0)** (detalle en [docs/BOTIN.md](docs/BOTIN.md)):
+- **Armas:** fusil de asalto/SCAR, escopeta de corredera, subfusil con silenciador y
+  francotirador de cerrojo, cada uno con su rareza, daño, cadencia, dispersión y munición
+  común por tipo.
+- **Botín:** cofres, botín de suelo, cajas de munición y airdrops con armas legendarias.
+  CUADRADO abre y recoge (y si no hay nada, recarga).
+- **Autobús y caída:** autobús de batalla quieto en el cielo, salto con X, caída libre y
+  ala delta con X.
+- **Bots:** caen igual, aterrizan sin arma y van a por botín, pelean según su arma, cazan
+  al rival más cercano, oyen los disparos y se cubren con paredes.
+- **Puntería:** más difícil (ayuda de 1°, dispersión, L ya no clava la cámara).
+
+![Autobús](docs/capturas/app_08a_autobus.png)
+![Ala delta](docs/capturas/app_08c_ala_delta.png)
+![Cofre abierto](docs/capturas/app_08e_cofre_abierto.png)
 
 **Fase 7, tormenta en el límite del mapa (v0.7.3)** (detalle en
 [docs/MUNDO.md](docs/MUNDO.md#límite-del-mapa-la-tormenta-fase-7)):
@@ -192,11 +208,12 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 |---------------|----------------------------------------|----------------------------------------------|
 | Siempre       | **Stick analógico**                    | Andar / correr; la cámara se coloca sola detrás (no al ir hacia atrás) |
 | Siempre       | **X**                                  | Saltar (mantener = salto completo)           |
-| Siempre       | **L (mantener)**                       | Apuntar: con un enemigo a la vista lo fija (el stick mueve de lado); sin él, el stick mueve la mira |
+| Siempre       | **L (mantener)**                       | Apuntar: con un enemigo a la vista gira la cámara hacia él (el stick mueve de lado); sin él, el stick mueve la mira |
 | Combate       | **Cruceta ← →**                        | Cambiar de ranura del inventario             |
 | Combate       | **TRIÁNGULO**                          | Sacar / guardar el pico                      |
 | Combate       | **R**                                  | Disparar (arma), golpear (pico, mantener) o usar (consumible) |
-| Combate       | **CUADRADO**                           | Recargar                                     |
+| Combate       | **CUADRADO**                           | Abrir / recoger lo que haya al alcance; si no, recargar |
+| Autobús / caída | **X**                                | Saltar del autobús / abrir el ala delta (stick: dirigir la caída) |
 | Siempre       | **CÍRCULO**                            | **Modo construcción on/off**                 |
 | Construcción  | **Cruceta ← →**                        | Elegir pieza (pared; suelo y rampa aún no)   |
 | Construcción  | **R (pulsar)**                         | Colocar una pared delante (10 de madera)     |
@@ -221,14 +238,15 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
   pico y cámara).
 - **Inicio de sesión simulado:** no hay red, cuentas ni partidas online. El nombre es
   siempre "Jugador".
-- **Botín pendiente (paso 2):** aún no hay cofres ni objetos en el suelo; se empieza con
-  la SCAR, 5 vendas, 3 minipociones y 30 de madera. El botiquín y la poción de escudo
-  existen, pero todavía no se consiguen.
+- **v0.8.0 sin probar en ejecución real:** el rendimiento con el botín a la vista y los 30
+  bots cayendo a la vez, y el tacto de la caída y de la puntería nueva.
+- **Partidas cortas:** los bots se buscan y las partidas simuladas duran 1-1,5 min. Se
+  ajusta en `MatchConfig` (ver docs/BOTIN.md).
 - **Objetos agotados:** al picarlos no desaparecen. Las copas de los árboles no tienen
   colisión y la cámara puede quedar dentro de ellas.
 - **Construcción:** solo funciona la pared; suelo y rampa se eligen con la cruceta, pero
   aún no se colocan. Piedra y metal se acumulan, pero aún no se usan.
-- **Los bots** no usan pico, escudo ni consumibles.
+- **Los bots** no usan escudo ni consumibles.
 - **Zona que se cierra simplificada:** un círculo que se cierra en 4 min y guía a los bots
   hacia el depósito. Fuera de ella no se pierde vida; solo hace daño la tormenta fija del
   límite del mapa. El reloj del HUD muestra lo que falta para que termine de cerrarse.
@@ -252,6 +270,7 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 Makefile                     Build basado en build.mak de PSPSDK
 docs/PRESENTACION.md         Pantallas, HUD, estilo, animaciones, sonido, memoria (fase 6)
 docs/INVENTARIO.md           Inventario, escudo, curas, pico y materiales (fase 7)
+docs/BOTIN.md                Armas, botin, autobus, ala delta, airdrops y bots de la fase 7
 docs/MUNDO.md                Escala, ejes, plano del mapa, colisiones y texturas
 docs/JUGADOR.md              Controles, movimiento, salto, paso fijo y cámara
 docs/BOTS.md                 IA, disparos, partida, rendimiento y verificación
@@ -314,11 +333,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 68 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 76 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
-  - **Audio:** formato de los 18 efectos. La música decodificada frente a la original,
+  - **Audio:** formato de los 26 efectos. La música decodificada frente a la original,
     con SNR de 33 dB y sin chasquidos. El panorama, las 8 voces y la cola llena.
   - **Flujo:** inicio de sesión → lobby → controles → lobby → carga → partida (disparos,
     construcción, recarga, páginas del HUD, pausa) → derrota → seguir mirando → fin →
@@ -330,10 +349,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 91 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 110 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
-  escudo, curas, pico, materiales, coste de las paredes y la tormenta del límite del mapa.
+  escudo, curas, pico, materiales, coste de las paredes, tormenta del límite del mapa, armas,
+  botín, autobús, airdrops, bots que se cubren y partidas completas con las reglas nuevas.
 - **`make physics-test`: 0 fallos.**
 - **`make preview`:** 7 vistas del mapa, 5 de juego con personajes y 1 de construcción,
   con las texturas de `Recursos/Texturas`.
@@ -341,6 +361,13 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 
 ## Historial de correcciones
 
+- **v0.8.0:**
+  - **Interpolación:** dentro del autobús, la cámara se iba al suelo porque se mezclaba con
+    la posición anterior. Ahora el autobús coloca al personaje sin interpolar
+    (`CharacterBody::place`).
+  - **Pruebas:** los bots se cubrían con una pared a mitad de la resolución de un disparo
+    y la comprobación independiente veía esa pared. Ahora construyen en su paso
+    siguiente.
 - **v0.7.3:**
   - **Límite del mapa:** la pared invisible del borde pasa a ser una tormenta.
   - **Pruebas:** `Match::teleport()` (solo pruebas) no conservaba el escudo; ahora sí.

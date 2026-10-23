@@ -110,6 +110,9 @@ constexpr int kFreeCameraHintY = 256;
 const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
 const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "quitar esta"}, {B::Circle, "salir"}};
 const ui::Hint kBuildHintsShort[] = {{B::R, "colocar pared"}, {B::Circle, "combate"}};
+const ui::Hint kBusHint[] = {{B::Cross, "Saltar del autobus"}};
+const ui::Hint kGliderHint[] = {{B::Cross, "Abrir el ala delta"}};
+constexpr int kPromptY = 180;
 
 constexpr float kStickBoxX = 361.0f;
 constexpr float kStickBoxY = 130.0f;
@@ -145,14 +148,35 @@ u32 rarityColor(game::Rarity r) {
         case game::Rarity::Rare: return rgba(50, 120, 210, 200);
         case game::Rarity::Epic: return rgba(150, 70, 200, 200);
         case game::Rarity::Legendary: return rgba(214, 138, 40, 200);
+        case game::Rarity::Count: break;
     }
     return rgba(0, 0, 0, 50);
 }
 
-// Imagen de la ranura de cada objeto (Recursos/HUD y Recursos/Weapons), o nullptr.
-const assets::ui::Rect* slotArt(game::ItemType type) {
+// Imagen de la ranura de cada objeto (Recursos/HUD, Recursos/Weapons y las siluetas de
+// Recursos/HUD/Armas sobre el fondo de su rareza), o nullptr.
+const assets::ui::Rect* slotArt(game::ItemType type, game::Rarity rarity) {
+    namespace a = assets::ui;
+    const int r = static_cast<int>(rarity);
     switch (type) {
-        case game::ItemType::Scar: return &assets::ui::kSlotScar;
+        case game::ItemType::AssaultRifle: {
+            static const a::Rect* kArt[] = {&a::kSlotAR0, &a::kSlotAR1, &a::kSlotAR2, &a::kSlotAR3, &a::kSlotScar};
+            return kArt[r];
+        }
+        case game::ItemType::Shotgun: {
+            static const a::Rect* kArt[] = {&a::kSlotShotgun1, &a::kSlotShotgun1, &a::kSlotShotgun2, &a::kSlotShotgun3,
+                                            &a::kSlotShotgun4};
+            return kArt[r];
+        }
+        case game::ItemType::Smg: {
+            static const a::Rect* kArt[] = {&a::kSlotSmg0, &a::kSlotSmg1, &a::kSlotSmg2, &a::kSlotSmg3, &a::kSlotSmg4};
+            return kArt[r];
+        }
+        case game::ItemType::Sniper: {
+            static const a::Rect* kArt[] = {&a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper3,
+                                            &a::kSlotSniper4};
+            return kArt[r];
+        }
         case game::ItemType::Bandage: return &assets::ui::kSlotVendas;
         case game::ItemType::Medkit: return &assets::ui::kSlotBotiquin;
         case game::ItemType::SmallShield: return &assets::ui::kSlotMinipocion;
@@ -161,6 +185,19 @@ const assets::ui::Rect* slotArt(game::ItemType type) {
         case game::ItemType::Count: break;
     }
     return nullptr;
+}
+
+// Texto de un objeto segun su rareza (algo mas claro que el fondo de la ranura).
+u32 rarityTextColor(game::Rarity r) {
+    switch (r) {
+        case game::Rarity::Common: return rgba(220, 220, 220);
+        case game::Rarity::Uncommon: return rgba(130, 230, 100);
+        case game::Rarity::Rare: return rgba(110, 190, 255);
+        case game::Rarity::Epic: return rgba(210, 140, 255);
+        case game::Rarity::Legendary: return rgba(255, 190, 70);
+        case game::Rarity::Count: break;
+    }
+    return rgba(255, 255, 255);
 }
 
 // Caja de ranura al estilo de la referencia: fondo translucido y borde claro.
@@ -205,11 +242,60 @@ void App::renderGameHud() const {
             ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55, hints, n);
         }
     }
-    renderCrosshair();
+    if (m_match.alive(0) && m_match.airState(0) != game::AirState::Ground) {
+        renderAirHud();
+    } else {
+        renderCrosshair();
+        int n = 0;
+        if (const ui::Hint* hint = interactionHint(&n)) {
+            gfx::fillRect(0, kPromptY - 4, gfx::kScreenWidth, 16, rgba(0, 0, 0, 90));
+            ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, hint, n);
+        }
+    }
     renderMinimap();
     renderVitals();
     renderSlots();
     renderDamageNumbers();
+}
+
+const ui::Hint* App::interactionHint(int* count) const {
+    // CUADRADO: lo que se abriria o recogeria ahora (texto en m_promptText).
+    static ui::Hint hint{ui::Button::Square, ""};
+    static char text[64];
+    if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground) return nullptr;
+    const game::Interactable it = m_match.playerInteractable();
+    if (it.kind == game::Interactable::Kind::None) return nullptr;
+    if (it.kind == game::Interactable::Kind::Container) {
+        const game::ContainerKind kind = m_match.containers()[it.index].kind;
+        snprintf(text, sizeof(text), "%s", kind == game::ContainerKind::Chest     ? "Abrir cofre"
+                                           : kind == game::ContainerKind::AmmoBox ? "Abrir caja de municion"
+                                                                                 : "Abrir suministro");
+    } else {
+        const game::Pickup& p = m_match.pickups()[it.index];
+        const game::Inventory& inv = m_match.inventory();
+        const bool swap = inv.full() && inv.count(p.item) == 0;
+        const char* name = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemDef(p.item).name;
+        if (swap && inv.slot(inv.selected()).type != game::ItemType::None) {
+            snprintf(text, sizeof(text), "Cambiar por %s (%s)", name, game::rarityName(p.rarity));
+        } else if (p.count > 1) {
+            snprintf(text, sizeof(text), "Recoger %s x%d", name, p.count);
+        } else {
+            snprintf(text, sizeof(text), "Recoger %s (%s)", name, game::rarityName(p.rarity));
+        }
+    }
+    hint.text = text;
+    *count = 1;
+    return &hint;
+}
+
+void App::renderAirHud() const {
+    // Autobus: saltar con X. Caida libre: abrir el ala delta con X. Altura sobre el suelo.
+    const game::AirState air = m_match.airState(0);
+    gfx::fillRect(140, 150, 200, air == game::AirState::Glide ? 14 : 30, rgba(0, 0, 0, 110));
+    if (air == game::AirState::Bus) ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(kBusHint, 1)) / 2, 154, kBusHint, 1);
+    if (air == game::AirState::Freefall) {
+        ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(kGliderHint, 1)) / 2, 154, kGliderHint, 1);
+    }
 }
 
 void App::renderCrosshair() const {
@@ -289,6 +375,21 @@ void App::renderMinimap() const {
         };
         gfx::drawLines2D(arrow, 8);
         gfx::fillRect(px - 1, py - 1, 2, 2, c);
+    }
+
+    // Airdrops sin abrir (cuadro azul) y el autobus mientras se va dentro (amarillo).
+    for (const game::Container& c : m_match.containers()) {
+        if (c.kind != game::ContainerKind::Airdrop || c.opened) continue;
+        float sx, sy;
+        if (toMap(c.position.x, c.position.z, &sx, &sy)) {
+            gfx::fillRect(sx - 2, sy - 2, 5, 5, rgba(20, 20, 30));
+            gfx::fillRect(sx - 1, sy - 1, 3, 3, rgba(90, 170, 255));
+        }
+    }
+    if (m_match.airState(0) == game::AirState::Bus) {
+        float sx, sy;
+        const Vec3& bus = m_match.busPosition();
+        if (toMap(bus.x, bus.z, &sx, &sy)) gfx::fillRect(sx - 2, sy - 3, 5, 6, config::kColorGold);
     }
 
     // Fila de iconos: zona, vivos y bajas.
@@ -383,7 +484,7 @@ void App::renderSlots() const {
         const float y = kWeaponRowY - (selected ? 3.0f : 0.0f);
         const game::ItemType type = i == 0 ? game::ItemType::None : inv.slot(i - 1).type;
         // Cada objeto tiene su ranura completa dibujada en Recursos (con su fondo de rareza).
-        const atlas::Rect* art = slotArt(type);
+        const atlas::Rect* art = slotArt(type, i == 0 ? game::Rarity::Common : inv.slot(i - 1).rarity);
         if (art && m_atlas.ready()) {
             m_atlas.draw(*art, x + 1, y + 1);
             ui::frame(x, y, kWeaponSlotSize, kWeaponSlotSize, 1, rgba(255, 255, 255, 170));
@@ -447,6 +548,37 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     gfx::text::printShadow(6, 4, kLightGrey, "%s", kPlayerName);
     gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
     overlayCompass();
+
+    // Autobus y caida.
+    const game::AirState air = m_match.airState(0);
+    if (m_match.alive(0) && air != game::AirState::Ground) {
+        if (air == game::AirState::Bus) {
+            ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kBusHint, 1)) / 2, 154, kWhite, kBusHint, 1);
+            char line[48];
+            snprintf(line, sizeof(line), "Salto automatico en %.0f s", fmaxf(0.0f, m_match.busTimeLeft()));
+            printCenteredShadow(168, kLightGrey, line);
+        } else {
+            if (air == game::AirState::Freefall) {
+                ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kGliderHint, 1)) / 2, 154, kWhite, kGliderHint, 1);
+            }
+            char line[32];
+            snprintf(line, sizeof(line), "Altura %.0f m", m_match.heightAboveGround(0));
+            printCenteredShadow(air == game::AirState::Glide ? 153 : 168, kLightGrey, line);
+        }
+    } else {
+        int n = 0;
+        if (const ui::Hint* hint = interactionHint(&n)) {
+            const game::Interactable it = m_match.playerInteractable();
+            u32 color = kWhite;
+            if (it.kind == game::Interactable::Kind::Pickup) {
+                color = rarityTextColor(m_match.pickups()[it.index].rarity);
+            }
+            ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, color, hint, n);
+        }
+    }
+    if (m_airdropMessage > 0.0f && fmodf(m_airdropMessage, 0.8f) > 0.2f) {
+        printCenteredShadow(96, rgba(120, 190, 255), "Suministro aereo en camino!");
+    }
 
     // Construccion: paredes y por que no se puede colocar.
     if (m_buildMode) {
@@ -535,7 +667,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const game::InventorySlot& slot = inv.slot(i);
         if (slot.type == game::ItemType::None) continue;
         const bool weapon = game::itemDef(slot.type).kind == game::ItemKind::Weapon;
-        const int n = weapon ? slot.weapon.reserve() : slot.count;
+        const int n = weapon ? inv.ammo(static_cast<game::AmmoType>(slot.weapon.config().ammoType)) : slot.count;
         if (n < 0 || (!weapon && n <= 1 && game::itemDef(slot.type).maxStack == 1)) continue;
         const bool selected = !m_buildMode && !inv.pickaxe() && inv.selected() == i;
         const int sx = static_cast<int>(kWeaponSlotX + (i + 1) * kWeaponSlotStep) + 33 - 8 * (n >= 100 ? 3 : n >= 10 ? 2 : 1);

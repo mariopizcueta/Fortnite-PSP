@@ -226,6 +226,28 @@ private:
     std::vector<s16> m_recording;
 };
 
+// Salta del autobus, cae hasta el suelo y recibe el equipo de las fases anteriores (SCAR,
+// vendas, minipociones, municion y madera) en la aparicion de siempre: asi las pruebas
+// de armas, construccion y curas no dependen del botin que haya cerca.
+bool landAndEquip(Sim& sim) {
+    game::Match& match = sim.app().testMatch();
+    sim.press(PSP_CTRL_CROSS);
+    const bool landed = sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 25.0f);
+    match.giveItem(game::ItemType::AssaultRifle, 1, game::Rarity::Legendary);
+    match.giveItem(game::ItemType::Bandage, 5);
+    match.giveItem(game::ItemType::SmallShield, 3, game::Rarity::Uncommon);
+    match.giveAmmo(game::AmmoType::Medium, 120);
+    match.giveMaterials(world::Resource::Wood, 30 - match.materials().get(world::Resource::Wood));
+    match.teleport(0, {0.0f, 0.0f, 24.0f}, 0.0f);
+    // La SCAR en la mano (se guarda el pico con TRIANGULO y se busca con la cruceta).
+    if (match.inventory().pickaxe()) sim.press(PSP_CTRL_TRIANGLE);
+    for (int k = 0; k < game::Inventory::kSlots && match.inventory().activeType() != game::ItemType::AssaultRifle; ++k) {
+        sim.press(PSP_CTRL_RIGHT);
+    }
+    sim.wait(0.5f);
+    return landed && match.inventory().activeType() == game::ItemType::AssaultRifle;
+}
+
 void killAllBots(Sim& sim) {
     game::Match& m = sim.app().testMatch();
     for (int i = 1; i < m.entityCount(); ++i) {
@@ -256,7 +278,8 @@ void testAudio(const char* outDir) {
                                   assets::sfxRecarga(), assets::sfxMenuMover(), assets::sfxMenuAceptar(),
                                   assets::sfxVictoria(), assets::sfxDerrota(), assets::sfxPico(),
                                   assets::sfxCuracion(), assets::sfxMuerteJugador(), assets::sfxMiniescudo(),
-                                  assets::sfxPocionEscudo(), assets::sfxPaso(), assets::sfxAvisoTormenta()};
+                                  assets::sfxPocionEscudo(), assets::sfxPaso(), assets::sfxAvisoTormenta(),
+                                  assets::sfxCofreAbrir(), assets::sfxCofreCerca(), assets::sfxSaltoAutobus(), assets::sfxAlaDelta(), assets::sfxFrancotirador(), assets::sfxEscopeta(), assets::sfxSubfusil(), assets::sfxRecoger()};
     bool clipsOk = true;
     int clipBytes = 0;
     for (const assets::Blob& b : clips) {
@@ -264,8 +287,8 @@ void testAudio(const char* outDir) {
         clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
         clipBytes += static_cast<int>(b.size);
     }
-    printf("  18 efectos, %d KB en total\n", clipBytes / 1024);
-    check(clipsOk, "los 18 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+    printf("  26 efectos, %d KB en total\n", clipBytes / 1024);
+    check(clipsOk, "los 26 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
 
     // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
     static audio::ImaStream music;
@@ -510,6 +533,52 @@ int main(int argc, char** argv) {
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "tras la carga empieza la partida");
     game::Match& match = sim.app().testMatch();
     check(match.botCount() == 10 && match.aliveCount() == 11, "la partida tiene 10 bots y 11 vivos");
+
+    // Autobus de batalla, caida libre y ala delta, con los botones.
+    check(match.airState(0) == game::AirState::Bus, "la partida empieza en el autobus de batalla");
+    sim.wait(1.0f);
+    sim.shot("08a_autobus");
+    sim.takeAudioPeak();
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.3f);
+    const int jumpPeak = sim.takeAudioPeak();
+    printf("  salto: estado %s, pico de audio %d\n", game::airStateName(match.airState(0)), jumpPeak);
+    check(match.airState(0) == game::AirState::Freefall && jumpPeak > 3000, "X: salto del autobus (con su sonido)");
+    sim.hold(0, 1.2f, 0.0f, -1.0f);
+    sim.shot("08b_caida_libre", 0);
+    sim.press(PSP_CTRL_CROSS);
+    check(match.airState(0) == game::AirState::Glide, "X en caida libre abre el ala delta");
+    sim.hold(0, 0.8f, 0.0f, -1.0f);
+    sim.shot("08c_ala_delta");
+    check(sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 25.0f), "con el ala delta se llega al suelo");
+
+    // Cofre: CUADRADO lo abre y recoge lo que suelta.
+    int chest = -1;
+    float best = 1e9f;
+    for (size_t i = 0; i < match.containers().size(); ++i) {
+        const game::Container& c = match.containers()[i];
+        const float d = math3d::length(c.position - match.body(0).state().position);
+        if (c.kind == game::ContainerKind::Chest && !c.opened && d < best) {
+            best = d;
+            chest = static_cast<int>(i);
+        }
+    }
+    const game::Container& c = match.containers()[chest];
+    const float yawToChest = sim.app().testCameraYaw();
+    const Vec3 inFront = c.position - Vec3{-sinf(yawToChest), 0.0f, -cosf(yawToChest)} * 1.3f;
+    match.teleport(0, inFront, yawToChest);
+    sim.wait(0.5f);
+    sim.shot("08d_cofre");
+    sim.press(PSP_CTRL_SQUARE);
+    check(match.containers()[chest].opened, "CUADRADO abre el cofre");
+    sim.wait(0.4f);
+    sim.shot("08e_cofre_abierto");
+    for (int k = 0; k < 4; ++k) sim.press(PSP_CTRL_SQUARE);
+    bool armed = false;
+    for (int i = 0; i < game::Inventory::kSlots; ++i) armed |= game::isWeapon(match.inventory().slot(i).type);
+    check(armed, "CUADRADO recoge el arma que suelta el cofre");
+    sim.shot("08f_botin_recogido");
+    check(landAndEquip(sim), "equipo de pruebas listo");
     sim.wait(1.0f);
     sim.shot("08_partida");
 
@@ -581,12 +650,14 @@ int main(int argc, char** argv) {
     check(match.aliveCount() == 11 && match.elapsed() < 0.5f && match.structures().count() == 0 &&
               sim.app().testWorld().collision().dynamicCount() == 0,
           "la partida nueva empieza limpia (11 vivos, sin paredes ni cajas dinamicas)");
+    check(landAndEquip(sim), "salto, aterrizaje y equipo de pruebas");
     testNewControls(sim);
     sim.takeAudioPeak();
     killAllBots(sim);
     check(sim.takeAudioPeak() > 4000, "las eliminaciones suenan");
-    check(match.phase() == game::MatchPhase::Finished && match.winner() == 0 && match.playerKills() == 10,
-          "al eliminar a los 10 bots gana el jugador");
+    printf("  victoria con %d bajas del jugador (el resto, entre bots)\n", match.playerKills());
+    check(match.phase() == game::MatchPhase::Finished && match.winner() == 0 && match.playerKills() >= 1,
+          "al eliminar a los bots que quedan gana el jugador");
     check(sim.waitUntil([&] { return sim.results() == kVictory; }, 3.0f), "aparece la pantalla de victoria");
     sim.wait(0.1f);
     sim.shot("19_victoria_entrada");

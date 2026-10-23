@@ -28,6 +28,8 @@ struct CameraInput {
     float look = 0.0f;       // -1..1: + mira hacia arriba
     float followYaw = 0.0f;  // hacia donde mira el jugador
     float follow = 0.0f;     // 0..1: fuerza con la que la camara se coloca detras de el
+    float distance = 5.0f;   // m del pivote al ojo (mas lejos en el autobus y cayendo)
+    float restLook = -0.065f;  // inclinacion a la que vuelve la mira al seguir (rad)
 };
 
 class ThirdPersonCamera {
@@ -58,6 +60,7 @@ private:
     math3d::Vec3 m_eye;
     float m_yaw = 0.0f, m_targetYaw = 0.0f;
     float m_look = 0.0f, m_targetLook = 0.0f;
+    float m_distance = 5.0f;
 };
 
 }  // namespace camera

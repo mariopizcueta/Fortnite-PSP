@@ -18,8 +18,11 @@ namespace {
 using namespace common;
 using math3d::Vec3;
 
-constexpr float kLockAngleDegrees = 35.0f;  // L: objetivo dentro de este cono
-constexpr float kLockDistance = 45.0f;
+// L: objetivo dentro de este cono (fase 7: mas estrecho y la camara gira con velocidad
+// limitada; antes, 35 grados y giro inmediato: acertar era casi automatico).
+constexpr float kLockAngleDegrees = 22.0f;
+constexpr float kLockDistance = 40.0f;
+constexpr float kChestHumRange = 9.0f;  // m: se oye el zumbido de un cofre sin abrir
 constexpr float kSoundRange = 60.0f;
 constexpr float kFootstepRange = 14.0f;
 // Tormenta del limite del mapa (world/storm.h): niebla y color.
@@ -119,6 +122,9 @@ void App::init() {
     platform::log::write("modelos de personaje: %s, %d triangulos (%d el de lejos)",
                          m_modelsReady ? "ok" : "ERROR", m_models[0].triangles(), m_models[0].lowDetailTriangles());
     m_buildVisualsReady = m_buildVisuals.build(m_matchConfig.build);
+    m_propsReady = m_props.build();
+    platform::log::write("botin, autobus y ala delta: %s, %d triangulos en total", m_propsReady ? "ok" : "ERROR",
+                         m_props.triangles());
     m_lobbyReady = m_lobbyScene.build();
     buildMinimap();
     logStage("modelos, lobby, minimapa", t0);
@@ -169,9 +175,13 @@ void App::startMatch() {
     for (game::CharacterAnim& a : m_botAnims) a = game::CharacterAnim{};
     m_playerSteps = 0;
     for (u32& s : m_botSteps) s = 0;
-    m_followCamera.reset(m_match.body(0).state().position, kPlayerSpawnYaw);
+    // En el autobus, vista de tres cuartos (el autobus va a lo largo de Z).
+    m_followCamera.reset(m_match.body(0).state().position + Vec3{0.0f, 4.0f, 0.0f},
+                         m_match.airState(0) == game::AirState::Bus ? 0.9f : kPlayerSpawnYaw);
     m_freeCameraActive = false;
     m_lockTarget = -1;
+    m_chestHumTimer = 0.0f;
+    m_airdropMessage = 0.0f;
     m_paused = false;
     m_results = Results::None;
     m_resultsTime = m_resultsDelay = 0.0f;
@@ -206,6 +216,8 @@ void App::shutdown() {
     m_lobbyReady = false;
     m_buildVisuals.destroy();
     m_buildVisualsReady = false;
+    m_props.destroy();
+    m_propsReady = false;
     for (game::CharacterModel& m : m_models) m.destroy();
     m_modelsReady = false;
     m_world.destroy();
@@ -295,14 +307,18 @@ void App::updateGame(const input::Input& in, float dt) {
     }
 
     const bool control = !overlay && !m_freeCameraActive && m_match.phase() == game::MatchPhase::Playing;
+    // En el autobus o cayendo solo cuentan el stick y X (saltar / abrir el ala delta).
+    const bool onGround = m_match.airState(0) == game::AirState::Ground;
+    const bool act = control && onGround;
+    if (!onGround) m_buildMode = false;
     game::PlayerCommands commands;
     // CIRCULO: modo construccion. Se desactiva solo si el jugador cae.
-    if (control && in.pressed(PSP_CTRL_CIRCLE)) {
+    if (act && in.pressed(PSP_CTRL_CIRCLE)) {
         m_buildMode = !m_buildMode;
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
     // TRIANGULO: sacar / guardar el pico (desde construccion, vuelve al combate con el pico).
-    if (control && !freeCameraToggle && in.pressed(PSP_CTRL_TRIANGLE)) {
+    if (act && !freeCameraToggle && in.pressed(PSP_CTRL_TRIANGLE)) {
         if (m_buildMode) {
             m_buildMode = false;
             if (!m_match.inventory().pickaxe()) commands.togglePickaxe = true;
@@ -313,7 +329,7 @@ void App::updateGame(const input::Input& in, float dt) {
     }
     // Cruceta izquierda / derecha: ranura del inventario o pieza de construccion.
     const int dpad = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
-    if (control && dpad != 0) {
+    if (act && dpad != 0) {
         if (m_buildMode) m_buildPiece = (m_buildPiece + kBuildPieces + dpad) % kBuildPieces;
         else commands.cycleSlot = dpad;
         playSfx(audio::Sfx::MenuMove, 0.5f);
@@ -321,7 +337,7 @@ void App::updateGame(const input::Input& in, float dt) {
     if (!m_match.alive(0)) m_buildMode = false;
     // L: modo apuntado. Con un enemigo a la vista lo fija (y el stick mueve); sin el, el
     // stick gira la camara y sube o baja la mira en lugar de andar.
-    const bool aimHeld = control && in.held(PSP_CTRL_LTRIGGER);
+    const bool aimHeld = act && in.held(PSP_CTRL_LTRIGGER);
     const bool stickAims = aimHeld && !(m_lockTarget > 0);
 
     // 1) Entrada del jugador.
@@ -367,6 +383,7 @@ void App::updateGame(const input::Input& in, float dt) {
         m_botAnims[i].update(renderState(i + 1), b.aiming, b.state != game::BotState::Eliminated, dt);
     }
     playFootsteps();
+    updateChestHum(dt);
 
     // 5) Camaras y construccion.
     updateGameCameras(in, dt, control, aimHeld);
@@ -399,6 +416,9 @@ void App::updateStormFog() {
     }
     const float nearT = math3d::clampf((depth + kStormFogRange) / kStormFogRange, 0.0f, 1.0f);
     const float inT = math3d::clampf(depth / 4.0f, 0.0f, 1.0f);
+    // Desde el autobus y cayendo, la niebla se aleja con la altura (si no, a 90 m solo se
+    // veria niebla); se dibuja mas lejos solo esos segundos.
+    const float altitude = eye.y > 8.0f ? eye.y - 8.0f : 0.0f;
     auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
     auto lerpColor = [&](u32 a, u32 b, float t) {
         auto ch = [&](int shift) {
@@ -407,8 +427,8 @@ void App::updateStormFog() {
         return rgba(ch(0), ch(8), ch(16));
     };
     m_fogColor = lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormInsideColor, inT);
-    m_fogStart = lerp(lerp(config::kFogStart, 6.0f, nearT), 0.0f, inT);
-    m_fogEnd = lerp(lerp(config::kFogEnd, 42.0f, nearT), 13.0f, inT);
+    m_fogStart = lerp(lerp(config::kFogStart, 6.0f, nearT), 0.0f, inT) + altitude * 0.6f;
+    m_fogEnd = lerp(lerp(config::kFogEnd, 42.0f, nearT), 13.0f, inT) + altitude * 1.4f;
 }
 
 void App::updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld) {
@@ -435,7 +455,10 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
         return;
     }
     // Tras caer, la camara sigue a quien elimino al jugador (o a otro superviviente).
-    const game::CharacterState followed = renderState(spectateTarget());
+    const int target = spectateTarget();
+    game::CharacterState followed = renderState(target);
+    // En el autobus, la camara mira al centro entre el autobus y su globo.
+    if (m_match.airState(target) == game::AirState::Bus) followed.position.y += 4.0f;
     camera::CameraInput cam;
     if (control && aimHeld && !lock) {
         // Modo apuntado sin objetivo: el stick mueve la mira.
@@ -449,6 +472,30 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
         const bool backwards = ay > 0.6f * magnitude;
         cam.followYaw = followed.yaw;
         cam.follow = control ? (backwards ? 0.0f : magnitude) : (m_match.alive(0) ? 0.0f : 0.6f);
+    }
+    // Autobus y caida: camara mas lejos y mirando hacia abajo; en el autobus el stick la
+    // hace girar alrededor de el.
+    switch (m_match.airState(target)) {
+        case game::AirState::Bus:
+            cam.distance = 22.0f;
+            cam.restLook = -0.12f;
+            cam.follow = 0.4f;
+            cam.followYaw = m_followCamera.yaw();
+            cam.turn = control ? in.analogX() : 0.0f;
+            cam.look = 0.0f;
+            break;
+        case game::AirState::Freefall:
+            cam.distance = 8.0f;
+            cam.restLook = -0.60f;
+            cam.follow = fmaxf(cam.follow, 0.4f);
+            break;
+        case game::AirState::Glide:
+            cam.distance = 6.5f;
+            cam.restLook = -0.35f;
+            cam.follow = fmaxf(cam.follow, 0.4f);
+            break;
+        case game::AirState::Ground:
+            break;
     }
     m_followCamera.update(cam, followed.position, followed.yaw, dt, recenter, lock, &m_world.collision());
 }
@@ -471,6 +518,37 @@ void App::playSpatial(audio::Sfx sfx, const Vec3& position, float maxVolume) con
         pan = 0.8f * math3d::dot(delta, right) / distance;
     }
     playSfx(sfx, volume, pan);
+}
+
+void App::updateChestHum(float dt) {
+    // Zumbido de un cofre sin abrir cercano (Sonidos Limpios/Fortnite Chest(sin abrir), 5 s
+    // que se repiten mientras se esta cerca), como el aviso de Fortnite.
+    m_airdropMessage -= dt;
+    m_chestHumTimer -= dt;
+    const Vec3 pos = renderState(0).position;
+    const game::Container* nearest = nullptr;
+    float best = kChestHumRange;
+    if (m_match.alive(0) && m_match.airState(0) == game::AirState::Ground) {
+        for (const game::Container& c : m_match.containers()) {
+            if (c.kind != game::ContainerKind::Chest || c.opened) continue;
+            const float d = math3d::length(c.position - pos);
+            if (d < best) {
+                best = d;
+                nearest = &c;
+            }
+        }
+    }
+    if (nearest) {
+        if (m_chestHumTimer <= 0.0f) {
+            playSpatial(audio::Sfx::ChestHum, nearest->position, 0.6f);
+            m_chestHumTimer = 5.0f;
+            m_chestHumOn = true;
+        }
+    } else if (m_chestHumOn) {
+        if (m_audioReady) audio::mixer().stop(audio::Sfx::ChestHum);
+        m_chestHumOn = false;
+        m_chestHumTimer = 0.0f;
+    }
 }
 
 void App::playFootsteps() {
@@ -499,15 +577,21 @@ void App::processEvents() {
     for (; m_eventCursor < count; ++m_eventCursor) {
         const game::GameEvent& e = m_match.event(m_eventCursor);
         switch (e.type) {
-            case game::GameEventType::Shot:
+            case game::GameEventType::Shot: {
+                // Cada arma con su sonido (other = tipo de arma).
+                const audio::Sfx shot = e.other == static_cast<int>(game::ItemType::Shotgun) ? audio::Sfx::ShotgunShot
+                                        : e.other == static_cast<int>(game::ItemType::Smg) ? audio::Sfx::SmgShot
+                                        : e.other == static_cast<int>(game::ItemType::Sniper) ? audio::Sfx::SniperShot
+                                                                                               : audio::Sfx::Shot;
                 if (e.entity == 0) {
-                    playSfx(audio::Sfx::Shot, 0.85f);
+                    playSfx(shot, 0.85f);
                     m_playerAnim.onShot();
                 } else if (e.entity > 0) {
-                    playSpatial(audio::Sfx::Shot, e.position, 0.7f);
+                    playSpatial(shot, e.position, 0.7f);
                     m_botAnims[e.entity - 1].onShot();
                 }
                 break;
+            }
             case game::GameEventType::HitEntity:
                 if (e.entity > 0) m_botAnims[e.entity - 1].onHit();
                 if (e.other == 0) playSfx(audio::Sfx::HitMarker, 0.9f);
@@ -527,7 +611,31 @@ void App::processEvents() {
                 if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
                 break;
             case game::GameEventType::WallBuilt:
-                playSfx(audio::Sfx::WallBuild, 0.8f);
+                if (e.entity == 0) playSfx(audio::Sfx::WallBuild, 0.8f);
+                else playSpatial(audio::Sfx::WallBuild, e.position, 0.7f);  // un bot se cubre
+                break;
+            case game::GameEventType::BusJump:
+                if (e.entity == 0) playSfx(audio::Sfx::BusJump, 0.9f);
+                break;
+            case game::GameEventType::GliderOpen:
+                if (e.entity == 0) playSfx(audio::Sfx::GliderOpen, 0.9f);
+                else playSpatial(audio::Sfx::GliderOpen, e.position, 0.5f);
+                break;
+            case game::GameEventType::Landed:
+                if (e.entity == 0) playSfx(audio::Sfx::Footstep, 0.8f);
+                break;
+            case game::GameEventType::ContainerOpened:
+                if (e.entity == 0 && m_audioReady) audio::mixer().stop(audio::Sfx::ChestHum);
+                if (e.entity == 0) playSfx(audio::Sfx::ChestOpen, 0.9f);
+                else playSpatial(audio::Sfx::ChestOpen, e.position, 0.6f);
+                break;
+            case game::GameEventType::PickedUp:
+                if (e.entity == 0) playSfx(audio::Sfx::Pickup, 0.8f);
+                break;
+            case game::GameEventType::AirdropIncoming:
+                m_airdropMessage = 5.0f;
+                break;
+            case game::GameEventType::AirdropLanded:
                 break;
             case game::GameEventType::WallRemoved:
                 playSfx(audio::Sfx::WallBuild, 0.5f);
@@ -693,6 +801,12 @@ void App::renderGame(const FrameInfo& frame) {
         m_characterTriangles = m_modelsReady ? renderCharacters(frustum, cameraEye()) : 0;
         renderTracers();
         // Lo semitransparente al final, para no tapar lo que hay detras.
+        if (m_propsReady) {
+            // El autobus (si alguien sigue dentro o se ve desde abajo) y el botin cercano.
+            m_props.drawBus(m_match.busPosition(), m_world.textures());
+            m_props.drawLoot(m_match, frustum, cameraEye(), drawDistance, m_match.elapsed(), m_world.textures());
+            m_props.drawBeams(m_match, frustum, cameraEye(), m_match.elapsed());
+        }
         m_world.drawStormWall(frustum, cameraEye(), drawDistance);
         if (m_buildVisualsReady && m_buildMode && !m_freeCameraActive) {
             if (m_targetWall >= 0) m_buildVisuals.drawHighlight(m_match.structures().wall(m_targetWall));
@@ -725,26 +839,39 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         return math3d::length(p - eye) < maxDistance + 2.0f &&
                frustum.sphereVisible(p + Vec3{0.0f, 0.9f, 0.0f}, 1.3f);
     };
+    // Postura segun la caida (en el autobus no se ve a nadie) y el ala delta encima.
+    auto pose = [&](int id) {
+        switch (m_match.airState(id)) {
+            case game::AirState::Freefall: return game::BodyPose::Skydive;
+            case game::AirState::Glide: return game::BodyPose::Glide;
+            default: return game::BodyPose::Normal;
+        }
+    };
     const game::CharacterState player = renderState(0);
-    if (visible(player.position)) {
+    if (m_match.airState(0) != game::AirState::Bus && visible(player.position)) {
         // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
         const game::Inventory& inv = m_match.inventory();
         const game::HeldItem held = inv.pickaxe()        ? game::HeldItem::Pickaxe
                                     : inv.activeWeapon() ? game::HeldItem::Rifle
                                                          : game::HeldItem::Empty;
-        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held);
+        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0));
+        if (m_propsReady && m_match.airState(0) == game::AirState::Glide) m_props.drawGlider(player.position, player.yaw);
         triangles += m_models[0].triangles();
     }
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);
+        const int id = i + 1;
+        if (m_match.airState(id) == game::AirState::Bus) continue;
         const bool eliminated = b.state == game::BotState::Eliminated;
         if (eliminated && m_match.elapsed() - b.eliminatedAt > kCorpseSeconds) continue;
-        const game::CharacterState s = renderState(i + 1);
+        const game::CharacterState s = renderState(id);
         if (!visible(s.position)) continue;
         // Mas alla de kCharacterLodDistance, la version de pocos poligonos.
         const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
-        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, game::HeldItem::Rifle, far);
+        const game::HeldItem held = b.armed ? game::HeldItem::Rifle : game::HeldItem::Pickaxe;
+        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id));
+        if (m_propsReady && m_match.airState(id) == game::AirState::Glide) m_props.drawGlider(s.position, s.yaw);
         triangles += far ? model.lowDetailTriangles() : model.triangles();
     }
     return triangles;

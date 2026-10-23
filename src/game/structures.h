@@ -25,6 +25,8 @@ struct BuildConfig {
     float minHeight = 2.2f;      // bajo un dintel la pared se recorta, pero no por debajo de esto
     float removeRange = 7.0f;    // m: alcance para quitar una pared apuntandola
     int wallCost = 10;           // madera por pared (como en Fortnite)
+    int maxBotWalls = 24;        // paredes de bots en pie a la vez (entre todos)
+    int maxWallsPerBot = 3;
 };
 
 constexpr int kMaxWallCapacity = 64;  // limite tecnico (cajas dinamicas disponibles)
@@ -57,6 +59,7 @@ struct BuiltWall {
     float health = 0.0f;
     float maxHealth = 0.0f;
     float sinceHit = 99.0f;  // para el parpadeo al recibir un disparo
+    int owner = 0;           // 0 = jugador, 1..N = bot que la levanto
 };
 
 class StructureSystem {
@@ -65,11 +68,12 @@ public:
     void reset(world::CollisionWorld& world, NavGrid& nav, const BuildConfig& config);
 
     // Calcula donde iria la pared delante de `feet` mirando a `yaw` y si es valida.
-    // `player` y `bots` son las cajas de los cuerpos que no puede atravesar.
+    // `player` (quien construye) y `bots` (el resto) son las cajas de los cuerpos que no
+    // puede atravesar. `owner`: 0 = jugador (limite maxWalls), 1..N = bot.
     WallPlacement plan(const math3d::Vec3& feet, float yaw, const world::Aabb& player,
-                       const world::Aabb* bots, int botCount) const;
+                       const world::Aabb* bots, int botCount, int owner = 0) const;
 
-    int place(const WallPlacement& placement);  // indice de la pared o -1
+    int place(const WallPlacement& placement, int owner = 0);  // indice de la pared o -1
     bool remove(int index);
     // Resta vida; devuelve true si la pared se ha destruido.
     bool damage(int index, float amount);
@@ -80,7 +84,10 @@ public:
     // Primera pared construida en el segmento (para quitarla apuntando), o -1.
     int wallAlong(const math3d::Vec3& from, const math3d::Vec3& to) const;
 
-    int count() const { return m_count; }
+    // Paredes del jugador en pie (las del limite maxWalls) y de todos.
+    int count() const { return countOwnedBy(0); }
+    int totalCount() const { return m_count; }
+    int countOwnedBy(int owner) const;  // owner < 0: de cualquier bot
     const BuildConfig& config() const { return m_config; }
     const BuiltWall& wall(int i) const { return m_walls[i]; }
     int capacity() const { return kMaxWallCapacity; }
@@ -91,6 +98,7 @@ private:
     void changed(const world::Aabb& box);
     bool blockedFrom(const math3d::Vec3& chest, const world::Aabb& box) const;
     bool duplicates(const WallPlacement& placement) const;
+    bool limitReached(int owner) const;
 
     BuildConfig m_config;
     world::CollisionWorld* m_world = nullptr;

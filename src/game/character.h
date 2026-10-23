@@ -40,6 +40,10 @@ struct MoveIntent {
     bool jumpHeld = false;
     bool faceYawOverride = false;  // true: mirar a faceYaw (apuntar) en vez de hacia donde anda
     float faceYaw = 0.0f;
+    // Caida desde el autobus: velocidad horizontal en el aire y velocidad de caida maxima
+    // (0 = las normales). Caida libre ~13 y 20 m/s; ala delta ~10 y 6 m/s.
+    float airSpeed = 0.0f;
+    float fallSpeed = 0.0f;
 };
 
 namespace tuning {
@@ -71,6 +75,12 @@ public:
     void reset(const math3d::Vec3& spawn, float yaw, const world::CollisionWorld& world);
     // Un paso de duracion fija. La pulsacion de salto se guarda en un buffer.
     void step(const MoveIntent& intent, float dt, const world::CollisionWorld& world);
+
+    // Coloca el cuerpo sin interpolar ni apoyarlo en el suelo (autobus, salida del autobus).
+    void place(const math3d::Vec3& position) {
+        m_state.position = position;
+        m_previous.position = position;
+    }
 
     CharacterState& state() { return m_state; }
     const CharacterState& state() const { return m_state; }

@@ -32,6 +32,7 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/app/app_menus.cpp" \
     "$ROOT/src/app/build_visuals.cpp" \
     "$ROOT/src/app/lobby_scene.cpp" \
+    "$ROOT/src/app/prop_visuals.cpp" \
     "$ROOT/src/app/ui.cpp" \
     "$ROOT/src/audio/audio_system.cpp" \
     "$ROOT/src/audio/mixer.cpp" \
@@ -42,6 +43,9 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/game/character.cpp" \
     "$ROOT/src/game/character_model.cpp" \
     "$ROOT/src/game/match.cpp" \
+    "$ROOT/src/game/match_air.cpp" \
+    "$ROOT/src/game/match_bots.cpp" \
+    "$ROOT/src/game/match_loot.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/game/inventory.cpp" \

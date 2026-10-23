@@ -11,7 +11,8 @@ using math3d::Vec3;
 
 namespace {
 
-constexpr float kDistance = 5.0f;       // metros del pivote al ojo
+constexpr float kLockTurnRate = 1.6f;   // rad/s: fijar objetivo gira la camara, no la clava
+constexpr float kLockLookRate = 1.0f;
 constexpr float kOrbitPitch = 0.24f;    // el ojo queda ~1.2 m por encima del pivote
 constexpr float kPivotHeight = 1.7f;    // sobre los pies
 constexpr float kDefaultLook = -0.065f; // ~ -4 grados: la mira cae a la altura del pecho
@@ -44,10 +45,14 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
                                float dt, bool recenter, const Vec3* lockTarget,
                                const world::CollisionWorld* world) {
     if (lockTarget) {
-        // Fijar objetivo: encararlo en horizontal y en vertical.
-        m_targetYaw = game::yawTowards(m_pivot, *lockTarget);
+        // Fijar objetivo: la camara gira hacia el con velocidad limitada (no se clava en el:
+        // si el objetivo se mueve, hay que seguir apuntando).
+        const float wantYaw = game::yawTowards(m_pivot, *lockTarget);
+        m_targetYaw = game::approachAngle(m_targetYaw, wantYaw, kLockTurnRate * dt);
         const Vec3 d = *lockTarget - m_eye;
-        m_targetLook = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
+        const float wantLook = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
+        const float dl = wantLook - m_targetLook, maxLook = kLockLookRate * dt;
+        m_targetLook += dl > maxLook ? maxLook : (dl < -maxLook ? -maxLook : dl);
     } else {
         // Giro manual: a la derecha el yaw decrece (crece hacia el oeste).
         m_targetYaw -= control.turn * kYawSpeed * dt;
@@ -57,7 +62,7 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
         if (control.follow > 0.0f) {
             const float k = smoothFactor(kFollowRate * control.follow, dt);
             m_targetYaw += game::wrapAngle(control.followYaw - m_targetYaw) * k;
-            m_targetLook += (kDefaultLook - m_targetLook) * smoothFactor(kLookReturnRate * control.follow, dt);
+            m_targetLook += (control.restLook - m_targetLook) * smoothFactor(kLookReturnRate * control.follow, dt);
         }
         if (recenter) {
             m_targetYaw = playerYaw;
@@ -73,7 +78,9 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
 
     const Vec3 wanted = playerPosition + Vec3{0.0f, kPivotHeight, 0.0f};
     const float h = smoothFactor(kFollowHorizontal, dt);
-    const float v = smoothFactor(kFollowVertical, dt);
+    // En caida libre (20 m/s) el seguimiento vertical suave se quedaria atras.
+    const float v = smoothFactor(fabsf(wanted.y - m_pivot.y) > 2.0f ? 20.0f : kFollowVertical, dt);
+    m_distance += (control.distance - m_distance) * smoothFactor(3.0f, dt);
     m_pivot.x += (wanted.x - m_pivot.x) * h;
     m_pivot.z += (wanted.z - m_pivot.z) * h;
     m_pivot.y += (wanted.y - m_pivot.y) * v;
@@ -82,9 +89,9 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
 }
 
 void ThirdPersonCamera::computeEye(const world::CollisionWorld* world) {
-    const float back = kDistance * cosf(kOrbitPitch);
+    const float back = m_distance * cosf(kOrbitPitch);
     const Vec3 desired =
-        m_pivot + Vec3{sinf(m_yaw) * back, kDistance * sinf(kOrbitPitch), cosf(m_yaw) * back};
+        m_pivot + Vec3{sinf(m_yaw) * back, m_distance * sinf(kOrbitPitch), cosf(m_yaw) * back};
     m_eye = desired;
     if (world) {
         world::RayHit hit;

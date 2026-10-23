@@ -4,54 +4,15 @@
 #include <stdio.h>
 
 #include "core/timer.h"
+#include "game/match_internal.h"
 #include "world/storm.h"
 
 namespace game {
 
 using math3d::Vec3;
 using namespace tuning;
+using namespace detail;
 
-namespace {
-
-constexpr float kArriveDistance = 1.2f;    // m para dar por alcanzado un punto del camino
-constexpr float kStuckWindow = 1.5f;       // s entre comprobaciones de progreso
-constexpr float kStuckMinProgress = 0.6f;  // m minimos en esa ventana si quiere moverse
-constexpr float kHitHalfWidth = 0.4f;      // caja de impacto de un personaje
-constexpr float kHitHeight = 1.85f;
-constexpr float kTracerLife = 0.12f;
-constexpr float kMinSeparation = 2.0f * kBodyRadius + 0.05f;
-constexpr float kSensorDistance = 0.9f;    // sensor de obstaculos delante del bot
-constexpr float kSensorTurn = 0.87f;       // ~50 grados
-
-Vec3 flatten(const Vec3& v) { return {v.x, 0.0f, v.z}; }
-
-float distXZ(const Vec3& a, const Vec3& b) {
-    const float dx = a.x - b.x, dz = a.z - b.z;
-    return sqrtf(dx * dx + dz * dz);
-}
-
-Vec3 rotateY(const Vec3& v, float a) {
-    const float c = cosf(a), s = sinf(a);
-    return {v.x * c + v.z * s, 0.0f, -v.x * s + v.z * c};
-}
-
-// Desvia `dir` un angulo aleatorio dentro de un cono de semiapertura `spread` (rad).
-Vec3 perturb(const Vec3& dir, float spread, core::Random& rng) {
-    const Vec3 up = fabsf(dir.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
-    const Vec3 right = math3d::normalize(math3d::cross(dir, up));
-    const Vec3 up2 = math3d::cross(right, dir);
-    const float angle = spread * sqrtf(rng.uniform());
-    const float phi = rng.range(0.0f, 2.0f * math3d::kPi);
-    const Vec3 offset = right * cosf(phi) + up2 * sinf(phi);
-    return math3d::normalize(dir * cosf(angle) + offset * sinf(angle));
-}
-
-world::Aabb bodyBoxAt(const Vec3& feet) {
-    return {{feet.x - kBodyRadius, feet.y + kStepHeight, feet.z - kBodyRadius},
-            {feet.x + kBodyRadius, feet.y + kBodyHeight, feet.z + kBodyRadius}};
-}
-
-}  // namespace
 
 const char* botStateName(BotState state) {
     switch (state) {
@@ -59,6 +20,7 @@ const char* botStateName(BotState state) {
         case BotState::Travel: return "Desplazarse";
         case BotState::Search: return "Buscar obj.";
         case BotState::Attack: return "Atacar";
+        case BotState::Loot: return "Botin";
         case BotState::Eliminated: return "Eliminado";
     }
     return "?";
@@ -110,9 +72,14 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_buildMode = false;
     m_inventory.clear();
     for (const MatchConfig::StartItem& item : m_config.startItems) {
-        m_inventory.add(item.type, item.count, &m_config.playerWeapon);
+        if (item.type != ItemType::None) m_inventory.add(item.type, item.rarity, item.count);
+    }
+    for (int a = 0; a < static_cast<int>(AmmoType::Count); ++a) {
+        m_inventory.addAmmo(static_cast<AmmoType>(a), m_config.startAmmo[a]);
     }
     m_inventory.select(0);
+    // Sin nada en las manos (como al saltar del autobus en Fortnite): el pico.
+    if (m_inventory.slot(0).type == ItemType::None) m_inventory.setPickaxe(true);
     m_materials = Materials{};
     for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
         m_materials.add(static_cast<world::Resource>(r), m_config.startMaterials[r]);
@@ -150,7 +117,11 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     for (int i = 0; i <= kMaxBots; ++i) {
         m_inStorm[i] = false;
         m_stormTimer[i] = 0.0f;
+        m_air[i] = AirState::Ground;
     }
+    // Botin repartido por el mapa y, si se empieza en el autobus, todos dentro.
+    spawnLoot();
+    if (m_config.startInBus) startBus();
     if (m_alive <= 1) {
         m_phase = MatchPhase::Finished;
         m_winner = 0;
@@ -177,6 +148,7 @@ void Match::spawnBots(const Vec3& playerSpawn) {
         b.body.reset(spawn, m_rng.range(-math3d::kPi, math3d::kPi), *m_world);
         b.state = BotState::Explore;
         b.weapon.reset(m_config.botWeapon);
+        b.armed = m_config.botsStartArmed;  // si no, aterriza solo con el pico y busca botin
         // Decisiones escalonadas: no piensan todos en el mismo paso.
         b.decisionTimer = m_config.aiDecisionInterval * static_cast<float>(i + 1) / static_cast<float>(n);
         b.palette = i % 3;
@@ -215,6 +187,7 @@ void Match::teleport(int id, const Vec3& position, float yaw) {
     mutableBody(id).reset(position, yaw, *m_world);
     mutableBody(id).state().health = health;
     mutableBody(id).state().shield = shield;
+    m_air[id] = AirState::Ground;
     if (id > 0) m_bots[id - 1].progressAnchor = position;
 }
 
@@ -223,7 +196,7 @@ int Match::findLockTarget(const Vec3& eye, const Vec3& forward, float maxAngleDe
     int best = -1;
     float bestCos = cosf(math3d::toRadians(maxAngleDegrees));
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id)) continue;
+        if (!alive(id) || m_air[id] == AirState::Bus) continue;
         const Vec3 chest = chestOf(id);
         const Vec3 v = chest - eye;
         const float d = math3d::length(v);
@@ -263,8 +236,10 @@ void Match::step(float dt) {
     for (Tracer& t : m_tracers) t.age += dt;
     for (DamageNumber& d : m_damageNumbers) d.age += dt;
     m_structures.update(dt);
+    updateAirdrops(dt);
 
     updatePlayer(dt);
+    autoPickupAmmo(0);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
     separateCharacters();
     updateStorm(dt);
@@ -282,7 +257,13 @@ void Match::updatePlayer(float dt) {
     m_pendingCycle = 0;
     m_sinceUseError += dt;
     if (m_swingCooldown > 0.0f) m_swingCooldown -= dt;
-    if (Weapon* w = m_inventory.activeWeapon()) w->update(dt);
+    if (Weapon* w = m_inventory.activeWeapon()) {
+        // La reserva es la municion comun del inventario (la recarga la gasta).
+        const AmmoType ammo = static_cast<AmmoType>(w->config().ammoType);
+        w->setReserve(m_inventory.ammo(ammo));
+        w->update(dt);
+        m_inventory.setAmmo(ammo, w->reserve());
+    }
     if (!alive(0)) {
         cancelUse();
         m_pendingUse = false;
@@ -295,6 +276,23 @@ void Match::updatePlayer(float dt) {
     m_pendingJump = false;
     const bool control = m_phase == MatchPhase::Playing || m_phase == MatchPhase::Finished;
     if (!control) in = PlayerInput{};
+
+    // En el autobus o cayendo: X salta / abre el ala delta y el stick dirige la caida.
+    if (m_air[0] != AirState::Ground) {
+        updateAirState(0, control && in.jumpPressed);
+        m_buildMode = false;
+        m_playerAiming = false;
+        m_assistTarget = -1;
+        m_pendingUse = false;
+        cancelUse();
+        if (m_air[0] == AirState::Bus) return;
+        in.jumpPressed = false;
+        const u64 t0 = core::nowMicros();
+        m_player.step(airIntent(0, playerIntent(in).wish, false), dt, *m_world);
+        m_stats.physicsMicros += core::nowMicros() - t0;
+        updateAirState(0, false);  // aterrizaje
+        return;
+    }
 
     // Cambiar lo que se lleva en la mano interrumpe la recarga y el consumible en uso.
     if (control && (cycle != 0 || togglePickaxe)) {
@@ -337,6 +335,14 @@ void Match::updatePlayer(float dt) {
 void Match::updatePlayerItems(float dt, bool reload) {
     const bool use = m_pendingUse;
     m_pendingUse = false;
+    // CUADRADO: abrir / recoger lo que haya al alcance; si no hay nada, recargar.
+    if (reload) {
+        const Interactable target = interactableFor(0);
+        if (target.kind != Interactable::Kind::None) {
+            interact(0, target);
+            reload = false;
+        }
+    }
     if (m_inventory.pickaxe()) {
         // Pico: un golpe cada pickaxeInterval mientras se mantiene R.
         m_assistTarget = -1;
@@ -347,6 +353,8 @@ void Match::updatePlayerItems(float dt, bool reload) {
         return;
     }
     if (Weapon* weapon = m_inventory.activeWeapon()) {
+        const AmmoType ammo = static_cast<AmmoType>(weapon->config().ammoType);
+        weapon->setReserve(m_inventory.ammo(ammo));
         const bool wasReloading = weapon->reloading();
         if (reload) weapon->startReload();
         // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
@@ -356,10 +364,18 @@ void Match::updatePlayerItems(float dt, bool reload) {
                              : -1;
         // tryFire() aplica municion y cadencia: mantener R da como mucho un disparo por
         // intervalo (y por paso), nunca uno por frame.
-        if (m_aim.fire && m_phase != MatchPhase::Finished && weapon->tryFire()) {
-            playerShot(m_aim, weapon->config().damage, range);
+        if (m_aim.fire && m_phase != MatchPhase::Finished) {
+            const float spread = playerSpread(weapon->config());  // antes de tryFire (primer disparo)
+            if (weapon->tryFire()) {
+                const WeaponConfig& w = weapon->config();
+                const int type = static_cast<int>(m_inventory.activeType());
+                for (int pellet = 0; pellet < w.pellets; ++pellet) {
+                    playerShot(m_aim, w.damage / static_cast<float>(w.pellets), range, spread, &w, pellet == 0, type);
+                }
+            }
         }
         if (!wasReloading && weapon->reloading()) pushEvent(GameEventType::Reload, 0, -1, chestOf(0));
+        m_inventory.setAmmo(ammo, weapon->reserve());
         return;
     }
     // Consumible: R lo empieza a usar; termina tras su tiempo de uso si no se cambia de
@@ -412,6 +428,28 @@ void Match::cancelUse() {
     if (m_useSlot < 0) return;
     pushEvent(GameEventType::UseCanceled, 0, static_cast<int>(m_inventory.slot(m_useSlot).type), chestOf(0));
     m_useSlot = -1;
+}
+
+float Match::playerSpread(const WeaponConfig& w) const {
+    // Dispersion (grados): apuntando con L, la de apuntar; si no, la de cadera. Moverse y
+    // saltar la aumentan. Quieto, apuntando y sin haber disparado en 0.35 s, el primer
+    // disparo va exacto (como en Fortnite). La escopeta siempre abre su cono.
+    if (!m_config.weaponSpread) return 0.0f;
+    const CharacterState& s = m_player.state();
+    const bool aiming = m_input.aiming;
+    float spread = aiming ? w.aimSpread : w.hipSpread;
+    if (s.horizontalSpeed() > 1.0f) spread += 1.0f;
+    if (!s.grounded()) spread += 3.0f;
+    const Weapon* weapon = m_inventory.activeWeapon();
+    if (w.pellets == 1 && aiming && s.horizontalSpeed() < 0.5f && s.grounded() && weapon && weapon->sinceShot() > 0.35f) {
+        spread = 0.0f;
+    }
+    return spread;
+}
+
+int Match::playerReserve() const {
+    const Weapon& w = playerWeapon();
+    return m_inventory.ammo(static_cast<AmmoType>(w.config().ammoType));
 }
 
 const Weapon& Match::playerWeapon() const {
@@ -514,369 +552,6 @@ void Match::harvest(int index, const Vec3& point) {
     m_events[(m_eventCount - 1) % kMaxEvents].amount = added;
 }
 
-void Match::updateBot(int index, float dt) {
-    Bot& b = m_bots[index];
-    if (b.state == BotState::Eliminated) return;
-
-    const u64 t0 = core::nowMicros();
-    b.stateTime += dt;
-    b.weapon.update(dt);
-    b.reaction -= dt;
-    b.sidestepTimer -= dt;
-    b.strafeTimer -= dt;
-    b.pathRefresh -= dt;
-    b.decisionTimer -= dt;
-    if (b.decisionTimer <= 0.0f) {
-        decide(index);
-        ++m_stats.decisions;
-        b.decisionTimer += m_config.aiDecisionInterval;
-        if (b.decisionTimer <= 0.0f) b.decisionTimer = m_config.aiDecisionInterval;
-    }
-    const MoveIntent intent = steer(index, dt);
-    const u64 t1 = core::nowMicros();
-    b.body.step(intent, dt, *m_world);
-    const u64 t2 = core::nowMicros();
-    botShoot(index);
-    m_stats.aiMicros += (t1 - t0) + (core::nowMicros() - t2);
-    m_stats.physicsMicros += t2 - t1;
-}
-
-// --- IA: decisiones (cada aiDecisionInterval) -----------------------------------------------
-
-int Match::perceive(int index) const {
-    const Bot& b = m_bots[index];
-    const int self = index + 1;
-    const CharacterState& s = b.body.state();
-    const Vec3 eye = eyeOf(self);
-    const Vec3 forward = forwardFromYaw(s.yaw);
-    const float fovCos = b.state == BotState::Search ? -2.0f : cosf(math3d::toRadians(m_config.fovDegrees * 0.5f));
-
-    int best = -1;
-    float bestScore = 1e9f;
-    for (int id = 0; id < entityCount(); ++id) {
-        if (id == self || !alive(id)) continue;
-        const Vec3 p = body(id).state().position;
-        const float d = distXZ(p, s.position);
-        if (d > m_config.sightRange) continue;
-        // Campo de vision (el objetivo actual se sigue aunque salga del cono).
-        if (d > 2.5f && id != b.target) {
-            const Vec3 dir = flatten(p - s.position) * (1.0f / d);
-            if (math3d::dot(dir, forward) < fovCos) continue;
-        }
-        if (!lineOfSight(eye, chestOf(id))) continue;
-        const float score = d * (id == b.target ? 0.6f : 1.0f);
-        if (score < bestScore) {
-            bestScore = score;
-            best = id;
-        }
-    }
-    return best;
-}
-
-void Match::chooseDestination(Bot& b) {
-    const float radius = zoneRadius();
-    Vec3 dest = m_config.zoneCenter;
-    bool chosen = false;
-    if (!m_pois.empty() && m_rng.chance(0.55f)) {
-        for (int attempt = 0; attempt < 6 && !chosen; ++attempt) {
-            const Vec3& poi = m_pois[m_rng.index(static_cast<int>(m_pois.size()))];
-            if (distXZ(poi, m_config.zoneCenter) > radius + 5.0f) continue;
-            chosen = m_nav->randomPointNear(poi, 5.0f, m_rng, &dest);
-        }
-    }
-    if (!chosen) m_nav->randomPointNear(m_config.zoneCenter, radius, m_rng, &dest);
-    b.destination = dest;
-}
-
-bool Match::requestPath(Bot& b, const Vec3& to) {
-    if (m_pathBudget <= 0) return false;
-    --m_pathBudget;
-    ++m_stats.pathRequests;
-    int expansions = 0;
-    const int n = m_nav->findPath(b.body.state().position, to, b.path, kMaxPathPoints, &expansions);
-    if (expansions > m_stats.maxPathExpansions) m_stats.maxPathExpansions = expansions;
-    if (n == 0) {
-        ++m_stats.pathFailures;
-        b.pathLength = 0;
-        return false;
-    }
-    b.pathLength = n;
-    b.pathIndex = 0;
-    return true;
-}
-
-void Match::decide(int index) {
-    Bot& b = m_bots[index];
-    const Vec3 pos = b.body.state().position;
-    const float interval = m_config.aiDecisionInterval;
-
-    if (b.target >= 0 && !alive(b.target)) {
-        b.target = -1;
-        b.targetVisible = false;
-        if (b.state == BotState::Attack) {
-            b.state = BotState::Search;
-            b.stateTime = 0.0f;
-            b.searchDuration = m_rng.range(1.5f, 3.0f);
-            b.searchYaw = b.body.state().yaw;
-        }
-    }
-
-    // Percepcion: rango + campo de vision + linea de vision (raycast).
-    const int seen = perceive(index);
-    if (seen >= 0) {
-        if (b.state != BotState::Attack || b.target != seen) {
-            b.reaction = m_config.reactionTime;
-            b.stateTime = 0.0f;
-            b.pathLength = 0;  // el camino de exploracion ya no sirve
-            b.pathRefresh = 0.0f;
-        }
-        b.state = BotState::Attack;
-        b.target = seen;
-        b.targetVisible = true;
-        b.breakingWall = false;
-        b.lastSeen = body(seen).state().position;
-        b.lostTime = 0.0f;
-    } else if (b.state == BotState::Attack) {
-        b.targetVisible = false;
-        b.lostTime += interval;
-        // Objetivo escondido tras una pared construida cercana: disparar a la pared.
-        b.breakingWall = false;
-        if (b.target >= 0 && alive(b.target) && distXZ(pos, body(b.target).state().position) < m_config.attackRange) {
-            world::RayHit hit;
-            if (m_world->raycast(eyeOf(index + 1), chestOf(b.target), world::kBlocksShots, &hit) &&
-                m_structures.wallFromCollider(hit.dynamicHandle) >= 0) {
-                b.breakingWall = true;
-                b.wallPoint = hit.point;
-                b.lostTime = 0.0f;  // sigue atacando mientras haya pared que romper
-            }
-        }
-        if (b.lostTime > 6.0f || b.target < 0) {
-            b.state = BotState::Search;
-            b.stateTime = 0.0f;
-            b.searchDuration = m_rng.range(2.0f, 4.0f);
-            b.searchYaw = b.body.state().yaw;
-            b.pathLength = 0;
-        } else if (b.pathRefresh <= 0.0f) {
-            // Va hacia donde lo vio por ultima vez.
-            requestPath(b, b.lastSeen);
-            b.pathRefresh = 2.0f;
-        }
-    }
-
-    switch (b.state) {
-        case BotState::Explore:
-            chooseDestination(b);
-            if (requestPath(b, b.destination)) {
-                b.state = BotState::Travel;
-                b.stateTime = 0.0f;
-                b.progressAnchor = pos;
-                b.progressTimer = 0.0f;
-                b.stuckCount = 0;
-            }
-            break;
-        case BotState::Travel:
-            // Una pared nueva (o destruida) ha cambiado la navegacion: camino nuevo.
-            if (b.repath) {
-                if (!requestPath(b, b.destination)) break;
-                b.repath = false;
-            }
-            // Atajo: si el punto siguiente al actual ya se ve libre, se salta el actual.
-            if (b.pathIndex + 1 < b.pathLength &&
-                NavGrid::clearWalk(*m_world, pos, b.path[b.pathIndex + 1], kBodyRadius)) {
-                ++b.pathIndex;
-            }
-            if (b.pathIndex >= b.pathLength) {
-                b.state = BotState::Search;
-                b.stateTime = 0.0f;
-                b.searchDuration = m_rng.range(2.0f, 4.0f);
-                b.searchYaw = b.body.state().yaw;
-            } else if (distXZ(b.destination, m_config.zoneCenter) > zoneRadius() + 6.0f) {
-                b.state = BotState::Explore;  // la zona se ha cerrado: otro destino
-            }
-            break;
-        case BotState::Search:
-            if (b.stateTime > b.searchDuration) b.state = BotState::Explore;
-            break;
-        case BotState::Attack:
-            if (b.strafeTimer <= 0.0f) {
-                b.strafeSign = m_rng.chance(0.5f) ? 1.0f : -1.0f;
-                b.strafeTimer = m_rng.range(0.8f, 1.8f);
-            }
-            if (b.targetVisible) {
-                const float d = distXZ(pos, b.lastSeen);
-                if (d > m_config.attackRange && b.pathRefresh <= 0.0f &&
-                    !NavGrid::clearWalk(*m_world, pos, b.lastSeen, kBodyRadius)) {
-                    requestPath(b, b.lastSeen);
-                    b.pathRefresh = 2.0f;
-                } else if (d <= m_config.attackRange) {
-                    b.pathLength = 0;
-                }
-            }
-            break;
-        case BotState::Eliminated:
-            return;
-    }
-
-    // Deteccion de atascos: si quiere ir a algun sitio y apenas avanza, se aparta y salta;
-    // a la segunda replanifica desde donde esta; a la tercera cambia de destino.
-    const bool wantsToMove = b.pathIndex < b.pathLength &&
-                             (b.state == BotState::Travel || b.state == BotState::Attack);
-    b.progressTimer += interval;
-    if (b.progressTimer >= kStuckWindow) {
-        const float moved = distXZ(pos, b.progressAnchor);
-        if (wantsToMove && moved < kStuckMinProgress) {
-            ++b.stuckCount;
-            ++m_stats.stuckEvents;
-            b.sidestepTimer = 0.7f;
-            b.sidestepSign = m_rng.chance(0.5f) ? 1.0f : -1.0f;
-            b.wantsJump = true;
-            if (b.stuckCount >= 3) {
-                b.stuckCount = 0;
-                b.pathLength = 0;
-                if (b.state == BotState::Travel) b.state = BotState::Explore;
-            } else if (b.stuckCount == 2) {
-                requestPath(b, b.state == BotState::Attack ? b.lastSeen : b.destination);
-            }
-        } else if (moved > 2.0f) {
-            b.stuckCount = 0;
-        }
-        b.progressAnchor = pos;
-        b.progressTimer = 0.0f;
-    }
-}
-
-// --- IA: ejecucion del plan (cada paso, barato) ---------------------------------------------
-
-MoveIntent Match::steer(int index, float dt) {
-    Bot& b = m_bots[index];
-    const int self = index + 1;
-    const CharacterState& s = b.body.state();
-    const Vec3 pos = s.position;
-    MoveIntent intent;
-    Vec3 desired{0.0f, 0.0f, 0.0f};
-    float speed = 0.8f;
-    b.aiming = false;
-
-    auto followPath = [&]() {
-        while (b.pathIndex < b.pathLength && distXZ(pos, b.path[b.pathIndex]) < kArriveDistance) ++b.pathIndex;
-        if (b.pathIndex >= b.pathLength) return false;
-        desired = math3d::normalize(flatten(b.path[b.pathIndex] - pos));
-        return true;
-    };
-
-    switch (b.state) {
-        case BotState::Travel:
-            followPath();
-            break;
-        case BotState::Attack: {
-            const Vec3 to = flatten(b.lastSeen - pos);
-            const float d = math3d::length(to);
-            intent.faceYawOverride = true;
-            intent.faceYaw = yawTowards(pos, b.breakingWall ? b.wallPoint : b.lastSeen);
-            b.aiming = b.targetVisible || b.breakingWall;
-            if (b.breakingWall) {
-                // Quieto disparando a la pared (se aparta si esta pegado a ella).
-                const Vec3 toWall = flatten(b.wallPoint - pos);
-                const float dw = math3d::length(toWall);
-                if (dw < 2.5f && dw > 0.01f) desired = toWall * (-1.0f / dw);
-                speed = 0.5f;
-            } else if (!b.targetVisible || d > m_config.attackRange) {
-                if (!followPath() && d > 1.5f) desired = to * (1.0f / d);
-                speed = 0.9f;
-            } else if (d > 0.01f) {
-                // A distancia de combate: moverse de lado (y alejarse si esta muy cerca).
-                desired = Vec3{-to.z, 0.0f, to.x} * (b.strafeSign / d);
-                if (d < 7.0f) desired += to * (-0.7f / d);
-                speed = 0.55f;
-            }
-            break;
-        }
-        case BotState::Search:
-            b.searchYaw = wrapAngle(b.searchYaw + 1.4f * dt);
-            intent.faceYawOverride = true;
-            intent.faceYaw = b.searchYaw;
-            break;
-        case BotState::Explore:
-        case BotState::Eliminated:
-            break;
-    }
-
-    // Atascado: moverse de lado un momento.
-    if (b.sidestepTimer > 0.0f) {
-        const Vec3 base = math3d::length(desired) > 0.01f ? desired : forwardFromYaw(s.yaw);
-        desired = Vec3{-base.z, 0.0f, base.x} * b.sidestepSign + base * 0.3f;
-    }
-
-    // Separacion: no amontonarse con otros personajes.
-    for (int id = 0; id < entityCount(); ++id) {
-        if (id == self || !alive(id)) continue;
-        const Vec3 other = body(id).state().position;
-        const float d = distXZ(pos, other);
-        if (d < 1.4f && d > 0.001f) desired += flatten(pos - other) * ((1.4f - d) * 1.5f / d);
-    }
-
-    // Sensor: si justo delante hay un obstaculo, probar 50 grados a cada lado.
-    const float len = math3d::length(desired);
-    if (len > 0.05f) {
-        Vec3 dir = desired * (1.0f / len);
-        if (m_world->overlapsAny(bodyBoxAt(pos + dir * kSensorDistance), world::kBlocksMovement)) {
-            const Vec3 left = rotateY(dir, kSensorTurn);
-            const Vec3 right = rotateY(dir, -kSensorTurn);
-            const bool leftFree = !m_world->overlapsAny(bodyBoxAt(pos + left * kSensorDistance), world::kBlocksMovement);
-            const bool rightFree = !m_world->overlapsAny(bodyBoxAt(pos + right * kSensorDistance), world::kBlocksMovement);
-            if (leftFree && (!rightFree || b.sidestepSign > 0.0f)) dir = left;
-            else if (rightFree) dir = right;
-        }
-        desired = dir * (len > 1.0f ? 1.0f : len);
-    }
-
-    intent.wish = desired;
-    intent.speedScale = speed;
-    if (b.wantsJump) {
-        intent.jumpPressed = true;
-        intent.jumpHeld = true;
-        b.wantsJump = false;
-    }
-    return intent;
-}
-
-void Match::botShoot(int index) {
-    Bot& b = m_bots[index];
-    const int self = index + 1;
-    if (b.state != BotState::Attack || b.reaction > 0.0f) return;
-    if (!alive(b.target) || m_phase == MatchPhase::Finished) return;
-    const CharacterState& s = b.body.state();
-    if (!b.targetVisible) {
-        if (!b.breakingWall) return;
-        // Disparo a la pared que tapa al objetivo.
-        if (fabsf(wrapAngle(s.yaw - yawTowards(s.position, b.wallPoint))) > 0.45f) return;
-        if (!b.weapon.tryFire()) return;
-        const Vec3 eye = eyeOf(self);
-        const WeaponConfig& weapon = m_config.botWeapon;
-        const Vec3 dir = perturb(math3d::normalize(b.wallPoint - eye), math3d::toRadians(m_config.botSpreadDegrees), m_rng);
-        fireShot(self, eye, dir, weapon.range, weapon.damage);
-        b.weapon.addCooldown(weapon.fireInterval * m_rng.range(-0.15f, 0.25f));
-        return;
-    }
-    const Vec3 targetPos = body(b.target).state().position;
-    // Solo dispara si ya esta encarado (no dispara de espaldas).
-    if (fabsf(wrapAngle(s.yaw - yawTowards(s.position, targetPos))) > 0.45f) return;
-
-    const Vec3 eye = eyeOf(self);
-    const Vec3 aim = chestOf(b.target);
-    const float d = math3d::length(aim - eye);
-    const WeaponConfig& weapon = m_config.botWeapon;
-    if (d > weapon.range) return;
-    // El arma decide si puede disparar (cadencia, municion, recarga).
-    if (!b.weapon.tryFire()) return;
-    float spreadDeg = m_config.botSpreadDegrees + m_config.botSpreadPerMeter * d;
-    if (body(b.target).state().horizontalSpeed() > 2.0f) spreadDeg += 1.5f;
-    if (s.horizontalSpeed() > 1.0f) spreadDeg += 1.0f;
-    const Vec3 dir = perturb(math3d::normalize(aim - eye), math3d::toRadians(spreadDeg), m_rng);
-    fireShot(self, eye, dir, weapon.range, weapon.damage);
-    b.weapon.addCooldown(weapon.fireInterval * m_rng.range(-0.15f, 0.25f));  // cadencia algo irregular
-}
-
 // --- Combate --------------------------------------------------------------------------------
 
 ShotResult Match::fireShot(int shooter, const Vec3& origin, const Vec3& direction, float range,
@@ -884,10 +559,13 @@ ShotResult Match::fireShot(int shooter, const Vec3& origin, const Vec3& directio
     return resolveShot(shooter, origin, origin + direction * range, damage);
 }
 
-ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range) {
+ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, float spreadDegrees,
+                             const WeaponConfig* weapon, bool emitShot, int weaponType) {
     const Vec3 chest = chestOf(0);
     Vec3 dir = aim.direction;
     if (m_assistTarget >= 0) dir = math3d::normalize(chestOf(m_assistTarget) - aim.eye);
+    // Dispersion del arma (despues de la ayuda de punteria: la ayuda no la anula).
+    if (spreadDegrees > 0.0f) dir = perturb(dir, math3d::toRadians(spreadDegrees), m_rng);
 
     // 1) Rayo desde la camara por el centro de la mira. Empieza a la altura del jugador:
     //    lo que haya entre la camara y el jugador no cuenta.
@@ -898,7 +576,7 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range) {
     float best = m_world->raycast(start, end, world::kBlocksShots, &wallHit) ? wallHit.t : 1.0f;
     const Vec3 seg = end - start;
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id)) continue;
+        if (!alive(id) || m_air[id] == AirState::Bus) continue;
         const Vec3 p = body(id).state().position;
         const world::Aabb box{{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth},
                               {p.x + kHitHalfWidth, p.y + kHitHeight, p.z + kHitHalfWidth}};
@@ -911,12 +589,25 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range) {
     //    (p. ej. un muro que la camara ve por encima), el disparo termina en el solido.
     Vec3 toTarget = aimPoint - chest;
     const float len = math3d::length(toTarget);
-    if (len < 0.05f) return resolveShot(0, chest, chest + dir * range, damage);
+    if (len < 0.05f) return resolveShot(0, chest, chest + dir * range, damage, weapon, emitShot, weaponType);
     toTarget = toTarget * (1.0f / len);
-    return resolveShot(0, chest, aimPoint + toTarget * 0.1f, damage);
+    return resolveShot(0, chest, aimPoint + toTarget * 0.1f, damage, weapon, emitShot, weaponType);
 }
 
-ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, float damage) {
+void Match::fireWeapon(int shooter, const Vec3& origin, const Vec3& direction, const WeaponConfig& weapon,
+                       float spreadDegrees, float damageScale, int weaponType) {
+    // Un disparo (un sonido); la escopeta reparte el dano entre sus perdigones.
+    const int pellets = weapon.pellets > 0 ? weapon.pellets : 1;
+    const float spread = weapon.pellets > 1 ? fmaxf(spreadDegrees, weapon.hipSpread) : spreadDegrees;
+    for (int i = 0; i < pellets; ++i) {
+        const Vec3 dir = perturb(direction, math3d::toRadians(spread), m_rng);
+        resolveShot(shooter, origin, origin + dir * weapon.range, weapon.damage * damageScale / static_cast<float>(pellets),
+                    &weapon, i == 0, weaponType);
+    }
+}
+
+ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, float damage,
+                              const WeaponConfig* weapon, bool emitShot, int weaponType) {
     ShotResult result;
     const Vec3 seg = end - origin;
     world::RayHit wallHit;
@@ -924,7 +615,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
     float best = wall ? wallHit.t : 1.0f;
     int victim = -1;
     for (int id = 0; id < entityCount(); ++id) {
-        if (id == shooter || !alive(id)) continue;
+        if (id == shooter || !alive(id) || m_air[id] == AirState::Bus) continue;
         const Vec3 p = body(id).state().position;
         const world::Aabb box{{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth},
                               {p.x + kHitHalfWidth, p.y + kHitHeight, p.z + kHitHalfWidth}};
@@ -934,9 +625,18 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
             victim = id;
         }
     }
-    ++m_stats.shotsFired;
     result.end = origin + seg * best;
-    pushEvent(GameEventType::Shot, shooter, -1, origin);
+    if (emitShot) {
+        ++m_stats.shotsFired;
+        pushEvent(GameEventType::Shot, shooter, weaponType, origin);
+        if (shooter >= 0) hearShot(shooter, origin);
+    }
+    // Caida del dano con la distancia (escopeta y subfusil).
+    if (weapon && weapon->falloffEnd > weapon->falloffStart) {
+        const float d = math3d::length(result.end - origin);
+        const float t = math3d::clampf((d - weapon->falloffStart) / (weapon->falloffEnd - weapon->falloffStart), 0.0f, 1.0f);
+        damage *= 1.0f + (weapon->falloffMin - 1.0f) * t;
+    }
     if (victim >= 0) {
         pushEvent(GameEventType::HitEntity, victim, shooter, result.end);
         ++m_stats.shotsHitEntity;
@@ -988,6 +688,12 @@ void Match::pushEvent(GameEventType type, int entity, int other, const Vec3& pos
 }
 
 void Match::addDamageNumber(const Vec3& position, float amount, bool structure) {
+    // Los perdigones de un mismo disparo de escopeta suman en un solo numero.
+    DamageNumber& last = m_damageNumbers[(m_nextDamageNumber + kMaxDamageNumbers - 1) % kMaxDamageNumbers];
+    if (last.age == 0.0f && last.structure == structure && math3d::length(last.position - position) < 1.6f) {
+        last.amount += amount;
+        return;
+    }
     DamageNumber& d = m_damageNumbers[m_nextDamageNumber];
     // Pequeno desplazamiento lateral alterno para que los numeros seguidos no se tapen.
     const float side = (m_nextDamageNumber % 3 - 1) * 0.25f;
@@ -1081,8 +787,10 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
         m_sincePlayerDamaged = 0.0f;
         pushEvent(GameEventType::PlayerHurt, 0, attacker, chestOf(0));
     } else if (attacker >= 0 && attacker != victim && alive(attacker)) {
-        // Un bot que recibe un disparo se gira hacia quien le ha dado.
+        // Un bot que recibe un disparo se cubre con una pared (a veces, en su siguiente
+        // paso: no a mitad del disparo) y se gira hacia quien le ha dado.
         Bot& b = m_bots[victim - 1];
+        b.coverFrom = attacker;
         if (b.state != BotState::Attack || !b.targetVisible) {
             b.state = BotState::Attack;
             b.target = attacker;
@@ -1104,6 +812,7 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
 void Match::eliminate(int victim, int killer) {
     pushEvent(GameEventType::Eliminated, victim, killer, body(victim).state().position);
     if (victim > 0) {
+        if (m_config.loot) dropBotWeapon(victim - 1);  // su arma queda en el suelo
         Bot& b = m_bots[victim - 1];
         b.state = BotState::Eliminated;
         b.eliminatedAt = m_time;
@@ -1145,7 +854,7 @@ void Match::updateStorm(float dt) {
     // Tormenta del limite del mapa: al entrar, un golpe; despues, uno cada stormTickSeconds.
     if (m_phase == MatchPhase::Finished) return;
     for (int id = 0; id < entityCount(); ++id) {
-        if (!alive(id)) {
+        if (!alive(id) || m_air[id] == AirState::Bus) {
             m_inStorm[id] = false;
             continue;
         }
@@ -1173,9 +882,9 @@ void Match::updateStorm(float dt) {
 void Match::separateCharacters() {
     const int n = entityCount();
     for (int a = 0; a < n; ++a) {
-        if (!alive(a)) continue;
+        if (!alive(a) || m_air[a] != AirState::Ground) continue;
         for (int c = a + 1; c < n; ++c) {
-            if (!alive(c)) continue;
+            if (!alive(c) || m_air[c] != AirState::Ground) continue;
             CharacterState& sa = mutableBody(a).state();
             CharacterState& sc = mutableBody(c).state();
             if (fabsf(sa.position.y - sc.position.y) > kBodyHeight - 0.1f) continue;
