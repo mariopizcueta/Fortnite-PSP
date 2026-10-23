@@ -89,7 +89,8 @@ private:
     void playSpatial(audio::Sfx sfx, const math3d::Vec3& position, float maxVolume) const;
     void updatePerformance(float dt);
     void renderGame(const FrameInfo& frame);
-    void renderCharacters(const math3d::Frustum& frustum, const math3d::Vec3& eye) const;
+    // Devuelve los triangulos de personajes dibujados (para la pagina de depuracion).
+    int renderCharacters(const math3d::Frustum& frustum, const math3d::Vec3& eye) const;
     void renderTracers() const;
     void renderExitBar(float x, float y, float w, float h) const;
     math3d::Vec3 cameraEye() const;
@@ -144,6 +145,7 @@ private:
     world::World m_world;
     bool m_worldReady = false;
     world::RenderStats m_stats;
+    int m_characterTriangles = 0;  // del ultimo frame
     camera::Projection m_projection;
     game::NavGrid m_nav;
 

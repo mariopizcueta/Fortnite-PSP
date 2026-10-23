@@ -19,7 +19,8 @@ using math3d::Vec3;
 
 constexpr float kLockAngleDegrees = 35.0f;  // L: objetivo dentro de este cono
 constexpr float kLockDistance = 45.0f;
-constexpr float kSoundRange = 60.0f;        // m: mas lejos no se oyen disparos de bots
+constexpr float kSoundRange = 60.0f;
+constexpr float kCharacterLodDistance = 10.0f;  // m: bots mas lejos con el modelo simple        // m: mas lejos no se oyen disparos de bots
 
 // Aparicion del jugador: al sur del muro, mirando al deposito.
 constexpr Vec3 kPlayerSpawn{0.0f, 0.0f, 24.0f};
@@ -109,8 +110,8 @@ void App::init() {
         &game::palettes::kRanger};
     m_modelsReady = true;
     for (int i = 0; i < kModelCount; ++i) m_modelsReady &= m_models[i].build(*palettes[i]);
-    platform::log::write("modelos de personaje: %s, %d triangulos cada uno",
-                         m_modelsReady ? "ok" : "ERROR", m_models[0].triangles());
+    platform::log::write("modelos de personaje: %s, %d triangulos (%d el de lejos)",
+                         m_modelsReady ? "ok" : "ERROR", m_models[0].triangles(), m_models[0].lowDetailTriangles());
     m_buildVisualsReady = m_buildVisuals.build(m_matchConfig.build);
     m_lobbyReady = m_lobbyScene.build();
     buildMinimap();
@@ -613,7 +614,7 @@ void App::renderGame(const FrameInfo& frame) {
         const float drawDistance = m_fog ? config::kFogEnd : config::kFarPlane;
         m_stats = m_world.draw(frustum, cameraEye(), drawDistance);
         if (m_buildVisualsReady) m_buildVisuals.drawWalls(m_match.structures(), m_world.textures());
-        if (m_modelsReady) renderCharacters(frustum, cameraEye());
+        m_characterTriangles = m_modelsReady ? renderCharacters(frustum, cameraEye()) : 0;
         renderTracers();
         // Lo semitransparente al final, para no tapar lo que hay detras.
         if (m_buildVisualsReady && m_buildMode && !m_freeCameraActive) {
@@ -642,7 +643,8 @@ void App::renderGame(const FrameInfo& frame) {
     }
 }
 
-void App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const {
+int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const {
+    int triangles = 0;
     const float maxDistance = m_fog ? config::kFogEnd : config::kFarPlane;
     auto visible = [&](const Vec3& p) {
         return math3d::length(p - eye) < maxDistance + 2.0f &&
@@ -656,6 +658,7 @@ void App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) cons
                                     : inv.activeWeapon() ? game::HeldItem::Rifle
                                                          : game::HeldItem::Empty;
         m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held);
+        triangles += m_models[0].triangles();
     }
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);
@@ -663,8 +666,13 @@ void App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) cons
         if (eliminated && m_match.elapsed() - b.eliminatedAt > kCorpseSeconds) continue;
         const game::CharacterState s = renderState(i + 1);
         if (!visible(s.position)) continue;
-        m_models[1 + b.palette % 3].draw(s, m_botAnims[i], m_world.textures(), eliminated);
+        // Mas alla de kCharacterLodDistance, la version de pocos poligonos.
+        const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
+        const game::CharacterModel& model = m_models[1 + b.palette % 3];
+        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, game::HeldItem::Rifle, far);
+        triangles += far ? model.lowDetailTriangles() : model.triangles();
     }
+    return triangles;
 }
 
 void App::renderTracers() const {

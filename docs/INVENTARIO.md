@@ -82,7 +82,11 @@ cajas).
   construcción.
 
 **HUD y sonido:**
-- **Materiales:** los contadores bajo el minimapa son reales.
+- **Materiales:** los contadores bajo el minimapa son reales. Los iconos de madera, ladrillo
+  y metal son los de `Recursos/HUD/` (`Wood_icon`, `stone_orig`, `Metal_icon`).
+- **Ranuras:** la SCAR y la minipoción se dibujan con sus ranuras de `Recursos`
+  (`Weapons/AssaultRiffleLegendary.png`, `HUD/minipocion.png`), que ya traen el fondo de
+  rareza.
 - **Al picar:** cada golpe con material muestra su icono y "+8" junto a la mira.
 - **Sonido:** el golpe suena con `pico.wav`, un sonido original nuevo.
 

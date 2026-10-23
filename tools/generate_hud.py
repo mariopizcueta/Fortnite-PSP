@@ -26,45 +26,6 @@ def canvas(w, h):
     return Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
 
-def scar():
-    # Fusil de asalto de perfil (canon a la derecha), dorado como la SCAR legendaria.
-    img = canvas(48, 24)
-    d = ImageDraw.Draw(img)
-    d.rectangle((10, 8, 36, 13), fill=GOLD, outline=OUTLINE)       # cuerpo
-    d.rectangle((36, 9, 46, 11), fill=DARK, outline=OUTLINE)       # canon
-    d.rectangle((2, 9, 10, 15), fill=GOLD_DARK, outline=OUTLINE)   # culata
-    d.rectangle((16, 13, 20, 20), fill=DARK, outline=OUTLINE)      # cargador
-    d.rectangle((24, 13, 27, 18), fill=GOLD_DARK, outline=OUTLINE) # empunadura
-    d.rectangle((18, 5, 30, 7), fill=DARK, outline=OUTLINE)        # mira
-    return img
-
-
-def wood():
-    img = canvas(16, 16)
-    d = ImageDraw.Draw(img)
-    for i, y in enumerate((3, 7, 11)):
-        d.rectangle((1 + i, y, 14 - i, y + 3), fill=(176, 120, 64, 255), outline=(90, 56, 26, 255))
-    return img
-
-
-def brick():
-    img = canvas(16, 16)
-    d = ImageDraw.Draw(img)
-    d.rectangle((1, 5, 14, 12), fill=(196, 104, 72, 255), outline=(96, 44, 30, 255))
-    d.line((1, 8, 14, 8), fill=(96, 44, 30, 255))
-    d.line((7, 5, 7, 8), fill=(96, 44, 30, 255))
-    d.line((10, 8, 10, 12), fill=(96, 44, 30, 255))
-    return img
-
-
-def metal():
-    img = canvas(16, 16)
-    d = ImageDraw.Draw(img)
-    d.polygon([(2, 11), (10, 11), (14, 5), (6, 5)], fill=(170, 176, 190, 255), outline=(70, 74, 86, 255))
-    d.line((6, 8, 12, 8), fill=(220, 224, 236, 255))
-    return img
-
-
 def person():
     img = canvas(14, 14)
     d = ImageDraw.Draw(img)
@@ -135,16 +96,6 @@ def medkit():
     return img
 
 
-def small_shield():
-    # Minipocion: frasco pequeno y redondo de liquido azul.
-    img = canvas(24, 24)
-    d = ImageDraw.Draw(img)
-    d.rectangle((10, 4, 13, 8), fill=GLASS, outline=OUTLINE)
-    d.ellipse((5, 8, 18, 21), fill=SHIELD_BLUE, outline=OUTLINE)
-    d.ellipse((8, 11, 11, 14), fill=SHIELD_LIGHT)
-    return img
-
-
 def shield_potion():
     # Pocion de escudo: botella alta de liquido azul.
     img = canvas(24, 24)
@@ -155,11 +106,12 @@ def shield_potion():
     return img
 
 
+# Los materiales, la SCAR y la minipocion ya no se generan: estan en Recursos (Wood_icon,
+# stone_orig, Metal_icon, Weapons/AssaultRiffleLegendary, minipocion), dados por el usuario.
 ICONS = {
-    "scar": scar, "material_madera": wood, "material_ladrillo": brick, "material_metal": metal,
     "icono_vivos": person, "icono_bajas": kills, "icono_zona": zone, "icono_escudo": shield,
     "icono_vida": health,
-    "vendas": bandage, "botiquin": medkit, "minipocion": small_shield, "pocion_escudo": shield_potion,
+    "vendas": bandage, "botiquin": medkit, "pocion_escudo": shield_potion,
 }
 
 

@@ -218,9 +218,9 @@ void App::renderMinimap() const {
     gfx::fillRect(399, 107, 25, 28, rgba(130, 150, 210, 120));
     gfx::fillRect(425, 109, 1, 24, rgba(255, 255, 255, 120));
     if (m_atlas.ready()) {
-        m_atlas.draw(atlas::kMatMadera, 403, 108);
-        m_atlas.draw(atlas::kMatLadrillo, 429, 108, 1.0f, rgba(255, 255, 255, 150));
-        m_atlas.draw(atlas::kMatMetal, 455, 108, 1.0f, rgba(255, 255, 255, 150));
+        m_atlas.draw(atlas::kMatMadera, 402, 107);
+        m_atlas.draw(atlas::kMatLadrillo, 428, 107, 1.0f, rgba(255, 255, 255, 170));
+        m_atlas.draw(atlas::kMatMetal, 454, 107, 1.0f, rgba(255, 255, 255, 170));
     }
 }
 
@@ -296,10 +296,20 @@ void App::renderSlots() const {
         const float x = kWeaponSlotX + i * kWeaponSlotStep;
         const float y = kWeaponRowY - (selected ? 3.0f : 0.0f);
         const game::ItemType type = i == 0 ? game::ItemType::None : inv.slot(i - 1).type;
+        // La SCAR y la minipocion tienen la ranura completa dibujada (Recursos), con su
+        // fondo de rareza; el resto, fondo del color de la rareza e icono encima.
+        const atlas::Rect* art = type == game::ItemType::Scar          ? &atlas::kSlotScar
+                                 : type == game::ItemType::SmallShield ? &atlas::kSlotMinipocion
+                                                                       : nullptr;
         u32 fill = rgba(0, 0, 0, 50);
         if (i == 0) fill = rgba(170, 180, 200, 170);
         else if (type != game::ItemType::None) fill = rarityColor(game::itemDef(type).rarity);
-        slotBox(x, y, kWeaponSlotSize, fill, rgba(255, 255, 255, 170));
+        if (art && m_atlas.ready()) {
+            m_atlas.draw(*art, x + 1, y + 1);
+            ui::frame(x, y, kWeaponSlotSize, kWeaponSlotSize, 1, rgba(255, 255, 255, 170));
+        } else {
+            slotBox(x, y, kWeaponSlotSize, fill, rgba(255, 255, 255, 170));
+        }
         if (selected) ui::frame(x - 2, y - 2, kWeaponSlotSize + 4, kWeaponSlotSize + 4, 2, kWhite);
         if (!m_atlas.ready()) continue;
         if (i == 0) {
@@ -307,10 +317,10 @@ void App::renderSlots() const {
             continue;
         }
         switch (type) {
-            case game::ItemType::Scar: m_atlas.draw(atlas::kScar, x + 1, y + 6, 0.66f); break;
+            case game::ItemType::Scar:
+            case game::ItemType::SmallShield: break;  // ya dibujadas con su ranura
             case game::ItemType::Bandage: m_atlas.draw(atlas::kVendas, x + 5, y + 3); break;
             case game::ItemType::Medkit: m_atlas.draw(atlas::kBotiquin, x + 5, y + 3); break;
-            case game::ItemType::SmallShield: m_atlas.draw(atlas::kMinipocion, x + 5, y + 3); break;
             case game::ItemType::ShieldPotion: m_atlas.draw(atlas::kPocionEscudo, x + 5, y + 3); break;
             case game::ItemType::None:
             case game::ItemType::Count: break;
@@ -491,7 +501,8 @@ void App::overlayDebug(const FrameInfo& frame) const {
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Decisiones %3d/s", m_decisionsPerSecond);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Tris %5d lotes %3d", m_stats.trianglesDrawn, m_stats.batchesDrawn);
+    gfx::text::print(x, y, kWhite, "Tris %5d+%5d lotes %3d", m_stats.trianglesDrawn, m_characterTriangles,
+                     m_stats.batchesDrawn);
     y += kLineHeight;
     const struct mallinfo mem = mallinfo();
     gfx::text::print(x, y, kWhite, "Heap %u KB (lobby %u KB)", static_cast<unsigned>(mem.uordblks / 1024),

@@ -220,6 +220,50 @@ int main(int argc, char** argv) {
         printf("%-18s ojo=(%6.1f,%5.1f,%6.1f) tris=%5d banda_guarda=%3d idx_malos=%d\n", gv.name, eye.x,
                eye.y, eye.z, stats.trianglesDrawn, g.guardBandCulled, g.badIndices);
     }
+    // --- Personajes de cerca: de frente, de espaldas y primer plano de la cara ------------
+    {
+        struct Closeup {
+            const char* name;
+            Vec3 eye, target;
+            float yaw;  // hacia donde miran los personajes
+            int count;
+        };
+        const Closeup closeups[] = {
+            {"17_personajes_frente", {0.0f, 1.35f, 34.6f}, {0.0f, 0.95f, 30.0f}, pi, 4},
+            {"18_personajes_espalda", {0.0f, 1.35f, 34.6f}, {0.0f, 0.95f, 30.0f}, 0.0f, 4},
+            {"19_cara_primer_plano", {0.25f, 1.72f, 31.3f}, {0.15f, 1.62f, 30.0f}, pi * 0.94f, 1},
+        };
+        const Mat4 proj = Mat4::perspective(math3d::toRadians(config::kFovYDegrees), 480.0f / 272.0f, 0.2f, 140.0f);
+        for (const Closeup& c : closeups) {
+            clear(config::kColorSky);
+            const Mat4 view = Mat4::lookAt(c.eye, c.target, {0.0f, 1.0f, 0.0f});
+            gfx::FogSettings fog;
+            fog.enabled = true;
+            fog.start = config::kFogStart;
+            fog.end = config::kFogEnd;
+            fog.color = config::kColorSky;
+            gfx::begin3D(proj, view, fog);
+            w.draw(math3d::Frustum::fromMatrix(proj * view), c.eye, config::kFogEnd);
+            // Jugador apuntando, comando corriendo, naranja con el pico y ranger quieto.
+            const game::HeldItem held[4] = {game::HeldItem::Rifle, game::HeldItem::Rifle, game::HeldItem::Pickaxe,
+                                            game::HeldItem::Rifle};
+            for (int i = 0; i < c.count; ++i) {
+                game::CharacterState s;
+                s.position = {c.count == 1 ? 0.15f : -1.65f + 1.1f * i, 0.0f, 30.0f};
+                s.yaw = c.yaw;
+                s.velocity = i == 1 ? game::forwardFromYaw(c.yaw) * 5.5f : Vec3{0, 0, 0};
+                game::CharacterAnim anim;
+                for (int k = 0; k < 40; ++k) anim.update(s, i == 0 && c.count > 1, true, 1.0f / 60.0f);
+                models[i].draw(s, anim, w.textures(), false, held[i]);
+            }
+            char path[512];
+            snprintf(path, sizeof(path), "%s/%s.png", outDir, c.name);
+            savePng(path, true);
+            printf("%-22s modelo %d triangulos (lejos %d)\n", c.name, models[0].triangles(),
+                   models[0].lowDetailTriangles());
+        }
+    }
+
     // --- Construccion: fuerte de paredes de madera, una danada y la pared fantasma -------
     {
         game::NavGrid noNav;  // sin navegacion: solo colision y dibujo

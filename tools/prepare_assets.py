@@ -86,6 +86,14 @@ def icon(name, size):
     return img
 
 
+def slot_art(path, size=32, margin=0.06):
+    """Captura de una ranura del inventario con su fondo de rareza: sin el marco, a `size`."""
+    img = Image.open(path).convert("RGB")
+    w, h = img.size
+    img = img.crop((round(w * margin), round(h * margin), round(w * (1 - margin)), round(h * (1 - margin))))
+    return img.resize((size, size), Image.LANCZOS).convert("RGBA")
+
+
 def victory_banner():
     banner = alpha_crop(Image.open(RES / "HUD" / "Victory_Royale_Old_-_Fortnite.webp").convert("RGBA"))
     return banner.resize((round(banner.width * 1.5), round(banner.height * 1.5)), Image.NEAREST)
@@ -123,10 +131,13 @@ def ui_atlas():
         "Pared": icon("Pared.png", 26),
         "Rampa": icon("Rampa.png", 26),
         "Suelo": icon("Suelo.png", 26),
-        "Scar": Image.open(RES / "HUD" / "scar.png").convert("RGBA"),
-        "MatMadera": Image.open(RES / "HUD" / "material_madera.png").convert("RGBA"),
-        "MatLadrillo": Image.open(RES / "HUD" / "material_ladrillo.png").convert("RGBA"),
-        "MatMetal": Image.open(RES / "HUD" / "material_metal.png").convert("RGBA"),
+        # Ranuras completas (con su fondo de rareza) dadas en Recursos.
+        "SlotScar": slot_art(RES / "Weapons" / "AssaultRiffleLegendary.png"),
+        "SlotMinipocion": slot_art(RES / "HUD" / "minipocion.png"),
+        # Materiales (Recursos/HUD/Wood_icon.png, stone_orig.png, Metal_icon.png).
+        "MatMadera": icon("Wood_icon.png", 18),
+        "MatLadrillo": icon("stone_orig.png", 18),
+        "MatMetal": icon("Metal_icon.png", 18),
         "IconVivos": Image.open(RES / "HUD" / "icono_vivos.png").convert("RGBA"),
         "IconBajas": Image.open(RES / "HUD" / "icono_bajas.png").convert("RGBA"),
         "IconZona": Image.open(RES / "HUD" / "icono_zona.png").convert("RGBA"),
@@ -134,7 +145,6 @@ def ui_atlas():
         "IconVida": Image.open(RES / "HUD" / "icono_vida.png").convert("RGBA"),
         "Vendas": Image.open(RES / "HUD" / "vendas.png").convert("RGBA"),
         "Botiquin": Image.open(RES / "HUD" / "botiquin.png").convert("RGBA"),
-        "Minipocion": Image.open(RES / "HUD" / "minipocion.png").convert("RGBA"),
         "PocionEscudo": Image.open(RES / "HUD" / "pocion_escudo.png").convert("RGBA"),
     }
     # Empaquetado por estantes en un atlas de 512 px de ancho. La altura es solo la usada

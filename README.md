@@ -2,7 +2,8 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales), v0.7.0.** Se juega
+**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales) + personaje nuevo,
+v0.7.1.** Se juega
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -62,6 +63,17 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, mejora del personaje** (detalle en [docs/JUGADOR.md](docs/JUGADOR.md#modelo-del-personaje-fase-7)):
+deja de ser un conjunto de cajas.
+- **Forma:** volúmenes redondeados con proporciones de Fortnite.
+- **Articulaciones:** codos y rodillas.
+- **Sombreado:** suave por vértice.
+- **Textura:** sin filtrar (cara, camuflaje, pelo).
+- **Rifle:** se sujeta con las dos manos al apuntar.
+- **Nivel de detalle:** uno bajo para los bots lejanos.
+
+![Personajes](docs/capturas/preview_17_personajes_frente.png)
 
 **Fase 7, paso 1** (detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md)):
 - **Inventario:** 5 ranuras con armas y consumibles; la cruceta cambia de ranura.
@@ -177,12 +189,12 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 
 ## Limitaciones conocidas
 
-- **v0.7.0 sin probar en ejecución real:** ni PPSSPP ni la PSP. Falta comprobar:
-  - el tacto de la cámara que sigue al stick y del modo apuntado con L;
-  - el pico y los consumibles en la consola;
-  - que los FPS no bajen con el HUD del inventario.
+- **v0.7.1 sin probar en ejecución real:** ni PPSSPP ni la PSP. Falta comprobar los FPS
+  con el personaje nuevo y 30 bots: cada modelo cercano tiene 1292 triángulos y cada
+  lejano 564, frente a 348 antes (ver la página de depuración).
 
-  La v0.6.0 se ha probado en la PSP con 30 bots, según el usuario.
+  Según el usuario, en la PSP funcionan la v0.6.0 con 30 bots y la v0.7.0 (inventario,
+  pico y cámara).
 - **Inicio de sesión simulado:** no hay red, cuentas ni partidas online. El nombre es
   siempre "Jugador".
 - **Botín pendiente (paso 2):** aún no hay cofres ni objetos en el suelo; se empieza con
@@ -255,8 +267,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
   - `loginscreen.png`: pantalla de inicio de sesión.
   - `Loadscreen - match.png`: pantalla de carga, `PIC1.PNG` e `ICON0.PNG`.
   - `fortnite_PNG25.png`: logotipo del lobby.
-  - `HUD/`: iconos de construcción (Pared, Suelo, Rampa, Pico), rótulo de victoria e
-    iconos originales (SCAR, materiales, vivos, bajas, zona, escudo y vida).
+  - `HUD/`: iconos de construcción (Pared, Suelo, Rampa, Pico), rótulo de victoria,
+    materiales (`Wood_icon`, `stone_orig`, `Metal_icon`), ranura de la minipoción e
+    iconos originales (vivos, bajas, zona, escudo, vida, vendas, botiquín y poción de
+    escudo, de `tools/generate_hud.py`).
+  - `Weapons/AssaultRiffleLegendary.png`: ranura de la SCAR en el HUD.
 - **`Texturas/`:** 16 texturas originales de 32×32 (`tools/generate_textures.py`).
 - **`Sonidos/`:**
   - efectos originales (`tools/generate_sounds.py`);
@@ -299,6 +314,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 
 ## Historial de correcciones
 
+- **v0.7.1:** sin correcciones de errores; personaje nuevo e iconos de `Recursos`.
 - **v0.7.0:** ninguna corrección de errores; solo mecánicas nuevas.
 - **v0.6.0:**
   - **Música:** el mezclador se saltaba una muestra de música en cada bloque de audio.

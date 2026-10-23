@@ -147,32 +147,81 @@ mira   = dirección (yaw, inclinación), con inclinación de -4° por defecto
 - **Altura mínima:** el ojo nunca baja de 0,7 m sobre el suelo (1,155 × plano cercano de
   0,5 m; ver MUNDO.md).
 
-## Modelo provisional
+## Modelo del personaje (fase 7)
 
-Se basa en `Referencias/Personaje/` y está hecho de 29 prismas (348 triángulos), rifle
-incluido. Lo comparten el jugador y los bots con cuatro paletas: la del jugador sigue la
-referencia y los bots usan "comando" (negro), "naranja" y "ranger" (rojo y azul con
-casco).
+Se basa en `Referencias/Personaje/` (Jonesy). Lo comparten el jugador y los bots con
+cuatro paletas: la del jugador sigue la referencia y los bots usan "comando" (negro y
+camuflaje gris), "naranja" (mono, sin camuflaje) y "ranger" (rojo y azul con casco).
 
-- **Cabeza:** pelo rubio y ojos oscuros, que marcan el frente.
-- **Torso:** camiseta oliva sin mangas, pañuelo claro, cinturón con hebilla y bolsa en
-  la cadera.
-- **Brazos:** piel, brazalete rojo en el brazo derecho y guantes oscuros. El derecho
-  lleva un rifle de prismas del color tostado de `Referencias/Armas`.
-- **Piernas:** pantalón de camuflaje (textura `10_camuflaje.png` de 32×32), correas oscuras y botas
-  con rodilleras oliva.
+**Por qué antes parecía de Roblox y qué ha cambiado:**
 
-Hay cinco piezas: cuerpo, dos piernas y dos brazos. Piernas y brazos giran sobre la
-cadera y el hombro:
+| Antes (hasta v0.7.0)                     | Ahora                                                        |
+|------------------------------------------|--------------------------------------------------------------|
+| 29 cajas de color plano                  | Volúmenes redondeados: anillos elípticos unidos ("loft")     |
+| Cabeza cúbica, brazos y piernas rectos   | Cabeza con mandíbula, orejas y nariz; deltoides, bíceps, antebrazos, muslos y botas afinados |
+| Sombreado plano por cara                 | Sombreado suave horneado por vértice (luz principal + relleno por detrás) |
+| Sin cara                                 | Textura de 64×64 sin filtrar: ojos, cejas, nariz, boca y sombras de la cara |
+| Colores lisos                            | La misma textura añade camuflaje, tejido, mechones y suela, teñidos con la paleta |
+| 5 piezas, sin codos ni rodillas          | 9 piezas articuladas: codos y rodillas                       |
+| Rifle de una mano                        | Rifle sujeto con las dos manos al apuntar                    |
 
-- **Al andar:** balanceo proporcional a la velocidad, con la fase ligada a la distancia
-  recorrida (zancada de 1,6 m), así que los pies no patinan.
-- **En el aire:** pose de salto.
-- **Apuntando:** rifle al frente.
-- **Eliminado:** tumbado boca arriba.
+**Proporciones "heroicas" de Fortnite:**
+- **Torso:** en V, de 0,33 m de cintura a 0,47 m de pecho.
+- **Brazos:** musculosos.
+- **Cabeza:** algo grande.
+- **Extremos:** manos con guantes grandes y botas altas con pie grande.
+- **Altura:** ~1,95 m con el pelo.
 
-Bajo los pies hay una sombra circular semitransparente que encoge al subir y ayuda a
-leer la altura del salto.
+**Detalles:**
+- **Cabeza:** tupé rubio en onda y casquete por la nuca. El ranger lleva casco con
+  visera.
+- **Torso:** pañuelo al cuello que cae en pico, correa en bandolera por delante y por
+  detrás, cinturón con hebilla y bolsa en la cadera.
+- **Brazos:** brazalete rojo con las puntas colgando en el brazo derecho, y protector con
+  pantallita azul en el antebrazo izquierdo.
+- **Piernas:** dos correas en el muslo, bolsillo lateral, rodilleras y espinilleras
+  oliva.
+
+**Lo que lleva en la mano derecha** (pieza del antebrazo intercambiable):
+- **Rifle:** cuerpo tostado, cañón, cargador, mira y empuñadura.
+- **Pico:** mango y cabeza azulada.
+- **Mano vacía:** con un consumible seleccionado.
+
+**Niveles de detalle:**
+
+| Nivel | Lados por anillo | Triángulos | Detalles                     | Se usa para                    |
+|-------|------------------|------------|------------------------------|--------------------------------|
+| Alto  | 8                | 1292       | Todos                        | Jugador, lobby y bots a < 10 m |
+| Bajo  | 4                | 564        | Sin los pequeños (orejas, correas, bolsillos…) | Bots a más de 10 m |
+
+- **Comparación:** el modelo anterior tenía 348 triángulos.
+- **Llamadas de dibujo:** una por pieza (9 por personaje), con una sola textura.
+- **Medir:** la página de depuración (SELECT) muestra "Tris escenario+personajes".
+- **Ajustar:** si con 30 bots bajan los FPS en la PSP, se puede reducir
+  `kCharacterLodDistance` (app.cpp) o los lados del nivel alto.
+
+**Animación** (`CharacterAnim`):
+- **Al andar:** las piernas se balancean según la velocidad (zancada de 1,6 m) y la
+  rodilla se dobla al adelantar la pierna. Los brazos se balancean con el codo flexionado.
+- **En el aire:** pose de salto con las rodillas recogidas.
+- **Apuntando:** el antebrazo derecho queda horizontal con el rifle al frente y la mano
+  izquierda va al guardamanos.
+- **Disparo:** retroceso.
+- **Impacto:** gesto de dolor.
+- **Pico:** golpe desde encima de la cabeza.
+- **Reposo:** respiración.
+- **Eliminado:** cae de espaldas en 0,45 s.
+
+**Sombra:** bajo los pies hay una sombra circular semitransparente que encoge al subir y
+ayuda a leer la altura del salto.
+
+**Revisión:** `make preview` genera tres primeros planos.
+- `17_personajes_frente`: las 4 paletas de frente.
+- `18_personajes_espalda`: las 4 paletas de espaldas.
+- `19_cara_primer_plano`: la cara del jugador.
+
+![Personajes de frente](capturas/preview_17_personajes_frente.png)
+![Primer plano](capturas/preview_19_cara_primer_plano.png)
 
 ## Pendiente para fases siguientes
 
