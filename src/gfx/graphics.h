@@ -11,6 +11,11 @@ constexpr int kScreenWidth = 480;
 constexpr int kScreenHeight = 272;
 constexpr int kBufferWidth = 512;  // ancho de linea del framebuffer (potencia de 2)
 
+// Framebuffer de 16 bits (RGB 565) con tramado de la GE: el aspecto de color de PS1 y la
+// mitad de memoria y ancho de banda que con 32 bits. Para volver a 32 bits basta con
+// poner false (la portada y el HUD funcionan igual en los dos modos).
+constexpr bool kRetro16BitFramebuffer = true;
+
 struct Texture;
 struct Mesh;
 
@@ -60,6 +65,12 @@ void begin2D();
 void fillRect(float x, float y, float w, float h, u32 color);
 // Dibuja la textura completa a escala 1:1 con la esquina superior izquierda en (x, y).
 void drawTexture(const Texture& texture, float x, float y);
+// Dibuja el rectangulo (sx, sy, sw, sh) de la textura en (dx, dy, dw, dh), escalado sin
+// filtrar y multiplicado por `color` (tinte y transparencia).
+void drawTextureRect(const Texture& texture, float sx, float sy, float sw, float sh, float dx,
+                     float dy, float dw, float dh, u32 color = 0xFFFFFFFF);
+// Lineas 2D de color en coordenadas de pantalla.
+void drawLines2D(const LineVertex* vertices, int count);
 
 // Direccion (no cacheada) del buffer que se esta dibujando, para escritura por CPU.
 // Solo es valida entre endFrame() y present().

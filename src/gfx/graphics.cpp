@@ -46,8 +46,9 @@ void uploadMatrix(int type, const math3d::Mat4& m) {
 
 bool init() {
     // VRAM (2 MB): 2 framebuffers 32 bpp (2 x 544 KB) + profundidad 16 bpp (272 KB).
-    void* fbp0 = guGetStaticVramBuffer(kBufferWidth, kScreenHeight, GU_PSM_8888);
-    void* fbp1 = guGetStaticVramBuffer(kBufferWidth, kScreenHeight, GU_PSM_8888);
+    const int psm = kRetro16BitFramebuffer ? GU_PSM_5650 : GU_PSM_8888;
+    void* fbp0 = guGetStaticVramBuffer(kBufferWidth, kScreenHeight, psm);
+    void* fbp1 = guGetStaticVramBuffer(kBufferWidth, kScreenHeight, psm);
     void* zbp = guGetStaticVramBuffer(kBufferWidth, kScreenHeight, GU_PSM_4444);
     // OJO: son desplazamientos relativos al inicio de la VRAM, asi que fbp0 vale 0
     // legitimamente. Comprobar "!fbp0" cerraba la aplicacion nada mas arrancar.
@@ -55,7 +56,7 @@ bool init() {
     sceGuInit();
     sceGuStart(GU_DIRECT, g_displayList);
 
-    sceGuDrawBuffer(GU_PSM_8888, fbp0, kBufferWidth);
+    sceGuDrawBuffer(psm, fbp0, kBufferWidth);
     sceGuDispBuffer(kScreenWidth, kScreenHeight, fbp1, kBufferWidth);
     sceGuDepthBuffer(zbp, kBufferWidth);
 
@@ -66,6 +67,8 @@ bool init() {
     sceGuDepthFunc(GU_GEQUAL);
     sceGuScissor(0, 0, kScreenWidth, kScreenHeight);
     sceGuEnable(GU_SCISSOR_TEST);
+    // Con 16 bits, el tramado de la GE evita bandas en los degradados (como en PS1).
+    if (kRetro16BitFramebuffer) sceGuEnable(GU_DITHER);
 
     sceGuFrontFace(GU_CW);
     sceGuShadeModel(GU_SMOOTH);
@@ -203,6 +206,39 @@ void fillRect(float x, float y, float w, float h, u32 color) {
     v[0] = {color, x, y, 0.0f};
     v[1] = {color, x + w, y + h, 0.0f};
     sceGuDrawArray(GU_SPRITES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2, nullptr, v);
+}
+
+void drawTextureRect(const Texture& texture, float sx, float sy, float sw, float sh, float dx,
+                     float dy, float dw, float dh, u32 color) {
+    if (!texture.pixels) return;
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuTexMode(texture.psm, 0, 0, 0);
+    sceGuTexImage(0, texture.texWidth, texture.texHeight, texture.stride, texture.pixels);
+    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+    sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    sceGuTexFlush();
+    struct Vertex {
+        float u, v;
+        u32 color;
+        float x, y, z;
+    };
+    auto* v = static_cast<Vertex*>(sceGuGetMemory(2 * sizeof(Vertex)));
+    v[0] = {sx, sy, color, dx, dy, 0.0f};
+    v[1] = {sx + sw, sy + sh, color, dx + dw, dy + dh, 0.0f};
+    sceGuDrawArray(GU_SPRITES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, 2,
+                   nullptr, v);
+    sceGuDisable(GU_TEXTURE_2D);
+    g_boundTexture = kUnbound;
+}
+
+void drawLines2D(const LineVertex* vertices, int count) {
+    if (count < 2) return;
+    sceGuDisable(GU_TEXTURE_2D);
+    auto* v = static_cast<LineVertex*>(sceGuGetMemory(count * sizeof(LineVertex)));
+    for (int i = 0; i < count; ++i) v[i] = vertices[i];
+    sceGuDrawArray(GU_LINES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_2D, count, nullptr, v);
+    g_boundTexture = kUnbound;
 }
 
 void drawTexture(const Texture& texture, float x, float y) {

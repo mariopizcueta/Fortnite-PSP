@@ -1,5 +1,8 @@
 #include "world/textures.h"
 
+#include "assets/embedded_assets.h"
+#include "third_party/stb_image_config.h"
+
 #include <math.h>
 
 namespace world {
@@ -208,7 +211,36 @@ Rgb woodWall(int x, int y) {
 
 }  // namespace
 
+bool TextureLibrary::buildFromAtlas() {
+    const assets::Blob png = assets::texturesPng();
+    int w = 0, h = 0, channels = 0;
+    unsigned char* rgba = stbi_load_from_memory(static_cast<const stbi_uc*>(png.data),
+                                                static_cast<int>(png.size), &w, &h, &channels, 4);
+    if (!rgba) return false;
+    const int tilesPerRow = w / kSize;
+    bool ok = w == 128 && h == 128;
+    for (int id = 0; ok && id < kTexCount; ++id) {
+        gfx::Texture& tex = m_textures[id];
+        ok = gfx::createTexture(tex, kSize, kSize, GU_PSM_5551);
+        if (!ok) break;
+        const int ox = (id % tilesPerRow) * kSize, oy = (id / tilesPerRow) * kSize;
+        auto* dst = static_cast<u16*>(tex.pixels);
+        for (int y = 0; y < kSize; ++y) {
+            for (int x = 0; x < kSize; ++x) {
+                const unsigned char* p = rgba + ((oy + y) * w + ox + x) * 4;
+                dst[y * tex.stride + x] = gfx::pack5551(p[0], p[1], p[2]);
+            }
+        }
+        gfx::uploadTexture(tex);
+    }
+    stbi_image_free(rgba);
+    if (!ok) destroy();
+    return ok;
+}
+
 bool TextureLibrary::build() {
+    m_fromResources = buildFromAtlas();
+    if (m_fromResources) return true;
     bool ok = true;
     ok &= generate(m_textures[kTexGrass], grass);
     ok &= generate(m_textures[kTexDirt], dirt);

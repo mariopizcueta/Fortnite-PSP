@@ -1,142 +1,98 @@
 #include "app/app.h"
 
-#include <math.h>
-#include <stdio.h>
-#include <string.h>
-
-#include <initializer_list>
+#include <malloc.h>
 
 #include <psppower.h>
 
+#include "app/app_common.h"
 #include "assets/embedded_assets.h"
-#include "core/config.h"
-#include "gfx/debug_text.h"
-#include "gfx/graphics.h"
+#include "audio/audio_system.h"
 #include "platform/log.h"
 #include "world/world_units.h"
 
 namespace app {
 namespace {
 
-using gfx::rgba;
+using namespace common;
 using math3d::Vec3;
 
-constexpr u32 kWhite = rgba(255, 255, 255);
-constexpr u32 kLightGrey = rgba(200, 200, 200);
-constexpr u32 kErrorRed = rgba(255, 90, 80);
-constexpr u32 kPanel = rgba(0, 0, 0, 140);
-constexpr u32 kBar = rgba(0, 0, 0, 170);
-constexpr u32 kButtonOff = rgba(255, 255, 255, 60);
-constexpr u32 kButtonOn = config::kColorGold;
-constexpr u32 kCrosshair = rgba(255, 255, 255, 220);
-constexpr u32 kCrosshairLocked = rgba(255, 70, 60, 240);
-constexpr u32 kHealthGreen = rgba(84, 200, 72);
-constexpr u32 kBuildBlue = rgba(30, 90, 190, 170);
-constexpr u32 kBuildReticle = rgba(120, 200, 255);
-constexpr float kDamageNumberSeconds = 0.9f;
-
-constexpr int kLineHeight = 11;
-constexpr int kMinBots = 5;
-constexpr float kCorpseSeconds = 8.0f;     // los eliminados se ven tumbados este tiempo
-constexpr float kKillFeedSeconds = 6.0f;
 constexpr float kLockAngleDegrees = 35.0f;  // L: objetivo dentro de este cono
 constexpr float kLockDistance = 45.0f;
+constexpr float kSoundRange = 60.0f;        // m: mas lejos no se oyen disparos de bots
 
 // Aparicion del jugador: al sur del muro, mirando al deposito.
 constexpr Vec3 kPlayerSpawn{0.0f, 0.0f, 24.0f};
 constexpr float kPlayerSpawnYaw = 0.0f;
 
-// Botones que se muestran en la lista de "Pulsado", en orden de lectura.
-constexpr u32 kListedButtons[] = {
-    PSP_CTRL_UP,       PSP_CTRL_DOWN,     PSP_CTRL_LEFT,     PSP_CTRL_RIGHT,
-    PSP_CTRL_TRIANGLE, PSP_CTRL_CIRCLE,   PSP_CTRL_CROSS,    PSP_CTRL_SQUARE,
-    PSP_CTRL_LTRIGGER, PSP_CTRL_RTRIGGER, PSP_CTRL_SELECT,   PSP_CTRL_START,
-    PSP_CTRL_NOTE,     PSP_CTRL_SCREEN,   PSP_CTRL_VOLUP,    PSP_CTRL_VOLDOWN,
-};
+constexpr int kMinimapSize = 128;  // texeles por lado: 192 m / 128 = 1.5 m por texel
 
-// Disposicion del mando dibujado en la pagina de controles.
-struct ButtonBox {
-    u32 mask;
-    float x, y, w, h;
-};
-constexpr ButtonBox kButtonBoxes[] = {
-    {PSP_CTRL_LTRIGGER, 320, 34, 44, 10}, {PSP_CTRL_RTRIGGER, 422, 34, 44, 10},
-    {PSP_CTRL_UP, 336, 54, 12, 12},       {PSP_CTRL_DOWN, 336, 82, 12, 12},
-    {PSP_CTRL_LEFT, 322, 68, 12, 12},     {PSP_CTRL_RIGHT, 350, 68, 12, 12},
-    {PSP_CTRL_TRIANGLE, 438, 54, 12, 12}, {PSP_CTRL_CROSS, 438, 82, 12, 12},
-    {PSP_CTRL_SQUARE, 424, 68, 12, 12},   {PSP_CTRL_CIRCLE, 452, 68, 12, 12},
-    {PSP_CTRL_SELECT, 366, 100, 24, 8},   {PSP_CTRL_START, 396, 100, 24, 8},
-};
-
-constexpr float kStickBoxX = 361.0f;
-constexpr float kStickBoxY = 124.0f;
-constexpr float kStickBoxSize = 64.0f;
-
-void printCentered(int y, u32 color, const char* str) {
-    gfx::text::print((gfx::kScreenWidth - gfx::text::width(str)) / 2, y, color, "%s", str);
-}
-
-void printCenteredShadow(int y, u32 color, const char* str) {
-    gfx::text::printShadow((gfx::kScreenWidth - gfx::text::width(str)) / 2, y, color, "%s", str);
-}
-
-// Rumbo de 0 a 360 grados (0 = norte, crece hacia el oeste como el yaw).
-float headingDegrees(float yaw) {
-    float d = yaw * (180.0f / math3d::kPi);
-    if (d < 0.0f) d += 360.0f;
-    return d;
-}
-
-void formatTime(float seconds, char* out, size_t size) {
-    const int s = static_cast<int>(seconds);
-    snprintf(out, size, "%02d:%02d", s / 60, s % 60);
-}
-
-// Concatena los nombres de los botones mantenidos sin pasar de `capacity`.
-void heldButtonsString(u32 buttons, char* out, size_t capacity) {
-    out[0] = '\0';
-    size_t len = 0;
-    for (u32 mask : kListedButtons) {
-        if (!(buttons & mask)) continue;
-        const char* name = input::buttonName(mask);
-        const size_t need = strlen(name) + (len ? 1 : 0);
-        if (len + need + 1 > capacity) {
-            if (len + 3 < capacity) strcat(out, "..");
-            return;
-        }
-        if (len) strcat(out, " ");
-        strcat(out, name);
-        len += need;
-    }
-    if (len == 0) strcpy(out, "(ninguno)");
+unsigned heapInUse() {
+    const struct mallinfo mem = mallinfo();
+    return static_cast<unsigned>(mem.uordblks);
 }
 
 }  // namespace
 
 // --- Ciclo de vida ----------------------------------------------------------------------
 
-void App::init() {
-    const assets::Blob png = assets::loadscreenPng();
-    m_hasLoadscreen = gfx::loadPngFromMemory(m_loadscreen, png.data, png.size);
-    const assets::Blob logo = assets::logoPng();
-    m_hasLogo = gfx::loadPngFromMemory(m_logo, logo.data, logo.size);
-    platform::log::write("portada: %s, logotipo: %s", m_hasLoadscreen ? "ok" : "ERROR",
-                         m_hasLogo ? "ok" : "ERROR");
+void App::presentBootFrame(const char* status) {
+    // Un frame completo fuera del bucle principal: la carga inicial no deja la pantalla
+    // en negro (lo pesado es construir el escenario, ~1 s).
+    gfx::beginFrame(rgba(0, 0, 0));
+    if (m_login.pixels) gfx::drawTexture(m_login, 0.0f, 0.0f);
+    gfx::fillRect(0, 244, gfx::kScreenWidth, 28, kBar);
+    gfx::endFrame();
+    gfx::text::setTarget(gfx::cpuDrawBuffer());
+    printCenteredShadow(254, kWhite, status);
+    gfx::present(true);
+}
 
-    u64 t0 = core::nowMicros();
+void App::logStage(const char* stage, u64 startMicros) const {
+    platform::log::write("carga: %-22s %4u ms, heap en uso %u KB", stage,
+                         static_cast<unsigned>((core::nowMicros() - startMicros) / 1000),
+                         heapInUse() / 1024);
+}
+
+void App::init() {
+    const u64 bootStart = core::nowMicros();
+    u64 t0 = bootStart;
+    const assets::Blob login = assets::loginPng();
+    if (!gfx::loadPngFromMemory(m_login, login.data, login.size)) platform::log::write("ERROR: login.png");
+    presentBootFrame("Cargando...");
+
+    const assets::Blob loading = assets::loadscreenPng();
+    if (!gfx::loadPngFromMemory(m_loadscreen, loading.data, loading.size)) {
+        platform::log::write("ERROR: loadscreen.png");
+    }
+    if (!m_atlas.load()) platform::log::write("ERROR: ui_atlas.png");
+    logStage("imagenes de interfaz", t0);
+
+    t0 = core::nowMicros();
+    m_audioReady = audio::init();
+    platform::log::write("audio: %s, recursos %u KB", m_audioReady ? "ok" : "ERROR (sin sonido)",
+                         audio::resourceBytes() / 1024);
+    if (m_audioReady) audio::mixer().playMusic(true);
+    logStage("audio", t0);
+
+    presentBootFrame("Construyendo el escenario...");
+    t0 = core::nowMicros();
     m_worldReady = m_world.build();
-    platform::log::write("escenario: %s en %u ms, %d lotes, %d triangulos, geometria %u KB, "
-                         "texturas %u KB, %d cajas de colision",
-                         m_worldReady ? "ok" : "ERROR (memoria)",
-                         static_cast<unsigned>((core::nowMicros() - t0) / 1000), m_world.batchCount(),
+    platform::log::write("escenario: %s, %d lotes, %d triangulos, geometria %u KB, texturas %u KB "
+                         "(%s), %d cajas de colision",
+                         m_worldReady ? "ok" : "ERROR (memoria)", m_world.batchCount(),
                          m_world.totalTriangles(), static_cast<unsigned>(m_world.geometryBytes() / 1024),
-                         static_cast<unsigned>(m_world.textureBytes() / 1024), m_world.collision().count());
+                         static_cast<unsigned>(m_world.textureBytes() / 1024),
+                         m_world.textures().fromResources() ? "Recursos/Texturas" : "procedurales",
+                         m_world.collision().count());
+    logStage("escenario", t0);
 
     t0 = core::nowMicros();
     m_nav.build(m_world.collision(), world::kMapHalfSize);
-    platform::log::write("navegacion: %d de %d nodos transitables en %u ms", m_nav.walkableCount(),
-                         m_nav.size() * m_nav.size(), static_cast<unsigned>((core::nowMicros() - t0) / 1000));
+    platform::log::write("navegacion: %d de %d nodos transitables", m_nav.walkableCount(),
+                         m_nav.size() * m_nav.size());
+    logStage("navegacion", t0);
 
+    t0 = core::nowMicros();
     const game::CharacterPalette* palettes[kModelCount] = {
         &game::palettes::kPlayer, &game::palettes::kCommando, &game::palettes::kOrange,
         &game::palettes::kRanger};
@@ -145,6 +101,9 @@ void App::init() {
     platform::log::write("modelos de personaje: %s, %d triangulos cada uno",
                          m_modelsReady ? "ok" : "ERROR", m_models[0].triangles());
     m_buildVisualsReady = m_buildVisuals.build(m_matchConfig.build);
+    m_lobbyReady = m_lobbyScene.build();
+    buildMinimap();
+    logStage("modelos, lobby, minimapa", t0);
 
     m_projection.fovYDegrees = config::kFovYDegrees;
     m_projection.aspect = static_cast<float>(gfx::kScreenWidth) / gfx::kScreenHeight;
@@ -153,15 +112,36 @@ void App::init() {
 
     m_cpuMhz = scePowerGetCpuClockFrequencyInt();
     m_busMhz = scePowerGetBusClockFrequencyInt();
+    m_lobbyYaw = 3.45f;  // mirando a la camara del lobby
+    m_startHeapBytes = heapInUse();
+    logStage("TOTAL arranque", bootStart);
+}
+
+void App::buildMinimap() {
+    if (!gfx::createTexture(m_minimap, kMinimapSize, kMinimapSize, GU_PSM_5551)) return;
+    u16* pixels = static_cast<u16*>(m_minimap.pixels);
+    const float texel = 2.0f * world::kMapHalfSize / kMinimapSize;
+    for (int v = 0; v < kMinimapSize; ++v) {
+        for (int u = 0; u < kMinimapSize; ++u) {
+            // Norte (-Z) arriba y este (+X) a la derecha.
+            const u32 c = world::mapColorAt(-world::kMapHalfSize + (u + 0.5f) * texel,
+                                            -world::kMapHalfSize + (v + 0.5f) * texel);
+            pixels[v * m_minimap.stride + u] = gfx::pack5551(c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF);
+        }
+    }
+    gfx::uploadTexture(m_minimap);
 }
 
 void App::startMatch() {
+    const u64 t0 = core::nowMicros();
     m_matchConfig = game::MatchConfig{};
     m_matchConfig.botCount = m_botCount;
     // Semilla distinta en cada partida (el reloj del sistema).
     m_matchConfig.seed = static_cast<u32>(core::nowMicros()) ^ (0x9E3779B9u * ++m_matchesPlayed);
     m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(),
                   kPlayerSpawn, kPlayerSpawnYaw);
+    m_eventCursor = m_match.eventCount();
+    m_playerKiller = -1;
     m_buildMode = false;
     m_targetWall = -1;
     m_timestep.reset();
@@ -170,24 +150,46 @@ void App::startMatch() {
     m_followCamera.reset(m_match.body(0).state().position, kPlayerSpawnYaw);
     m_freeCameraActive = false;
     m_lockTarget = -1;
+    m_paused = false;
+    m_results = Results::None;
+    m_resultsTime = m_resultsDelay = 0.0f;
+    m_spectating = false;
+    m_resultsDismissed = false;
     m_matchFrameMsSum = m_matchFrameMsMax = 0.0f;
     m_matchFrames = 0;
     m_matchLogged = false;
-    platform::log::write("partida %d: %d bots, semilla %u", m_matchesPlayed, m_botCount,
-                         static_cast<unsigned>(m_matchConfig.seed));
+    platform::log::write("partida %d: %d bots, semilla %u, preparada en %u ms, heap %u KB "
+                         "(%+d KB desde el lobby inicial), %d cajas de colision",
+                         m_matchesPlayed, m_botCount, static_cast<unsigned>(m_matchConfig.seed),
+                         static_cast<unsigned>((core::nowMicros() - t0) / 1000), heapInUse() / 1024,
+                         static_cast<int>(heapInUse() / 1024) - static_cast<int>(m_startHeapBytes / 1024),
+                         m_world.collision().count());
+}
+
+void App::goToLobby() {
+    m_screen = Screen::Lobby;
+    m_paused = false;
+    m_results = Results::None;
+    m_lobbyItem = LobbyItem::Play;
+    m_confirmExit = false;
+    if (m_audioReady) audio::mixer().playMusic(true);
 }
 
 void App::shutdown() {
+    if (m_audioReady) audio::shutdown();
+    m_audioReady = false;
+    m_lobbyScene.destroy();
+    m_lobbyReady = false;
     m_buildVisuals.destroy();
     m_buildVisualsReady = false;
     for (game::CharacterModel& m : m_models) m.destroy();
     m_modelsReady = false;
     m_world.destroy();
     m_worldReady = false;
-    gfx::destroyTexture(m_logo);
-    m_hasLogo = false;
+    gfx::destroyTexture(m_minimap);
+    m_atlas.destroy();
     gfx::destroyTexture(m_loadscreen);
-    m_hasLoadscreen = false;
+    gfx::destroyTexture(m_login);
 }
 
 // --- Logica -----------------------------------------------------------------------------
@@ -211,17 +213,11 @@ void App::update(const input::Input& in, float dt) {
     }
 
     switch (m_screen) {
-        case Screen::Title:
-            if (in.pressed(PSP_CTRL_LEFT) && m_botCount > kMinBots) m_botCount -= 5;
-            if (in.pressed(PSP_CTRL_RIGHT) && m_botCount < game::kMaxBots) m_botCount += 5;
-            if (in.pressed(PSP_CTRL_CROSS) && m_worldReady) {
-                startMatch();
-                m_screen = Screen::Game;
-            }
-            break;
-        case Screen::Game:
-            updateGame(in, dt);
-            break;
+        case Screen::Login: updateLogin(in, dt); break;
+        case Screen::Lobby: updateLobby(in, dt); break;
+        case Screen::Controls: updateControlsScreen(in); break;
+        case Screen::Loading: updateLoading(dt); break;
+        case Screen::Game: updateGame(in, dt); break;
     }
 }
 
@@ -229,13 +225,38 @@ game::CharacterState App::renderState(int id) const {
     return m_match.body(id).interpolated(m_timestep.alpha());
 }
 
+int App::spectateTarget() const {
+    if (m_match.alive(0)) return 0;
+    if (m_playerKiller > 0 && m_match.alive(m_playerKiller)) return m_playerKiller;
+    for (int i = 1; i < m_match.entityCount(); ++i) {
+        if (m_match.alive(i)) return i;
+    }
+    return 0;
+}
+
 void App::updateGame(const input::Input& in, float dt) {
-    if (in.pressed(PSP_CTRL_SELECT)) {
+    if (m_paused) {
+        updatePause(in);
+        return;
+    }
+    updateResults(in, dt);
+    if (m_screen != Screen::Game) return;  // los resultados han vuelto al lobby o a cargar
+    const bool overlay = m_results != Results::None;
+
+    if (!overlay && in.pressed(PSP_CTRL_SELECT)) {
         m_hud = static_cast<Hud>((static_cast<int>(m_hud) + 1) % static_cast<int>(Hud::Count));
+    }
+    // START: pausa (si no se esta haciendo la combinacion de salida L+R+START).
+    if (!overlay && !m_freeCameraActive && in.pressed(PSP_CTRL_START) &&
+        !in.held(PSP_CTRL_LTRIGGER) && !in.held(PSP_CTRL_RTRIGGER)) {
+        m_paused = true;
+        m_pauseItem = 0;
+        playSfx(audio::Sfx::MenuAccept, 0.7f);
+        return;
     }
     // TRIANGULO: camara libre de depuracion. Dentro de ella, CUADRADO = niebla y
     // START = VSync (el jugador no actua, asi que esos botones estan libres).
-    if (in.pressed(PSP_CTRL_TRIANGLE)) {
+    if (!overlay && in.pressed(PSP_CTRL_TRIANGLE)) {
         m_freeCameraActive = !m_freeCameraActive;
         if (m_freeCameraActive) {
             m_freeCamera.set(renderState(0).position + Vec3{0.0f, 1.0f, 0.0f}, m_followCamera.yaw(),
@@ -246,14 +267,13 @@ void App::updateGame(const input::Input& in, float dt) {
         if (in.pressed(PSP_CTRL_SQUARE)) m_fog = !m_fog;
         if (in.pressed(PSP_CTRL_START)) m_vsync = !m_vsync;
     }
-    if (m_match.phase() == game::MatchPhase::Finished && in.pressed(PSP_CTRL_CROSS)) {
-        startMatch();
-        return;
-    }
 
-    const bool control = !m_freeCameraActive && m_match.phase() != game::MatchPhase::Spectating;
+    const bool control = !overlay && !m_freeCameraActive && m_match.phase() == game::MatchPhase::Playing;
     // CIRCULO: modo construccion. Se desactiva solo si el jugador cae.
-    if (control && in.pressed(PSP_CTRL_CIRCLE)) m_buildMode = !m_buildMode;
+    if (control && in.pressed(PSP_CTRL_CIRCLE)) {
+        m_buildMode = !m_buildMode;
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
     if (!m_match.alive(0)) m_buildMode = false;
     const bool lockHeld = control && !m_buildMode && in.held(PSP_CTRL_LTRIGGER);
 
@@ -285,15 +305,33 @@ void App::updateGame(const input::Input& in, float dt) {
     const int steps = m_timestep.advance(dt);
     for (int i = 0; i < steps; ++i) m_match.step(game::FixedTimestep::kStep);
 
-    // 3) Animaciones (visuales, con el tiempo de frame).
-    const game::CharacterState player = renderState(0);
-    m_playerAnim.update(player, m_match.playerAiming(), dt);
+    // 3) Sucesos de la partida -> sonido y reacciones de las animaciones.
+    processEvents();
+
+    // 4) Animaciones (visuales, con el tiempo de frame). Los eliminados tambien: caen.
+    m_playerAnim.update(renderState(0), m_match.playerAiming(), m_match.alive(0), dt);
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);
-        if (b.state != game::BotState::Eliminated) m_botAnims[i].update(renderState(i + 1), b.aiming, dt);
+        m_botAnims[i].update(renderState(i + 1), b.aiming, b.state != game::BotState::Eliminated, dt);
     }
 
-    // 4) Camaras. L: fijar el bot visible mas centrado (o recolocar si no hay ninguno).
+    // 5) Camaras y construccion.
+    updateGameCameras(in, dt, control, lockHeld);
+    if (m_buildMode) {
+        game::PlayerAim view;
+        view.eye = m_followCamera.eye();
+        view.direction = m_followCamera.lookDirection();
+        m_wallPlan = m_match.planWall(m_followCamera.yaw());
+        m_targetWall = m_match.targetedWall(view);
+    } else {
+        m_targetWall = -1;
+    }
+
+    updatePerformance(dt);
+}
+
+void App::updateGameCameras(const input::Input& in, float dt, bool control, bool lockHeld) {
+    // L: fijar el bot visible mas centrado (o recolocar si no hay ninguno).
     Vec3 lockPoint;
     const Vec3* lock = nullptr;
     if (lockHeld) {
@@ -313,23 +351,80 @@ void App::updateGame(const input::Input& in, float dt) {
     const bool recenter = control && in.pressed(PSP_CTRL_LTRIGGER) && !lock;
     if (m_freeCameraActive) {
         m_freeCamera.update(in, dt);
-    } else {
-        m_followCamera.update(in, player.position, player.yaw, dt, recenter, lock,
-                              &m_world.collision());
+        return;
     }
+    // Tras caer, la camara sigue a quien elimino al jugador (o a otro superviviente).
+    const game::CharacterState followed = renderState(spectateTarget());
+    m_followCamera.update(in, followed.position, followed.yaw, dt, recenter, lock, &m_world.collision());
+}
 
-    // 5) Construccion: donde iria la pared y que pared se quitaria (para dibujarlas).
-    if (m_buildMode) {
-        game::PlayerAim view;
-        view.eye = m_followCamera.eye();
-        view.direction = m_followCamera.lookDirection();
-        m_wallPlan = m_match.planWall(m_followCamera.yaw());
-        m_targetWall = m_match.targetedWall(view);
-    } else {
-        m_targetWall = -1;
+void App::playSfx(audio::Sfx sfx, float volume, float pan) const {
+    if (m_audioReady) audio::mixer().play(sfx, volume, pan);
+}
+
+void App::playSpatial(audio::Sfx sfx, const Vec3& position, float maxVolume) const {
+    const Vec3 eye = cameraEye();
+    const Vec3 delta = position - eye;
+    const float distance = math3d::length(delta);
+    const float volume = maxVolume * (1.0f - distance / kSoundRange);
+    if (volume < 0.04f) return;
+    float pan = 0.0f;
+    if (distance > 0.5f) {
+        // Derecha de la camara = adelante x arriba = (-z, 0, x).
+        const Vec3 f = m_followCamera.lookDirection();
+        const Vec3 right = math3d::normalize(Vec3{-f.z, 0.0f, f.x});
+        pan = 0.8f * math3d::dot(delta, right) / distance;
     }
+    playSfx(sfx, volume, pan);
+}
 
-    updatePerformance(dt);
+void App::processEvents() {
+    const u32 count = m_match.eventCount();
+    // Si se acumularon mas de los que caben (frame muy largo), se pierden los mas viejos.
+    if (count - m_eventCursor > static_cast<u32>(game::Match::kMaxEvents)) {
+        m_eventCursor = count - game::Match::kMaxEvents;
+    }
+    for (; m_eventCursor < count; ++m_eventCursor) {
+        const game::GameEvent& e = m_match.event(m_eventCursor);
+        switch (e.type) {
+            case game::GameEventType::Shot:
+                if (e.entity == 0) {
+                    playSfx(audio::Sfx::Shot, 0.85f);
+                    m_playerAnim.onShot();
+                } else if (e.entity > 0) {
+                    playSpatial(audio::Sfx::Shot, e.position, 0.7f);
+                    m_botAnims[e.entity - 1].onShot();
+                }
+                break;
+            case game::GameEventType::HitEntity:
+                if (e.entity > 0) m_botAnims[e.entity - 1].onHit();
+                if (e.other == 0) playSfx(audio::Sfx::HitMarker, 0.9f);
+                break;
+            case game::GameEventType::HitStructure:
+                if (e.other == 0) playSfx(audio::Sfx::HitMarker, 0.4f);
+                break;
+            case game::GameEventType::PlayerHurt:
+                playSfx(audio::Sfx::Hurt, 0.9f);
+                m_playerAnim.onHit();
+                break;
+            case game::GameEventType::Eliminated:
+                if (e.entity == 0) m_playerKiller = e.other;
+                if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
+                break;
+            case game::GameEventType::WallBuilt:
+                playSfx(audio::Sfx::WallBuild, 0.8f);
+                break;
+            case game::GameEventType::WallRemoved:
+                playSfx(audio::Sfx::WallBuild, 0.5f);
+                break;
+            case game::GameEventType::WallBroken:
+                playSpatial(audio::Sfx::WallBreak, e.position, 0.9f);
+                break;
+            case game::GameEventType::Reload:
+                playSfx(audio::Sfx::Reload, 0.8f);
+                break;
+        }
+    }
 }
 
 void App::updatePerformance(float dt) {
@@ -360,7 +455,8 @@ void App::updatePerformance(float dt) {
             "fin de partida: ganador %s, puesto del jugador %d, bajas %d, %.0f s | %d bots: "
             "frame medio %.2f ms (max %.1f), IA %.3f ms/s de juego, %d decisiones, %d caminos "
             "(max %d nodos), %d atascos, %d disparos (%d impactos, %d contra paredes, %d contra "
-            "paredes construidas) | paredes: %d construidas, %d quitadas, %d rotas",
+            "paredes construidas) | paredes: %d construidas, %d quitadas, %d rotas | heap %u KB, "
+            "voces de audio descartadas %u",
             m_match.name(m_match.winner()), m_match.playerPlace(), m_match.playerKills(),
             static_cast<double>(m_match.elapsed()), m_botCount,
             static_cast<double>(m_matchFrames ? m_matchFrameMsSum / m_matchFrames : 0.0f),
@@ -368,73 +464,69 @@ void App::updatePerformance(float dt) {
             static_cast<double>(s.aiMicros / 1000.0 / (m_match.elapsed() > 0.0f ? m_match.elapsed() : 1.0f)),
             s.decisions, s.pathRequests, s.maxPathExpansions, s.stuckEvents, s.shotsFired,
             s.shotsHitEntity, s.shotsBlockedByWorld, s.shotsHitStructure, s.wallsBuilt, s.wallsRemoved,
-            s.wallsDestroyed);
+            s.wallsDestroyed, heapInUse() / 1024,
+            static_cast<unsigned>(m_audioReady ? audio::mixer().droppedCommands() : 0));
     }
 }
 
 u32 App::clearColor() const {
-    // Mismo color que la niebla: los objetos lejanos se funden con el fondo.
-    return config::kColorSky;
+    // En la partida, mismo color que la niebla: los objetos lejanos se funden con el fondo.
+    return m_screen == Screen::Game ? config::kColorSky : kNavy;
 }
 
 math3d::Vec3 App::cameraEye() const {
     return m_freeCameraActive ? m_freeCamera.eye() : m_followCamera.eye();
 }
 
+bool App::projectToScreen(const math3d::Mat4& viewProjection, const Vec3& p, float* x, float* y) const {
+    const float* m = viewProjection.m;
+    const float w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
+    if (w < 0.2f) return false;  // detras de la camara
+    const float sx = (m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12]) / w;
+    const float sy = (m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13]) / w;
+    *x = (sx * 0.5f + 0.5f) * gfx::kScreenWidth;
+    *y = (0.5f - sy * 0.5f) * gfx::kScreenHeight;
+    return true;
+}
+
 void App::render(const FrameInfo& frame) {
-    if (m_screen == Screen::Title) {
-        renderTitle();
-    } else {
-        renderGame(frame);
+    switch (m_screen) {
+        case Screen::Login: renderLogin(); break;
+        case Screen::Lobby: renderLobby(); break;
+        case Screen::Controls: renderControlsScreen(frame); break;
+        case Screen::Loading: renderLoading(); break;
+        case Screen::Game:
+            renderGame(frame);
+            if (m_results != Results::None) renderResults();
+            if (m_paused) renderPause();
+            break;
     }
+    if (m_exitProgress > 0.0f) renderExitBar(140, 4, 200, 4);
 }
 
 void App::renderOverlay(const FrameInfo& frame) const {
-    if (m_screen == Screen::Title) {
-        overlayTitle(frame);
-    } else {
-        overlayGame(frame);
+    switch (m_screen) {
+        case Screen::Login: overlayLogin(); break;
+        case Screen::Lobby: overlayLobby(); break;
+        case Screen::Controls: overlayControlsScreen(frame); break;
+        case Screen::Loading: overlayLoading(); break;
+        case Screen::Game:
+            if (m_results != Results::None) {
+                overlayResults();
+            } else {
+                overlayGame(frame);
+            }
+            if (m_paused) overlayPause();
+            break;
     }
 }
 
 void App::renderExitBar(float x, float y, float w, float h) const {
     gfx::fillRect(x, y, w, h, kButtonOff);
-    if (m_exitProgress > 0.0f) gfx::fillRect(x, y, w * m_exitProgress, h, rgba(220, 60, 50));
+    gfx::fillRect(x, y, w * m_exitProgress, h, rgba(220, 60, 50));
 }
 
-// --- Portada --------------------------------------------------------------------------
-
-void App::renderTitle() const {
-    if (m_hasLoadscreen) {
-        gfx::drawTexture(m_loadscreen, 0.0f, 0.0f);
-    } else {
-        gfx::fillRect(0, 180, gfx::kScreenWidth, gfx::kScreenHeight - 180, config::kColorGrass);
-    }
-    gfx::fillRect(0, 0, gfx::kScreenWidth, 20, kBar);
-    if (m_hasLogo) {
-        gfx::drawTexture(m_logo, static_cast<float>((gfx::kScreenWidth - m_logo.width) / 2), 26.0f);
-    }
-    gfx::fillRect(0, 214, gfx::kScreenWidth, 58, kBar);
-    if (m_exitProgress > 0.0f) renderExitBar(140, 210, 200, 3);
-}
-
-void App::overlayTitle(const FrameInfo& frame) const {
-    gfx::text::printShadow(8, 6, config::kColorGold, "%s v%s", config::kGameTitle, config::kVersion);
-    gfx::text::printShadow(400, 6, kWhite, "%5.1f FPS", frame.timer.fps());
-
-    char bots[48];
-    snprintf(bots, sizeof(bots), "Bots: < %d >   (izq./dcha.)", m_botCount);
-    printCentered(220, m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
-    if (m_botCount > game::kDefaultBots) printCentered(230, kLightGrey, "(mas de 10: mide el rendimiento)");
-    if (!m_worldReady) {
-        printCentered(242, kErrorRed, "ERROR: sin memoria para el escenario");
-    } else if (fmodf(m_blinkTime, 1.0f) < 0.65f) {
-        printCentered(242, config::kColorGold, "Pulsa X para jugar");
-    }
-    printCentered(256, kLightGrey, "Salir: mantener L + R + START (1 s)");
-}
-
-// --- Partida: dibujo ------------------------------------------------------------------------
+// --- Partida: dibujo 3D ---------------------------------------------------------------------
 
 void App::renderGame(const FrameInfo& frame) {
     if (m_worldReady) {
@@ -465,7 +557,7 @@ void App::renderGame(const FrameInfo& frame) {
 
     switch (m_hud) {
         case Hud::Game:
-            renderGameHud();
+            if (m_results == Results::None) renderGameHud();
             break;
         case Hud::Debug:
             gfx::fillRect(0, 0, gfx::kScreenWidth, 16, kBar);
@@ -479,7 +571,6 @@ void App::renderGame(const FrameInfo& frame) {
         case Hud::Count:
             break;
     }
-    if (m_exitProgress > 0.0f) renderExitBar(140, 18, 200, 4);
 }
 
 void App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const {
@@ -515,342 +606,6 @@ void App::renderTracers() const {
     }
     gfx::setModelMatrix(math3d::Mat4::identity());
     gfx::drawLines(lines, count);
-}
-
-void App::renderGameHud() const {
-    // Destello rojo al recibir un impacto.
-    const float hurt = m_match.sincePlayerDamaged();
-    if (hurt < 0.35f) {
-        gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight,
-                      rgba(200, 20, 10, static_cast<u32>(110.0f * (1.0f - hurt / 0.35f))));
-    }
-    gfx::fillRect(0, 0, gfx::kScreenWidth, 16, kBar);
-
-    const game::CharacterState& p = m_match.body(0).state();
-    if (m_buildMode) {
-        // Franja azul: el modo construccion se ve siempre.
-        gfx::fillRect(0, 17, gfx::kScreenWidth, 26, kBuildBlue);
-    }
-    if (m_match.alive(0) && !m_freeCameraActive && m_buildMode) {
-        // Reticula de construccion: cuatro esquinas.
-        const u32 c = m_wallPlan.valid ? kBuildReticle : kErrorRed;
-        for (int sx : {-1, 1}) {
-            for (int sy : {-1, 1}) {
-                const float cx = 240.0f + sx * 10.0f, cy = 136.0f + sy * 10.0f;
-                gfx::fillRect(sx < 0 ? cx : cx - 5.0f, cy, 6, 2, c);
-                gfx::fillRect(cx, sy < 0 ? cy : cy - 5.0f, 2, 6, c);
-            }
-        }
-    } else if (m_match.alive(0) && !m_freeCameraActive) {
-        // Mira (roja si la ayuda de punteria tiene un objetivo) y marcador de impacto.
-        const u32 c = m_match.playerAssistTarget() >= 0 || m_lockTarget > 0 ? kCrosshairLocked : kCrosshair;
-        gfx::fillRect(229, 135, 7, 2, c);
-        gfx::fillRect(244, 135, 7, 2, c);
-        gfx::fillRect(239, 125, 2, 7, c);
-        gfx::fillRect(239, 140, 2, 7, c);
-        gfx::fillRect(239, 135, 2, 2, c);
-        if (m_match.sincePlayerHit() < 0.15f) {
-            for (int k = 0; k < 4; ++k) {
-                gfx::fillRect(233 - k, 129 - k, 2, 2, kWhite);
-                gfx::fillRect(245 + k, 129 - k, 2, 2, kWhite);
-                gfx::fillRect(233 - k, 141 + k, 2, 2, kWhite);
-                gfx::fillRect(245 + k, 141 + k, 2, 2, kWhite);
-            }
-        }
-    }
-
-    // Vida (como en Referencias/Referencia gameplay.png).
-    const float ratio = p.maxHealth > 0.0f ? p.health / p.maxHealth : 0.0f;
-    gfx::fillRect(20, 255, 152, 11, rgba(0, 0, 0, 170));
-    gfx::fillRect(21, 256, 150 * ratio, 9, ratio > 0.3f ? kHealthGreen : kErrorRed);
-    renderAmmo();
-    renderDamageNumbers();
-
-    if (m_match.phase() != game::MatchPhase::Playing) {
-        gfx::fillRect(0, 96, gfx::kScreenWidth, 62, rgba(0, 0, 0, 170));
-    }
-}
-
-void App::renderAmmo() const {
-    gfx::fillRect(352, 222, 124, 46, kPanel);
-    if (m_buildMode) {
-        // Paredes construidas en grande (como la municion en modo combate).
-        const game::StructureSystem& s = m_match.structures();
-        const bool full = s.count() >= s.config().maxWalls;
-        drawBigNumber(358, 238, s.count(), 4.0f, full ? kErrorRed : kBuildReticle);
-        return;
-    }
-    const game::Weapon& w = m_match.playerWeapon();
-    const u32 color = w.ammo() == 0 ? kErrorRed : (w.reloading() ? kLightGrey : kWhite);
-    drawBigNumber(358, 238, w.ammo(), 4.0f, color);
-    if (w.reloading()) {
-        gfx::fillRect(356, 263, 116, 3, rgba(0, 0, 0, 200));
-        gfx::fillRect(356, 263, 116 * w.reloadProgress(), 3, config::kColorGold);
-    }
-}
-
-void App::renderDamageNumbers() const {
-    // Numeros de dano sobre lo que ha alcanzado el jugador: suben y se desvanecen.
-    const game::DamageNumber* numbers = m_match.damageNumbers();
-    for (int i = 0; i < game::Match::kMaxDamageNumbers; ++i) {
-        const game::DamageNumber& d = numbers[i];
-        if (d.age >= kDamageNumberSeconds) continue;
-        const Vec3 p = d.position + Vec3{0.0f, d.age * 0.9f, 0.0f};
-        const float* m = m_viewProjection.m;
-        const float w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
-        if (w < 0.2f) continue;  // detras de la camara
-        const float sx = (m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12]) / w;
-        const float sy = (m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13]) / w;
-        const float x = (sx * 0.5f + 0.5f) * gfx::kScreenWidth;
-        const float y = (0.5f - sy * 0.5f) * gfx::kScreenHeight;
-        const float fade = d.age < 0.55f ? 1.0f : 1.0f - (d.age - 0.55f) / (kDamageNumberSeconds - 0.55f);
-        const u32 alpha = static_cast<u32>(255.0f * fade);
-        const float scale = d.structure ? 2.0f : 3.0f;
-        const u32 color = d.structure ? rgba(200, 220, 255, alpha) : rgba(255, 255, 255, alpha);
-        const int value = static_cast<int>(d.amount + 0.5f);
-        drawBigNumber(x - bigNumberWidth(value, scale) * 0.5f, y - 2.5f * scale, value, scale, color);
-    }
-}
-
-// --- Partida: texto -------------------------------------------------------------------------
-
-void App::overlayGame(const FrameInfo& frame) const {
-    if (m_hud == Hud::Hidden) {
-        gfx::text::printShadow(400, 4, kWhite, "%5.1f FPS", frame.timer.fps());
-        return;
-    }
-    if (m_hud == Hud::Controls) {
-        overlayControlsPage(frame);
-        return;
-    }
-    if (m_hud == Hud::Debug) {
-        overlayDebug(frame);
-        return;
-    }
-    overlayGameHud(frame);
-}
-
-void App::overlayGameHud(const FrameInfo& frame) const {
-    char time[16];
-    formatTime(m_match.elapsed(), time, sizeof(time));
-    gfx::text::print(6, 4, config::kColorGold, "VIVOS %d", m_match.aliveCount());
-    gfx::text::print(96, 4, kWhite, "%s  %s", time, game::matchPhaseName(m_match.phase()));
-    gfx::text::print(400, 4, kLightGrey, "%5.1f FPS", frame.timer.fps());
-
-    if (m_buildMode) {
-        const game::StructureSystem& s = m_match.structures();
-        char banner[48];
-        snprintf(banner, sizeof(banner), "MODO CONSTRUCCION   Paredes %d/%d", s.count(), s.config().maxWalls);
-        printCenteredShadow(20, kWhite, banner);
-        if (!m_wallPlan.valid) {
-            printCenteredShadow(31, kErrorRed, game::placementErrorName(m_wallPlan.error));
-        } else if (m_targetWall >= 0) {
-            printCentered(31, config::kColorGold, "R: colocar  []: quitar esta pared  O: salir");
-        } else {
-            printCentered(31, kLightGrey, "R: colocar pared   O: volver al combate");
-        }
-    }
-
-    // Registro de eliminaciones.
-    int y = m_buildMode ? 47 : 22;
-    for (int i = 0; i < m_match.killEventCount(); ++i) {
-        const game::KillEvent& e = m_match.killEvent(i);
-        if (m_match.elapsed() - e.time > kKillFeedSeconds) continue;
-        const u32 color = (e.killer == 0 || e.victim == 0) ? config::kColorGold : kWhite;
-        if (e.killer >= 0) {
-            gfx::text::printShadow(6, y, color, "%s elimino a %s", m_match.name(e.killer), m_match.name(e.victim));
-        } else {
-            gfx::text::printShadow(6, y, color, "%s ha caido", m_match.name(e.victim));
-        }
-        y += 10;
-    }
-
-    const game::CharacterState& p = m_match.body(0).state();
-    gfx::text::print(8, 257, kWhite, "+");
-    gfx::text::print(26, 257, kWhite, "%3.0f|%3.0f", p.health, p.maxHealth);
-    gfx::text::printShadow(180, 257, kWhite, "Bajas %d", m_match.playerKills());
-
-    // Panel inferior derecho: arma o construccion.
-    if (m_buildMode) {
-        const game::StructureSystem& s = m_match.structures();
-        gfx::text::print(355, 226, kBuildReticle, "PAREDES MADERA");
-        gfx::text::print(400, 244, kWhite, "/ %d", s.config().maxWalls);
-        gfx::text::print(400, 255, kLightGrey, "[] quitar");
-    } else {
-        const game::Weapon& w = m_match.playerWeapon();
-        gfx::text::print(355, 226, config::kColorGold, "%s %s", w.config().name, w.config().rarity);
-        if (w.reserve() < 0) gfx::text::print(400, 244, kWhite, "/ inf");
-        else gfx::text::print(400, 244, kWhite, "/ %d", w.reserve());
-        if (w.reloading()) gfx::text::print(400, 254, config::kColorGold, "RECARGA");
-        else if (w.empty()) gfx::text::print(400, 254, kErrorRed, "SIN BALAS");
-        else if (w.ammo() == 0) gfx::text::print(400, 254, kErrorRed, "[] recarga");
-    }
-
-    if (m_match.phase() != game::MatchPhase::Playing) overlayMatchEnd();
-}
-
-void App::overlayMatchEnd() const {
-    char line[64];
-    char time[16];
-    formatTime(m_match.elapsed(), time, sizeof(time));
-    if (m_match.phase() == game::MatchPhase::Finished && m_match.winner() == 0) {
-        printCenteredShadow(102, config::kColorGold, "#1  VICTORIA MAGISTRAL");
-        snprintf(line, sizeof(line), "Bajas: %d   Tiempo: %s", m_match.playerKills(), time);
-        printCentered(118, kWhite, line);
-    } else {
-        snprintf(line, sizeof(line), "ELIMINADO - Puesto #%d de %d", m_match.playerPlace(), m_match.entityCount());
-        printCenteredShadow(102, kErrorRed, line);
-        if (m_match.phase() == game::MatchPhase::Finished) {
-            snprintf(line, sizeof(line), "Ganador: %s", m_match.winner() >= 0 ? m_match.name(m_match.winner()) : "nadie");
-        } else {
-            snprintf(line, sizeof(line), "Quedan %d - la partida sigue", m_match.aliveCount());
-        }
-        printCentered(118, kWhite, line);
-    }
-    if (m_match.phase() == game::MatchPhase::Finished) {
-        if (fmodf(m_blinkTime, 1.0f) < 0.65f) printCentered(138, config::kColorGold, "Pulsa X para jugar otra vez");
-    } else {
-        printCentered(138, kLightGrey, "O: camara libre para mirar");
-    }
-}
-
-void App::overlayDebug(const FrameInfo& frame) const {
-    const game::CharacterState& p = m_match.body(0).state();
-    const game::MatchStats& s = m_match.stats();
-    gfx::text::print(6, 4, config::kColorGold, "%s v%s", config::kGameTitle, config::kVersion);
-    gfx::text::print(168, 4, kLightGrey, "%s", config::kPhase);
-    gfx::text::print(400, 4, kWhite, "%5.1f FPS", frame.timer.fps());
-
-    int y = 24;
-    const int x = 8;
-    gfx::text::print(x, y, config::kColorGold, "JUGADOR");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Pos %6.1f %5.1f %6.1f", p.position.x, p.position.y, p.position.z);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Vel %4.2f vert %+5.2f", p.horizontalSpeed(), p.velocity.y);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "%s, %s", game::jumpStateName(p.jumpState), game::locomotionName(p));
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Rumbo %3.0f  cam %3.0f", headingDegrees(p.yaw), headingDegrees(m_followCamera.yaw()));
-    y += kLineHeight + 4;
-    gfx::text::print(x, y, config::kColorGold, "RENDIMIENTO (%d bots)", m_match.botCount());
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Frame %5.2f ms trab %5.2f", frame.timer.frameMsAvg(), frame.workMs);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "IA %5.2f ms  fis %5.2f ms", m_aiMsPerFrame, m_physicsMsPerFrame);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Decisiones %3d/s", m_decisionsPerSecond);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Tris %5d lotes %3d", m_stats.trianglesDrawn, m_stats.batchesDrawn);
-    y += kLineHeight + 4;
-    gfx::text::print(x, y, config::kColorGold, "PARTIDA");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Vivos %d/%d  zona %2.0f m", m_match.aliveCount(), m_match.entityCount(),
-                     m_match.zoneRadius());
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Caminos %d (fallos %d)", s.pathRequests, s.pathFailures);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Max nodos A* %d", s.maxPathExpansions);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Atascos %d", s.stuckEvents);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Disparos %d", s.shotsFired);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, " impactos %d pared %d", s.shotsHitEntity, s.shotsBlockedByWorld);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Paredes +%d -%d rotas %d", s.wallsBuilt, s.wallsRemoved, s.wallsDestroyed);
-
-    // Lista de bots: estado, vida, objetivo y distancia.
-    y = 24;
-    const int bx = 244;
-    gfx::text::print(bx, y, config::kColorGold, "BOT ESTADO       VIDA OBJ");
-    y += 10;
-    const int maxRows = 23;
-    for (int i = 0; i < m_match.botCount() && i < maxRows; ++i) {
-        const game::Bot& b = m_match.bot(i);
-        const bool dead = b.state == game::BotState::Eliminated;
-        char target[16] = "-";
-        if (!dead && b.target >= 0) snprintf(target, sizeof(target), "%s%d", b.target == 0 ? "J" : "B", b.target);
-        gfx::text::print(bx, y, dead ? rgba(130, 130, 130) : (b.state == game::BotState::Attack ? kErrorRed : kWhite),
-                         "%2d %-12s %3.0f %s", i + 1, game::botStateName(b.state), b.body.state().health, target);
-        y += 10;
-    }
-    if (m_match.botCount() > maxRows) gfx::text::print(bx, y, kLightGrey, "... (%d mas)", m_match.botCount() - maxRows);
-}
-
-// --- Pagina de controles (herencia de la fase 1) ----------------------------------------
-
-void App::renderControlsPage(const FrameInfo& frame) const {
-    const u32 buttons = frame.input.rawButtons();
-
-    gfx::fillRect(0, 0, gfx::kScreenWidth, 20, kBar);
-    gfx::fillRect(6, 26, 300, 200, kPanel);
-    gfx::fillRect(312, 26, 162, 200, kPanel);
-    gfx::fillRect(0, 232, gfx::kScreenWidth, 40, kBar);
-
-    for (const ButtonBox& b : kButtonBoxes) {
-        gfx::fillRect(b.x, b.y, b.w, b.h, (buttons & b.mask) ? kButtonOn : kButtonOff);
-    }
-
-    // Stick analogico: caja, cruz central y punto con la posicion normalizada.
-    const float half = kStickBoxSize / 2.0f;
-    const float cx = kStickBoxX + half;
-    const float cy = kStickBoxY + half;
-    gfx::fillRect(kStickBoxX, kStickBoxY, kStickBoxSize, kStickBoxSize, kButtonOff);
-    gfx::fillRect(kStickBoxX, cy, kStickBoxSize, 1, kButtonOff);
-    gfx::fillRect(cx, kStickBoxY, 1, kStickBoxSize, kButtonOff);
-    const float dotX = cx + frame.input.analogX() * (half - 3.0f);
-    const float dotY = cy + frame.input.analogY() * (half - 3.0f);
-    gfx::fillRect(dotX - 3.0f, dotY - 3.0f, 6, 6, kButtonOn);
-}
-
-void App::overlayControlsPage(const FrameInfo& frame) const {
-    const core::FrameTimer& t = frame.timer;
-    const input::Input& in = frame.input;
-
-    gfx::text::print(8, 6, config::kColorGold, "%s v%s", config::kGameTitle, config::kVersion);
-    gfx::text::print(8 + 8 * 20, 6, kLightGrey, "%s", config::kPhase);
-    gfx::text::print(400, 6, kWhite, "%5.1f FPS", t.fps());
-
-    int y = 32;
-    const int x = 14;
-    gfx::text::print(x, y, config::kColorGold, "COMBATE");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Stick mover  X saltar");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "R disparar  [] recargar");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "L fijar obj.  Cruceta camara");
-    y += kLineHeight;
-    gfx::text::print(x, y, config::kColorGold, "CONSTRUCCION (O)");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "R colocar  [] quitar");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "^ camara libre (depuracion)");
-    y += kLineHeight + 4;
-
-    char held[40];
-    heldButtonsString(in.rawButtons(), held, 26);
-    gfx::text::print(x, y, config::kColorGold, "MANDO");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Botones: 0x%08X", static_cast<unsigned>(in.rawButtons()));
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Pulsado: %s", held);
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Ultimo : %s  total %u", m_lastButton, static_cast<unsigned>(m_pressCount));
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Stick norm: %+.2f, %+.2f", in.analogX(), in.analogY());
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "CPU %d MHz / Bus %d MHz", m_cpuMhz, m_busMhz);
-
-    gfx::text::print(339, 35, kWhite, "L");
-    gfx::text::print(441, 35, kWhite, "R");
-    gfx::text::print(366, 110, kLightGrey, "SEL");
-    gfx::text::print(396, 110, kLightGrey, "STA");
-    gfx::text::print(357, 194, kLightGrey, "ANALOGICO");
-
-    gfx::text::print(8, 238, kWhite, "SELECT: siguiente HUD   ^: camara libre");
-    gfx::text::print(8, 253, kLightGrey, "Salir: mantener L+R+START 1 s");
 }
 
 }  // namespace app

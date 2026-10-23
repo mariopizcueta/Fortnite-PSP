@@ -41,6 +41,27 @@ struct PlayerCommands {
     bool reload = false;     // CUADRADO pulsado en modo combate
 };
 
+// Sucesos de la partida para sonido y animaciones. La partida los apila en una cola
+// circular; quien los consume guarda hasta que numero ha leido (eventCount()).
+enum class GameEventType : u8 {
+    Shot,          // entity = tirador, position = boca del arma
+    HitEntity,     // entity = alcanzado, other = tirador
+    HitStructure,  // other = tirador, position = impacto en la pared construida
+    PlayerHurt,    // entity = 0, other = atacante
+    Eliminated,    // entity = victima, other = quien la elimino
+    WallBuilt,
+    WallBroken,
+    WallRemoved,
+    Reload,        // entity = 0 (el jugador empieza a recargar)
+};
+
+struct GameEvent {
+    GameEventType type = GameEventType::Shot;
+    int entity = -1;
+    int other = -1;
+    math3d::Vec3 position;
+};
+
 // Numero de dano flotante (como en Fortnite): solo los impactos del jugador.
 struct DamageNumber {
     math3d::Vec3 position;
@@ -102,6 +123,7 @@ public:
     static constexpr int kMaxKillFeed = 4;
     static constexpr int kMaxTracers = 24;
     static constexpr int kMaxDamageNumbers = 12;
+    static constexpr int kMaxEvents = 64;
 
     // `world` es modificable: las paredes construidas se anaden como cajas dinamicas.
     void start(const MatchConfig& config, world::CollisionWorld& world, NavGrid& nav,
@@ -139,6 +161,9 @@ public:
     // Pared construida bajo la mira y a alcance para quitarla, o -1.
     int targetedWall(const PlayerAim& aim) const;
     const DamageNumber* damageNumbers() const { return m_damageNumbers; }
+    // Numero total de sucesos emitidos; event(i) es valido para i en [count - kMaxEvents, count).
+    u32 eventCount() const { return m_eventCount; }
+    const GameEvent& event(u32 index) const { return m_events[index % kMaxEvents]; }
 
     const KillEvent& killEvent(int i) const { return m_killFeed[i]; }
     int killEventCount() const { return m_killFeedCount; }
@@ -183,6 +208,7 @@ private:
     void damageWall(int wall, float amount, int attacker, const math3d::Vec3& point);
     void addDamageNumber(const math3d::Vec3& position, float amount, bool structure);
     void onStructuresChanged();
+    void pushEvent(GameEventType type, int entity, int other, const math3d::Vec3& position);
     world::Aabb bodyBounds(int id) const;
     void spawnBots(const math3d::Vec3& playerSpawn);
     void updatePlayer(float dt);
@@ -216,6 +242,8 @@ private:
     StructureSystem m_structures;
     unsigned m_seenStructureRevision = 0;
     DamageNumber m_damageNumbers[kMaxDamageNumbers];
+    GameEvent m_events[kMaxEvents];
+    u32 m_eventCount = 0;
     int m_nextDamageNumber = 0;
     bool m_playerAiming = false;
     int m_playerKills = 0;

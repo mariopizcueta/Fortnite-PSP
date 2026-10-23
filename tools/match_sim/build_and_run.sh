@@ -5,6 +5,8 @@ set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/build/match_sim"
 mkdir -p "$OUT"
+# host_assets.S incrusta los recursos con rutas relativas a la raiz del proyecto.
+cd "$ROOT"
 c++ -std=c++17 -O2 -Wall -Wextra \
     -I"$ROOT/tools/scene_preview/stubs" -I"$ROOT/src" \
     "$ROOT/tools/match_sim/match_sim.cpp" \
@@ -15,6 +17,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/game/structures.cpp" \
     "$ROOT/src/game/weapon.cpp" \
+    "$ROOT/tools/host/host_assets.S" \
     "$ROOT/src/gfx/mesh.cpp" \
     "$ROOT/src/gfx/texture.cpp" \
     "$ROOT/src/math/math3d.cpp" \

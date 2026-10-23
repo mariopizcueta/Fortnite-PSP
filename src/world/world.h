@@ -49,6 +49,9 @@ private:
     size_t m_geometryBytes = 0;
 };
 
+// Color del minimapa en (x, z): tipo de suelo, tejados de las naves, meseta. 0xAABBGGRR.
+u32 mapColorAt(float x, float z);
+
 // Contenido del escenario (world_layout.cpp). Cada funcion registra por separado la
 // parte visual (SceneBuilder) y la de colision (CollisionWorld).
 void buildGround(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out);

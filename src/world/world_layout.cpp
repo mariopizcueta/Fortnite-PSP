@@ -543,6 +543,26 @@ void scatteredTrees(Builders& b, std::vector<StaticBatch>& out) {
 
 }  // namespace
 
+u32 mapColorAt(float x, float z) {
+    // Tejados de las naves con su color (como se verian desde el aire).
+    if (insideWarehouse(x, z)) {
+        if (x < -10.0f) return rgba(58, 82, 168);
+        if (x < 10.0f) return rgba(128, 132, 130);
+        return rgba(156, 72, 52);
+    }
+    const float mx = x - kMesaX, mz = z - kMesaZ;
+    if (mx * mx + mz * mz < 20.0f * 20.0f) return rgba(150, 128, 108);
+    if (x < kForestMaxX && z < kForestMaxZ) return rgba(44, 92, 40);
+    switch (groundAt(x, z)) {
+        case GroundType::Concrete: return rgba(170, 168, 160);
+        case GroundType::Dirt: return rgba(146, 112, 74);
+        case GroundType::Water: return rgba(56, 110, 168);
+        case GroundType::Sand: return rgba(214, 196, 150);
+        case GroundType::Grass: break;
+    }
+    return rgba(78, 130, 54);
+}
+
 void buildGround(SceneBuilder& b, CollisionWorld& /*collision*/, std::vector<StaticBatch>& out) {
     const Material grass = textured(kTexGrass, kWhite, 4.0f);
     const Material concrete = textured(kTexConcrete, kWhite, 4.0f);
