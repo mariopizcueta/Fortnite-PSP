@@ -39,7 +39,14 @@ struct PlayerCommands {
     bool placeWall = false;  // R pulsado en modo construccion
     bool removeWall = false; // CUADRADO pulsado en modo construccion
     bool reload = false;     // CUADRADO pulsado en modo combate
+    int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
+    bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
+    bool useItem = false;    // R pulsado con un consumible en la mano
 };
+
+// Por que no se ha podido usar un consumible.
+enum class UseError : u8 { None, FullHealth, FullShield };
+const char* useErrorName(UseError error);
 
 // Sucesos de la partida para sonido y animaciones. La partida los apila en una cola
 // circular; quien los consume guarda hasta que numero ha leido (eventCount()).
@@ -53,12 +60,16 @@ enum class GameEventType : u8 {
     WallBroken,
     WallRemoved,
     Reload,        // entity = 0 (el jugador empieza a recargar)
+    PickaxeSwing,  // entity = 0, other = 1 si ha golpeado algo
+    Harvest,       // entity = 0, other = world::Resource, amount = material conseguido
+    ItemUsed,      // entity = 0, other = ItemType (consumible terminado)
 };
 
 struct GameEvent {
     GameEventType type = GameEventType::Shot;
     int entity = -1;
     int other = -1;
+    int amount = 0;
     math3d::Vec3 position;
 };
 
@@ -154,7 +165,19 @@ public:
     const Bot& bot(int i) const { return m_bots[i]; }
     bool playerAiming() const { return m_playerAiming; }
     bool buildMode() const { return m_buildMode; }
-    const Weapon& playerWeapon() const { return m_playerWeapon; }
+    // Arma en la mano o, si se lleva otra cosa, la primera del inventario (para el HUD).
+    const Weapon& playerWeapon() const;
+    const Inventory& inventory() const { return m_inventory; }
+    const Materials& materials() const { return m_materials; }
+    // Consumible en uso: progreso 0..1 (o -1 si no se esta usando nada) y que objeto es.
+    float useProgress() const { return m_useSlot >= 0 ? m_useTimer / m_useDuration : -1.0f; }
+    ItemType usingItem() const { return m_useSlot >= 0 ? m_inventory.slot(m_useSlot).type : ItemType::None; }
+    UseError lastUseError() const { return m_useError; }
+    float sinceUseError() const { return m_sinceUseError; }
+    // Material que le queda a un objeto recolectable (indice de world::World::harvestables()).
+    int harvestLeft(int index) const { return m_harvestLeft[index]; }
+    // Objetos que se pueden picar (los del mundo). Se llama una vez; start() repone el material.
+    void setHarvestables(const std::vector<world::Harvestable>* list);
     const StructureSystem& structures() const { return m_structures; }
     // Donde iria una pared ahora mismo (para dibujar la pared fantasma).
     WallPlacement planWall(float yaw) const;
@@ -196,6 +219,13 @@ public:
         m_shotObserverContext = context;
     }
 
+    // Pico y consumibles (publico para las pruebas): como si el jugador pulsara R.
+    void swingPickaxe();
+    bool startUse();
+    // Da objetos al jugador (pruebas; mas adelante, el botin).
+    int giveItem(ItemType type, int count) { return m_inventory.add(type, count, &m_config.playerWeapon); }
+    void giveMaterials(world::Resource r, int n) { m_materials.add(r, n); }
+
     // Construccion (publico para las pruebas): coloca / quita como haria el jugador.
     int buildWall(float yaw);
     bool removeWallAt(const PlayerAim& aim);
@@ -212,6 +242,9 @@ private:
     world::Aabb bodyBounds(int id) const;
     void spawnBots(const math3d::Vec3& playerSpawn);
     void updatePlayer(float dt);
+    void updatePlayerItems(float dt, bool reload);
+    void cancelUse();
+    void harvest(int index, const math3d::Vec3& point);
     void updateBot(int index, float dt);
     void decide(int index);
     int perceive(int index) const;
@@ -237,8 +270,20 @@ private:
     bool m_pendingPlace = false;
     bool m_pendingRemove = false;
     bool m_pendingReload = false;
+    bool m_pendingPickaxe = false;
+    bool m_pendingUse = false;
+    int m_pendingCycle = 0;
     bool m_buildMode = false;
-    Weapon m_playerWeapon;
+    Inventory m_inventory;
+    Materials m_materials;
+    int m_useSlot = -1;          // ranura del consumible en uso (-1: ninguno)
+    float m_useTimer = 0.0f, m_useDuration = 1.0f;
+    UseError m_useError = UseError::None;
+    float m_sinceUseError = 99.0f;
+    float m_swingCooldown = 0.0f;
+    const std::vector<world::Harvestable>* m_harvestables = nullptr;
+    std::vector<short> m_harvestByCollider;
+    std::vector<int> m_harvestLeft;
     StructureSystem m_structures;
     unsigned m_seenStructureRevision = 0;
     DamageNumber m_damageNumbers[kMaxDamageNumbers];

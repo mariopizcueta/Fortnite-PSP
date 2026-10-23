@@ -59,6 +59,10 @@ public:
     game::Match& testMatch() { return m_match; }
     const world::World& testWorld() const { return m_world; }
     int testNavWalkable() const { return m_nav.walkableCount(); }
+    float testCameraYaw() const { return m_followCamera.yaw(); }
+    int testLockTarget() const { return m_lockTarget; }
+    bool testFreeCamera() const { return m_freeCameraActive; }
+    int testBuildPiece() const { return m_buildPiece; }
 #endif
 
 private:
@@ -78,7 +82,7 @@ private:
     void goToLobby();
     void startLoading();
     void updateGame(const input::Input& in, float dt);
-    void updateGameCameras(const input::Input& in, float dt, bool control, bool lockHeld);
+    void updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld);
     void processEvents();
     void playSfx(audio::Sfx sfx, float volume = 1.0f, float pan = 0.0f) const;
     // Efecto con volumen por distancia (hasta 60 m) y panoramica respecto a la camara.
@@ -161,6 +165,11 @@ private:
     bool m_buildMode = false;
     game::WallPlacement m_wallPlan;
     int m_targetWall = -1;
+    static constexpr int kBuildPieces = 3;  // pared, suelo, rampa (cruceta en construccion)
+    int m_buildPiece = 0;
+    // Ultimo material conseguido con el pico (aviso "+8" junto a la mira).
+    int m_harvestResource = 0, m_harvestAmount = 0;
+    float m_harvestAge = 99.0f;
     BuildVisuals m_buildVisuals;
     bool m_buildVisualsReady = false;
     math3d::Mat4 m_viewProjection = math3d::Mat4::identity();  // para proyectar numeros de dano

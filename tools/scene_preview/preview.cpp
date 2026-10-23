@@ -168,8 +168,8 @@ int main(int argc, char** argv) {
         } else {
             camera::ThirdPersonCamera cam;
             cam.reset(gv.player, gv.yaw);
-            input::Input none;
-            // Ajuste de la mira como si se mantuviera la cruceta, y colision con paredes.
+            const camera::CameraInput none;
+            // Un segundo de seguimiento (camara asentada) con colision con paredes.
             for (int i = 0; i < 60; ++i) {
                 cam.update(none, gv.player, gv.yaw, 1.0f / 60.0f, false, nullptr, &w.collision());
             }

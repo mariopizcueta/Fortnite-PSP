@@ -132,6 +132,10 @@ def ui_atlas():
         "IconZona": Image.open(RES / "HUD" / "icono_zona.png").convert("RGBA"),
         "IconEscudo": Image.open(RES / "HUD" / "icono_escudo.png").convert("RGBA"),
         "IconVida": Image.open(RES / "HUD" / "icono_vida.png").convert("RGBA"),
+        "Vendas": Image.open(RES / "HUD" / "vendas.png").convert("RGBA"),
+        "Botiquin": Image.open(RES / "HUD" / "botiquin.png").convert("RGBA"),
+        "Minipocion": Image.open(RES / "HUD" / "minipocion.png").convert("RGBA"),
+        "PocionEscudo": Image.open(RES / "HUD" / "pocion_escudo.png").convert("RGBA"),
     }
     # Empaquetado por estantes en un atlas de 512 px de ancho. La altura es solo la usada
     # (multiplo de 8): la GE declara la potencia de 2 pero en RAM solo van esas filas.

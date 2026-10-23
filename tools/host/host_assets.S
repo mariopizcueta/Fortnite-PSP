@@ -28,4 +28,6 @@ _asset_\name\()_end:
     ASSET sfx_menu_aceptar, "assets/sounds/menu_aceptar.wav"
     ASSET sfx_victoria, "assets/sounds/victoria.wav"
     ASSET sfx_derrota, "assets/sounds/derrota.wav"
+    ASSET sfx_pico, "assets/sounds/pico.wav"
+    ASSET sfx_curacion, "assets/sounds/curacion.wav"
     ASSET music_menu, "assets/sounds/musica_menu.ima"

@@ -20,25 +20,30 @@ Las coordenadas y los ejes son los de [MUNDO.md](MUNDO.md): 1 unidad = 1 m, +Y a
 
 | Botón                      | Acción                                                      |
 |----------------------------|-------------------------------------------------------------|
-| Stick analógico            | Andar/correr (la velocidad depende de cuánto se incline)    |
+| Stick analógico            | Andar/correr (la velocidad depende de cuánto se incline); la cámara se coloca detrás |
 | X                          | Saltar (mantener = salto completo, tocar = salto corto)     |
-| Cruceta ← / →              | Girar la cámara alrededor del jugador                       |
-| Cruceta ↑ / ↓              | Mirar arriba / abajo                                        |
-| R (mantener)               | Disparar la SCAR (5,5 disparos/s, ver COMBATE_CONSTRUCCION.md) |
+| L (mantener)               | Apuntar: fija el bot visible más centrado (cono de 35°, 45 m) y el stick mueve de lado; sin objetivo, recoloca la cámara detrás y el stick mueve la mira |
+| Cruceta ← / →              | Ranura del inventario (en construcción: pieza)              |
+| TRIÁNGULO                  | Sacar / guardar el pico (en la página de depuración: cámara libre) |
+| R                          | Disparar, golpear con el pico o usar un consumible (ver INVENTARIO.md) |
 | CUADRADO                   | Recargar (en construcción: quitar la pared apuntada)        |
-| L (mantener)               | Fijar el bot visible más centrado (cono de 35°, 45 m); sin objetivo, recoloca la cámara detrás |
 | CÍRCULO                    | Modo construcción (R coloca paredes)                        |
-| TRIÁNGULO                  | Cámara libre de depuración (dentro: CUADRADO niebla, START VSync) |
 | SELECT                     | HUD: partida → depuración → controles → oculto              |
 | START                      | Pausa (CONTINUAR / VOLVER AL LOBBY)                         |
 | Resultados                 | X lobby, CUADRADO otra partida, CÍRCULO seguir mirando (derrota) |
 | L + R + START (1 s)        | Salir                                                       |
 
-El stick solo mueve al jugador; la cámara se maneja con la cruceta y los gatillos
-apuntan y disparan, así que no hay combinaciones que compitan con el movimiento. Como la
-PSP solo tiene un stick y el pulgar izquierdo no puede mover y girar a la vez, L fija el
-objetivo y la ayuda de puntería corrige pequeños desvíos. Al mantener L + R + START para
-salir, fijar y disparar no tienen otro efecto.
+**Esquema de la fase 7.** La PSP tiene un solo stick, así que mover y girar comparten el
+pulgar izquierdo:
+- **Andando:** la cámara se va colocando detrás del jugador (seguimiento a 0,9/s según
+  cuánto se incline el stick). Al ir hacia atrás no gira, para poder retroceder.
+- **Con L mantenido:** es el modo apuntado. Si hay un enemigo a la vista, lo fija y el
+  stick mueve de lado (como en fases anteriores). Si no, el stick gira la cámara y sube o
+  baja la mira, y el jugador se queda quieto.
+- **Cruceta:** queda libre para elegir objeto (o pieza en construcción).
+- **Ayuda de puntería:** corrige pequeños desvíos.
+
+Al mantener L + R + START para salir, apuntar y disparar no tienen otro efecto.
 
 ## Movimiento relativo a la cámara
 
@@ -124,7 +129,8 @@ mira   = dirección (yaw, inclinación), con inclinación de -4° por defecto
 - **Encuadre:** el ojo está por encima de la cabeza y la mira, casi horizontal, así que
   el personaje queda bajo la mira (como en `Referencias/Referencia gameplay.png`) y la
   mira señala a la altura del pecho de los enemigos.
-- **Cruceta ↑↓:** ajusta la inclinación de la mira entre -29° y +26°.
+- **L + stick ↑↓ (sin objetivo):** ajusta la inclinación de la mira entre -29° y +26°. Al
+  andar vuelve poco a poco a la de por defecto.
 - **Fijar objetivo (L):** encara al bot fijado en horizontal y en vertical.
 - **Paredes:** se lanza un raycast del pivote al ojo deseado. Si hay una pared, el ojo se
   acerca al jugador, de modo que dentro de las naves la cámara no queda al otro lado de

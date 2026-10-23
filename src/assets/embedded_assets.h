@@ -23,6 +23,8 @@ FORTNITEPSP_ASSET(sfx_menu_mover)
 FORTNITEPSP_ASSET(sfx_menu_aceptar)
 FORTNITEPSP_ASSET(sfx_victoria)
 FORTNITEPSP_ASSET(sfx_derrota)
+FORTNITEPSP_ASSET(sfx_pico)
+FORTNITEPSP_ASSET(sfx_curacion)
 FORTNITEPSP_ASSET(music_menu)
 
 namespace assets {
@@ -55,6 +57,8 @@ FORTNITEPSP_BLOB(sfxMenuMover, sfx_menu_mover)
 FORTNITEPSP_BLOB(sfxMenuAceptar, sfx_menu_aceptar)
 FORTNITEPSP_BLOB(sfxVictoria, sfx_victoria)
 FORTNITEPSP_BLOB(sfxDerrota, sfx_derrota)
+FORTNITEPSP_BLOB(sfxPico, sfx_pico)
+FORTNITEPSP_BLOB(sfxCuracion, sfx_curacion)
 FORTNITEPSP_BLOB(musicMenu, music_menu)
 
 #undef FORTNITEPSP_BLOB

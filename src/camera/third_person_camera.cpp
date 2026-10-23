@@ -17,8 +17,10 @@ constexpr float kPivotHeight = 1.7f;    // sobre los pies
 constexpr float kDefaultLook = -0.065f; // ~ -4 grados: la mira cae a la altura del pecho
 constexpr float kMinLook = -0.50f;
 constexpr float kMaxLook = 0.45f;
-constexpr float kYawSpeed = 2.4f;       // rad/s con la cruceta
+constexpr float kYawSpeed = 2.4f;       // rad/s con el stick en el modo apuntado
 constexpr float kLookSpeed = 1.0f;
+constexpr float kFollowRate = 0.9f;     // 1/s: lo que tarda en colocarse detras al andar
+constexpr float kLookReturnRate = 1.5f; // 1/s: la mira vuelve a la altura normal al andar
 constexpr float kMinEyeHeight = 0.7f;   // >= 1.155 * plano cercano (0.5 m), ver MUNDO.md
 constexpr float kWallMargin = 0.6f;     // separacion del ojo respecto a una pared
 
@@ -38,7 +40,7 @@ void ThirdPersonCamera::reset(const Vec3& playerPosition, float playerYaw) {
     computeEye(nullptr);
 }
 
-void ThirdPersonCamera::update(const input::Input& in, const Vec3& playerPosition, float playerYaw,
+void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPosition, float playerYaw,
                                float dt, bool recenter, const Vec3* lockTarget,
                                const world::CollisionWorld* world) {
     if (lockTarget) {
@@ -47,11 +49,16 @@ void ThirdPersonCamera::update(const input::Input& in, const Vec3& playerPositio
         const Vec3 d = *lockTarget - m_eye;
         m_targetLook = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
     } else {
-        // Cruceta: izquierda gira la vista a la izquierda (yaw crece hacia el oeste).
-        if (in.held(PSP_CTRL_LEFT)) m_targetYaw += kYawSpeed * dt;
-        if (in.held(PSP_CTRL_RIGHT)) m_targetYaw -= kYawSpeed * dt;
-        if (in.held(PSP_CTRL_UP)) m_targetLook += kLookSpeed * dt;    // mirar arriba
-        if (in.held(PSP_CTRL_DOWN)) m_targetLook -= kLookSpeed * dt;  // mirar abajo
+        // Giro manual: a la derecha el yaw decrece (crece hacia el oeste).
+        m_targetYaw -= control.turn * kYawSpeed * dt;
+        m_targetLook += control.look * kLookSpeed * dt;
+        // Seguimiento: al andar, la camara se va colocando detras del jugador y la mira
+        // vuelve a la altura normal (suavizado exponencial, independiente de los FPS).
+        if (control.follow > 0.0f) {
+            const float k = smoothFactor(kFollowRate * control.follow, dt);
+            m_targetYaw += game::wrapAngle(control.followYaw - m_targetYaw) * k;
+            m_targetLook += (kDefaultLook - m_targetLook) * smoothFactor(kLookReturnRate * control.follow, dt);
+        }
         if (recenter) {
             m_targetYaw = playerYaw;
             m_targetLook = kDefaultLook;

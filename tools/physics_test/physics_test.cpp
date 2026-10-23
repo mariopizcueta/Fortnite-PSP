@@ -275,7 +275,7 @@ CameraRun cameraFollow(float fps) {
     FixedTimestep ts;
     camera::ThirdPersonCamera cam;
     cam.reset(pc.state().position, 0.0f);
-    input::Input noButtons;  // la cruceta no se toca: solo seguimiento
+    const camera::CameraInput noControl;  // sin giro manual ni seguimiento automatico
     CameraRun r;
     const float dt = 1.0f / fps;
     Vec3 prevEye = cam.eye();
@@ -290,7 +290,7 @@ CameraRun cameraFollow(float fps) {
         const int steps = ts.advance(dt);
         for (int s = 0; s < steps; ++s) pc.step(FixedTimestep::kStep, flatWorld());
         const Player p = pc.interpolated(ts.alpha());
-        cam.update(noButtons, p.position, p.yaw, dt, false, nullptr, nullptr);
+        cam.update(noControl, p.position, p.yaw, dt, false, nullptr, nullptr);
 
         const Vec3 focusXZ{cam.focus().x, 0.0f, cam.focus().z};
         const float lag = math3d::length(focusXZ - Vec3{p.position.x, 0.0f, p.position.z});

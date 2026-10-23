@@ -8,6 +8,7 @@
 
 #include "math/math3d.h"
 #include "world/collision.h"
+#include "world/harvest.h"
 #include "world/scene_builder.h"
 #include "world/textures.h"
 
@@ -34,6 +35,14 @@ public:
     const TextureLibrary& textures() const { return m_textures; }
     // Lugares a los que tienden los bots al explorar (interiores de las naves, patio...).
     const std::vector<math3d::Vec3>& pointsOfInterest() const { return m_pointsOfInterest; }
+    // Arboles, cajas, rocas y contenedores que se pueden picar.
+    const std::vector<Harvestable>& harvestables() const { return m_harvestables; }
+    // Objeto recolectable de una caja fija (RayHit::collider), o -1.
+    int harvestableAt(int collider) const {
+        return collider >= 0 && collider < static_cast<int>(m_harvestByCollider.size())
+                   ? m_harvestByCollider[collider]
+                   : -1;
+    }
 
     int batchCount() const { return static_cast<int>(m_static.size()); }
     int totalTriangles() const { return m_totalTriangles; }
@@ -45,6 +54,8 @@ private:
     std::vector<StaticBatch> m_static;  // geometria visual, en coordenadas de mundo
     CollisionWorld m_collision;         // geometria de colision
     std::vector<math3d::Vec3> m_pointsOfInterest;
+    std::vector<Harvestable> m_harvestables;
+    std::vector<short> m_harvestByCollider;  // caja fija -> objeto recolectable (o -1)
     int m_totalTriangles = 0;
     size_t m_geometryBytes = 0;
 };
@@ -56,6 +67,7 @@ u32 mapColorAt(float x, float z);
 // parte visual (SceneBuilder) y la de colision (CollisionWorld).
 void buildGround(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out);
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision,
-                     std::vector<StaticBatch>& out, std::vector<math3d::Vec3>& pointsOfInterest);
+                     std::vector<StaticBatch>& out, std::vector<math3d::Vec3>& pointsOfInterest,
+                     std::vector<Harvestable>& harvestables);
 
 }  // namespace world

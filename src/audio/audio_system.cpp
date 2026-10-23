@@ -36,6 +36,8 @@ bool init() {
     load(Sfx::MenuAccept, assets::sfxMenuAceptar());
     load(Sfx::Victory, assets::sfxVictoria());
     load(Sfx::Defeat, assets::sfxDerrota());
+    load(Sfx::Pickaxe, assets::sfxPico());
+    load(Sfx::Heal, assets::sfxCuracion());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

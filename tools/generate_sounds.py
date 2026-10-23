@@ -152,10 +152,24 @@ def derrota():
     return normalize(arpeggio([523.25, 466.16, 392.0, 311.13], 0.18, 0.35, 1.4), 0.6)
 
 
+def pico():
+    # Golpe seco del pico: un "chac" de madera con un poco de ruido.
+    tt = t(0.22)
+    chop = (np.sin(2 * math.pi * 320 * tt) + 0.5 * np.sin(2 * math.pi * 760 * tt)) * env(len(tt), 0.0008, 0.035)
+    noise = lowpass(rng.uniform(-1, 1, len(tt)), 0.5) * env(len(tt), 0.0005, 0.012)
+    return normalize(chop + noise * 0.7, 0.7)
+
+
+def curacion():
+    # Acorde ascendente suave al terminar de usar un consumible.
+    return normalize(arpeggio([523.3, 659.3, 784.0, 1046.5], 0.07, 0.18, 0.55), 0.45)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
     "menu_aceptar": menu_aceptar, "victoria": victoria, "derrota": derrota,
+    "pico": pico, "curacion": curacion,  # al final: los anteriores salen identicos
 }
 
 

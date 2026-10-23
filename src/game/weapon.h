@@ -33,6 +33,9 @@ public:
     // Recarga manual (si falta municion en el cargador y hay reserva).
     bool startReload();
 
+    // Interrumpe la recarga (al cambiar de objeto en la mano); las balas no cambian.
+    void cancelReload() { m_reloadTimer = 0.0f; }
+
     // Anade un retardo extra antes del siguiente disparo (los bots varian su cadencia).
     void addCooldown(float seconds) { m_cooldown += seconds; }
 

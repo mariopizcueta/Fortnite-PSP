@@ -7,15 +7,30 @@
 
 namespace world {
 
+const char* resourceName(Resource resource) {
+    switch (resource) {
+        case Resource::Wood: return "madera";
+        case Resource::Stone: return "piedra";
+        case Resource::Metal: return "metal";
+        case Resource::Count: break;
+    }
+    return "?";
+}
+
 bool World::build() {
     if (!m_textures.build()) return false;
 
     SceneBuilder builder(kMaxSegment);
     m_collision.clear();
     buildGround(builder, m_collision, m_static);
-    buildStructures(builder, m_collision, m_static, m_pointsOfInterest);
+    m_harvestables.clear();
+    buildStructures(builder, m_collision, m_static, m_pointsOfInterest, m_harvestables);
     if (builder.failed()) return false;
     m_collision.build(kMapHalfSize);
+    m_harvestByCollider.assign(m_collision.count(), -1);
+    for (int i = 0; i < static_cast<int>(m_harvestables.size()); ++i) {
+        m_harvestByCollider[m_harvestables[i].collider] = static_cast<short>(i);
+    }
 
     // Agrupa por textura para minimizar cambios de estado al dibujar.
     std::stable_sort(m_static.begin(), m_static.end(),
@@ -35,6 +50,8 @@ void World::destroy() {
     m_static.clear();
     m_collision.clear();
     m_pointsOfInterest.clear();
+    m_harvestables.clear();
+    m_harvestByCollider.clear();
     m_textures.destroy();
 }
 

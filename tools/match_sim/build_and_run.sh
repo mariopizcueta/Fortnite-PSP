@@ -15,6 +15,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/game/match.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
     "$ROOT/src/game/player.cpp" \
+    "$ROOT/src/game/inventory.cpp" \
     "$ROOT/src/game/structures.cpp" \
     "$ROOT/src/game/weapon.cpp" \
     "$ROOT/tools/host/host_assets.S" \

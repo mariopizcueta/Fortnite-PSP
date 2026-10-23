@@ -102,7 +102,31 @@ Material containerSkin(u32 color) { return textured(kTexContainer, color, 2.6f);
 struct Builders {
     SceneBuilder& visual;
     CollisionWorld& collision;
+    std::vector<Harvestable>* harvest = nullptr;
 };
+
+// Material que da cada objeto al picarlo: por golpe y en total (con 6-8 golpes se agota).
+struct Yield {
+    Resource resource;
+    int perHit, total;
+};
+constexpr Yield kTreeYield{Resource::Wood, 8, 48};
+constexpr Yield kCrateYield{Resource::Wood, 6, 30};
+constexpr Yield kRockYield{Resource::Stone, 7, 49};
+constexpr Yield kMetalYield{Resource::Metal, 8, 64};
+constexpr Yield kSmallMetalYield{Resource::Metal, 6, 30};
+
+// La ultima caja de colision anadida se puede picar.
+void harvestable(Builders& b, const Yield& y) {
+    if (!b.harvest) return;
+    Harvestable h;
+    h.collider = b.collision.count() - 1;
+    h.resource = y.resource;
+    h.box = b.collision.collider(h.collider).box;
+    h.perHit = y.perHit;
+    h.total = y.total;
+    b.harvest->push_back(h);
+}
 
 // Caja con un material por cara. Orden: sur(+Z), norte(-Z), este(+X), oeste(-X), techo,
 // suelo (nullptr = sin esa cara). Mismos vertices que SceneBuilder::box().
@@ -221,6 +245,7 @@ void stairs(Builders& b, float x0, float x1, float topZ, float topY) {
 
 void crate(Builders& b, float x, float z, float y = 0.0f) {
     solid(b, kWood, kWood, {x - 0.6f, y, z - 0.6f}, {x + 0.6f, y + 1.2f, z + 0.6f});
+    harvestable(b, kCrateYield);
 }
 
 void shippingContainer(Builders& b, float x, float z, int level, u32 color, bool alongZ) {
@@ -228,6 +253,7 @@ void shippingContainer(Builders& b, float x, float z, int level, u32 color, bool
     const Material skin = containerSkin(color);
     if (alongZ) solid(b, skin, skin, {x, y, z}, {x + w, y + h, z + len});
     else solid(b, skin, skin, {x, y, z}, {x + len, y + h, z + w});
+    harvestable(b, kMetalYield);
 }
 
 // Estanteria industrial: postes de acero y baldas con cajas (cobertura dentro de la nave).
@@ -340,6 +366,7 @@ void lampPost(Builders& b, float x, float z, float armDirX) {
 
 void boxTrailer(Builders& b, float x0, float z0, float x1, float z1) {
     b.collision.add({{x0, 0.0f, z0}, {x1, 3.6f, z1}}, kSolid);
+    harvestable(b, kMetalYield);
     const Material skin = containerSkin(rgba(210, 210, 204));
     b.visual.box(skin, skin, {x0, 1.0f, z0}, {x1, 3.6f, z1}, true);
     b.visual.box(kDarkTrim, kDarkTrim, {x0 + 0.5f, 0.6f, z0 + 0.3f}, {x1 - 0.5f, 1.0f, z1 - 0.3f});
@@ -395,6 +422,7 @@ void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& p
     lampPost(b, 11.0f, 5.5f, -1.0f);
     lampPost(b, 33.0f, -16.0f, -1.0f);
     solid(b, flat(rgba(60, 110, 70)), flat(rgba(50, 90, 60)), {6.0f, 0, -30.0f}, {8.5f, 1.4f, -28.6f});
+    harvestable(b, kSmallMetalYield);  // contenedor de basura
     b.visual.flushGroup(out);
 
     pois.push_back({0.0f, 0.0f, 9.0f});
@@ -407,6 +435,7 @@ void buildDepot(Builders& b, std::vector<StaticBatch>& out, std::vector<Vec3>& p
 
 void pineTree(Builders& b, float x, float z, float s) {
     solid(b, kTrunk, kTrunk, {x - 0.3f * s, 0, z - 0.3f * s}, {x + 0.3f * s, 2.2f * s, z + 0.3f * s});
+    harvestable(b, kTreeYield);
     b.visual.cone(flat(rgba(50, 104, 52)), {x, 1.8f * s, z}, 2.6f * s, 4.2f * s, 6);
     b.visual.cone(flat(rgba(62, 124, 60)), {x, 4.4f * s, z}, 1.8f * s, 3.2f * s, 6);
 }
@@ -414,6 +443,7 @@ void pineTree(Builders& b, float x, float z, float s) {
 // Arbol de copa cubica, como los de Recursos/Loadscreen.png. La copa no colisiona.
 void blockTree(Builders& b, float x, float z, float s) {
     solid(b, kTrunk, kTrunk, {x - 0.3f * s, 0, z - 0.3f * s}, {x + 0.3f * s, 3.0f * s, z + 0.3f * s});
+    harvestable(b, kTreeYield);
     const Material leaves = flat(rgba(72, 132, 52));
     const Material leavesTop = flat(rgba(92, 156, 62));
     b.visual.box(leaves, leavesTop, {x - 2.2f * s, 2.6f * s, z - 2.2f * s}, {x + 2.2f * s, 4.8f * s, z + 2.2f * s}, true);
@@ -422,6 +452,7 @@ void blockTree(Builders& b, float x, float z, float s) {
 
 void boulder(Builders& b, float x, float z, float w, float d, float h) {
     solid(b, kRock, kRock, {x - w * 0.5f, 0, z - d * 0.5f}, {x + w * 0.5f, h, z + d * 0.5f});
+    harvestable(b, kRockYield);
     b.visual.box(kRock, kRock, {x - w * 0.3f, h, z - d * 0.25f}, {x + w * 0.2f, h + 0.5f, z + d * 0.3f});
 }
 
@@ -630,8 +661,8 @@ void buildGround(SceneBuilder& b, CollisionWorld& /*collision*/, std::vector<Sta
 }
 
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out,
-                     std::vector<Vec3>& pois) {
-    Builders b{visual, collision};
+                     std::vector<Vec3>& pois, std::vector<Harvestable>& harvestables) {
+    Builders b{visual, collision, &harvestables};
     buildDepot(b, out, pois);
     mesa(b, out);
     lake(b, out);

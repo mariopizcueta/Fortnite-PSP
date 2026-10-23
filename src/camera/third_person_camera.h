@@ -12,22 +12,32 @@
 //
 // Si hay una pared entre el pivote y el ojo deseado, el ojo se acerca al jugador (dentro
 // de las naves la camara nunca queda al otro lado de la pared).
+//
+// Control (fase 7): la cruceta ya no mueve la camara. Al andar, la camara se coloca sola
+// detras del jugador (`follow`); en el modo apuntado (L sin objetivo) el stick la gira y
+// la sube o baja (`turn`, `look`).
 #pragma once
 
-#include "input/input.h"
 #include "math/math3d.h"
 #include "world/collision.h"
 
 namespace camera {
 
+struct CameraInput {
+    float turn = 0.0f;       // -1..1: + gira a la derecha
+    float look = 0.0f;       // -1..1: + mira hacia arriba
+    float followYaw = 0.0f;  // hacia donde mira el jugador
+    float follow = 0.0f;     // 0..1: fuerza con la que la camara se coloca detras de el
+};
+
 class ThirdPersonCamera {
 public:
     void reset(const math3d::Vec3& playerPosition, float playerYaw);
 
-    // dt = tiempo de frame (render). Cruceta: girar (izq/dcha) y mirar arriba/abajo.
+    // dt = tiempo de frame (render). `control`: giro manual y seguimiento automatico.
     // `recenter`: volver detras del jugador. `lockTarget`: punto a encarar (o nullptr).
     // `world`: colision de la camara con paredes (o nullptr).
-    void update(const input::Input& in, const math3d::Vec3& playerPosition, float playerYaw,
+    void update(const CameraInput& control, const math3d::Vec3& playerPosition, float playerYaw,
                 float dt, bool recenter, const math3d::Vec3* lockTarget,
                 const world::CollisionWorld* world);
 

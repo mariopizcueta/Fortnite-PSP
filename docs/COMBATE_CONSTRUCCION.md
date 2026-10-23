@@ -10,15 +10,18 @@ paredes y números grandes) y `src/world/collision.*` (cajas dinámicas).
 |----------------|---------------------------|-----------------------------------------------------------|
 | Siempre        | Stick                     | Moverse (relativo a la cámara)                            |
 | Siempre        | X                         | Saltar                                                    |
-| Siempre        | Cruceta ← → / ↑ ↓         | Girar la cámara / subir o bajar la mira                   |
+| Siempre        | L + stick                 | Apuntar (ver JUGADOR.md); la cámara sigue al andar        |
+| Combate        | Cruceta ← →               | Ranura del inventario (ver INVENTARIO.md)                 |
+| Combate        | TRIÁNGULO                 | Pico                                                      |
+| Construcción   | Cruceta ← →               | Pieza (pared; suelo y rampa aún no se colocan)            |
 | Siempre        | **CÍRCULO**               | **Activar / desactivar el modo construcción**             |
 | Combate        | R (mantener)              | Disparar la SCAR (cadencia de 5,5 disparos/s)             |
 | Combate        | CUADRADO                  | Recargar                                                  |
 | Combate        | L (mantener)              | Fijar el bot visible más centrado (sin objetivo: centrar la cámara) |
-| Construcción   | R (pulsar)                | Colocar una pared delante (una por pulsación)             |
+| Construcción   | R (pulsar)                | Colocar una pared delante (una por pulsación, 10 de madera) |
 | Construcción   | CUADRADO                  | Quitar la pared que tienes en la mira (hasta 7 m)         |
-| Construcción   | L                         | Centrar la cámara detrás del jugador                      |
-| Siempre        | TRIÁNGULO                 | Cámara libre de depuración (dentro: CUADRADO niebla, START VSync) |
+| Construcción   | L + stick                 | Mover la mira (sin fijar objetivo)                        |
+| Depuración     | TRIÁNGULO                 | Cámara libre (dentro: CUADRADO niebla, START VSync)       |
 | Siempre        | SELECT                    | HUD: partida → depuración → controles → oculto            |
 | Siempre        | START                     | Pausa                                                     |
 | Resultados     | X / CUADRADO / CÍRCULO    | Lobby / otra partida / seguir mirando (solo en derrota)   |

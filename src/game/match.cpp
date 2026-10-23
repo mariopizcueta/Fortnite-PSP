@@ -63,6 +63,15 @@ const char* botStateName(BotState state) {
     return "?";
 }
 
+const char* useErrorName(UseError error) {
+    switch (error) {
+        case UseError::None: return "";
+        case UseError::FullHealth: return "Vida al maximo";
+        case UseError::FullShield: return "Escudo al maximo";
+    }
+    return "?";
+}
+
 const char* matchPhaseName(MatchPhase phase) {
     switch (phase) {
         case MatchPhase::Playing: return "En curso";
@@ -95,8 +104,26 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_aim = PlayerAim{};
     m_commands = PlayerCommands{};
     m_pendingJump = m_pendingPlace = m_pendingRemove = m_pendingReload = false;
+    m_pendingPickaxe = m_pendingUse = false;
+    m_pendingCycle = 0;
     m_buildMode = false;
-    m_playerWeapon.reset(m_config.playerWeapon);
+    m_inventory.clear();
+    for (const MatchConfig::StartItem& item : m_config.startItems) {
+        m_inventory.add(item.type, item.count, &m_config.playerWeapon);
+    }
+    m_inventory.select(0);
+    m_materials = Materials{};
+    for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
+        m_materials.add(static_cast<world::Resource>(r), m_config.startMaterials[r]);
+    }
+    m_useSlot = -1;
+    m_useError = UseError::None;
+    m_sinceUseError = 99.0f;
+    m_swingCooldown = 0.0f;
+    if (m_harvestables) {
+        m_harvestLeft.resize(m_harvestables->size());
+        for (size_t i = 0; i < m_harvestables->size(); ++i) m_harvestLeft[i] = (*m_harvestables)[i].total;
+    }
     m_playerAiming = false;
     m_playerKills = 0;
     for (DamageNumber& d : m_damageNumbers) d.age = 99.0f;
@@ -215,6 +242,9 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (commands.placeWall) m_pendingPlace = true;
     if (commands.removeWall) m_pendingRemove = true;
     if (commands.reload) m_pendingReload = true;
+    if (commands.togglePickaxe) m_pendingPickaxe = !m_pendingPickaxe;
+    if (commands.useItem) m_pendingUse = true;
+    m_pendingCycle += commands.cycleSlot;
 }
 
 void Match::step(float dt) {
@@ -237,10 +267,17 @@ void Match::step(float dt) {
 }
 
 void Match::updatePlayer(float dt) {
-    m_playerWeapon.update(dt);
     const bool place = m_pendingPlace, remove = m_pendingRemove, reload = m_pendingReload;
-    m_pendingPlace = m_pendingRemove = m_pendingReload = false;
+    const bool togglePickaxe = m_pendingPickaxe;
+    const int cycle = m_pendingCycle;
+    m_pendingPlace = m_pendingRemove = m_pendingReload = m_pendingPickaxe = false;
+    m_pendingCycle = 0;
+    m_sinceUseError += dt;
+    if (m_swingCooldown > 0.0f) m_swingCooldown -= dt;
+    if (Weapon* w = m_inventory.activeWeapon()) w->update(dt);
     if (!alive(0)) {
+        cancelUse();
+        m_pendingUse = false;
         m_playerAiming = false;
         m_assistTarget = -1;
         return;  // el cuerpo queda donde cayo
@@ -250,8 +287,23 @@ void Match::updatePlayer(float dt) {
     m_pendingJump = false;
     const bool control = m_phase == MatchPhase::Playing || m_phase == MatchPhase::Finished;
     if (!control) in = PlayerInput{};
+
+    // Cambiar lo que se lleva en la mano interrumpe la recarga y el consumible en uso.
+    if (control && (cycle != 0 || togglePickaxe)) {
+        Weapon* before = m_inventory.activeWeapon();
+        const int slotBefore = m_inventory.selected();
+        const bool pickaxeBefore = m_inventory.pickaxe();
+        if (togglePickaxe) m_inventory.setPickaxe(!m_inventory.pickaxe());
+        if (cycle != 0) m_inventory.cycle(cycle);
+        if (slotBefore != m_inventory.selected() || pickaxeBefore != m_inventory.pickaxe()) {
+            if (before) before->cancelReload();
+            cancelUse();
+        }
+    }
     m_buildMode = control && m_commands.buildMode;
-    m_playerAiming = in.aiming || (m_aim.fire && !m_buildMode);
+    if (m_buildMode) cancelUse();
+    const bool swinging = m_inventory.pickaxe() && m_aim.fire;
+    m_playerAiming = in.aiming || (!m_buildMode && ((m_aim.fire && m_inventory.activeWeapon()) || swinging));
     in.aiming = m_playerAiming;
 
     const u64 t0 = core::nowMicros();
@@ -260,29 +312,193 @@ void Match::updatePlayer(float dt) {
 
     if (!control) {
         m_assistTarget = -1;
+        m_pendingUse = false;
         return;
     }
     if (m_buildMode) {
         // Modo construccion: R coloca una pared, CUADRADO quita la apuntada. No se dispara.
         m_assistTarget = -1;
+        m_pendingUse = false;
         if (place) buildWall(m_input.cameraYaw);
         if (remove) removeWallAt(m_aim);
         return;
     }
+    updatePlayerItems(dt, reload);
+}
 
-    const bool wasReloading = m_playerWeapon.reloading();
-    if (reload) m_playerWeapon.startReload();
-    // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
-    const float range = m_config.playerWeapon.range;
-    m_assistTarget = m_config.aimAssistDegrees > 0.0f
-                         ? findLockTarget(m_aim.eye, m_aim.direction, m_config.aimAssistDegrees, range)
-                         : -1;
-    // tryFire() aplica municion y cadencia: mantener R da como mucho un disparo por
-    // intervalo (y por paso), nunca uno por frame.
-    if (m_aim.fire && m_phase != MatchPhase::Finished && m_playerWeapon.tryFire()) {
-        playerShot(m_aim, m_config.playerWeapon.damage, range);
+void Match::updatePlayerItems(float dt, bool reload) {
+    const bool use = m_pendingUse;
+    m_pendingUse = false;
+    if (m_inventory.pickaxe()) {
+        // Pico: un golpe cada pickaxeInterval mientras se mantiene R.
+        m_assistTarget = -1;
+        if (m_aim.fire && m_swingCooldown <= 0.0f && m_phase != MatchPhase::Finished) {
+            swingPickaxe();
+            m_swingCooldown = m_config.pickaxeInterval;
+        }
+        return;
     }
-    if (!wasReloading && m_playerWeapon.reloading()) pushEvent(GameEventType::Reload, 0, -1, chestOf(0));
+    if (Weapon* weapon = m_inventory.activeWeapon()) {
+        const bool wasReloading = weapon->reloading();
+        if (reload) weapon->startReload();
+        // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
+        const float range = weapon->config().range;
+        m_assistTarget = m_config.aimAssistDegrees > 0.0f
+                             ? findLockTarget(m_aim.eye, m_aim.direction, m_config.aimAssistDegrees, range)
+                             : -1;
+        // tryFire() aplica municion y cadencia: mantener R da como mucho un disparo por
+        // intervalo (y por paso), nunca uno por frame.
+        if (m_aim.fire && m_phase != MatchPhase::Finished && weapon->tryFire()) {
+            playerShot(m_aim, weapon->config().damage, range);
+        }
+        if (!wasReloading && weapon->reloading()) pushEvent(GameEventType::Reload, 0, -1, chestOf(0));
+        return;
+    }
+    // Consumible: R lo empieza a usar; termina tras su tiempo de uso si no se cambia de
+    // ranura ni se construye (moverse y recibir dano no lo interrumpen, como en Fortnite).
+    m_assistTarget = -1;
+    if (use && m_useSlot < 0) startUse();
+    if (m_useSlot < 0) return;
+    if (m_inventory.selected() != m_useSlot) {
+        cancelUse();
+        return;
+    }
+    m_useTimer += dt;
+    if (m_useTimer < m_useDuration) return;
+    const ItemType type = m_inventory.slot(m_useSlot).type;
+    const ItemDef& def = itemDef(type);
+    CharacterState& s = m_player.state();
+    if (def.health > 0.0f && s.health < def.healthCap) {
+        s.health = s.health + def.health > def.healthCap ? def.healthCap : s.health + def.health;
+    }
+    if (def.shield > 0.0f && s.shield < def.shieldCap) {
+        s.shield = s.shield + def.shield > def.shieldCap ? def.shieldCap : s.shield + def.shield;
+    }
+    m_inventory.consumeOne(m_useSlot);
+    m_useSlot = -1;
+    pushEvent(GameEventType::ItemUsed, 0, static_cast<int>(type), chestOf(0));
+}
+
+bool Match::startUse() {
+    if (!alive(0) || m_inventory.pickaxe()) return false;
+    const int slot = m_inventory.selected();
+    const ItemDef& def = itemDef(m_inventory.slot(slot).type);
+    if (def.kind != ItemKind::Consumable) return false;
+    const CharacterState& s = m_player.state();
+    UseError error = UseError::None;
+    if (def.health > 0.0f && s.health >= def.healthCap) error = UseError::FullHealth;
+    if (def.shield > 0.0f && s.shield >= def.shieldCap) error = UseError::FullShield;
+    if (error != UseError::None) {
+        m_useError = error;
+        m_sinceUseError = 0.0f;
+        return false;
+    }
+    m_useSlot = slot;
+    m_useTimer = 0.0f;
+    m_useDuration = def.useSeconds > 0.05f ? def.useSeconds : 0.05f;
+    return true;
+}
+
+void Match::cancelUse() { m_useSlot = -1; }
+
+const Weapon& Match::playerWeapon() const {
+    static const Weapon kNoWeapon;
+    if (const Weapon* w = m_inventory.activeWeapon()) return *w;
+    if (const Weapon* w = m_inventory.firstWeapon()) return *w;
+    return kNoWeapon;
+}
+
+void Match::setHarvestables(const std::vector<world::Harvestable>* list) {
+    m_harvestables = list;
+    m_harvestByCollider.clear();
+    m_harvestLeft.clear();
+    if (!list) return;
+    for (size_t i = 0; i < list->size(); ++i) {
+        const int c = (*list)[i].collider;
+        if (c >= static_cast<int>(m_harvestByCollider.size())) m_harvestByCollider.resize(c + 1, -1);
+        m_harvestByCollider[c] = static_cast<short>(i);
+        m_harvestLeft.push_back((*list)[i].total);
+    }
+}
+
+void Match::swingPickaxe() {
+    if (!alive(0)) return;
+    // Golpe desde el pecho en la direccion de la mira (a la altura de cajas, rocas y
+    // personajes; el rayo desde la camara pasaria por encima). Lo primero que toque.
+    const Vec3 chest = chestOf(0);
+    const float reach = m_config.pickaxeReach;
+    const Vec3 end = chest + m_aim.direction * reach;
+    float bestT = 2.0f;
+    int victim = -1;
+    for (int id = 1; id < entityCount(); ++id) {
+        if (!alive(id)) continue;
+        float t;
+        if (world::segmentVsAabb(chest, end - chest, bodyBounds(id), &t) && t < bestT) {
+            bestT = t;
+            victim = id;
+        }
+    }
+    world::RayHit hit;
+    const bool worldHit = m_world->raycast(chest, end, world::kBlocksShots, &hit) && hit.t < bestT;
+    int wall = -1, resource = -1;
+    Vec3 point = chest + (end - chest) * bestT;
+    if (worldHit) {
+        victim = -1;
+        point = hit.point;
+        wall = m_structures.wallFromCollider(hit.dynamicHandle);
+        if (hit.collider >= 0 && hit.collider < static_cast<int>(m_harvestByCollider.size())) {
+            resource = m_harvestByCollider[hit.collider];
+        }
+    } else if (victim < 0) {
+        // Los troncos son finos: si el rayo no toca nada, vale lo que este justo delante.
+        const Vec3 forward = forwardFromYaw(m_input.cameraYaw);
+        const Vec3 c = chest + forward * 1.1f;
+        const world::Aabb zone{c - Vec3{0.6f, 0.9f, 0.6f}, c + Vec3{0.6f, 0.9f, 0.6f}};
+        float best = 1e9f;
+        if (m_harvestables) {
+            for (size_t i = 0; i < m_harvestables->size(); ++i) {
+                const world::Harvestable& h = (*m_harvestables)[i];
+                if (!h.box.overlaps(zone)) continue;
+                const Vec3 center = (h.box.min + h.box.max) * 0.5f;
+                const float d = distXZ(center, chest);
+                if (d >= best) continue;
+                // Sin nada en medio: lo primero que toca el rayo es el propio objeto.
+                const Vec3 target{center.x, fminf(chest.y, h.box.max.y - 0.2f), center.z};
+                world::RayHit blocker;
+                if (m_world->raycast(chest, target, world::kBlocksShots, &blocker) && blocker.collider != h.collider) {
+                    continue;
+                }
+                best = d;
+                resource = static_cast<int>(i);
+                point = target;
+            }
+        }
+    }
+
+    const bool any = victim >= 0 || worldHit || resource >= 0;
+    pushEvent(GameEventType::PickaxeSwing, 0, any ? 1 : 0, point);
+    if (victim >= 0) {
+        m_sincePlayerHit = 0.0f;
+        addDamageNumber(chestOf(victim), m_config.pickaxeDamage, false);
+        pushEvent(GameEventType::HitEntity, victim, 0, chestOf(victim));
+        applyDamage(victim, m_config.pickaxeDamage, 0);
+    } else if (wall >= 0) {
+        damageWall(wall, m_config.pickaxeStructureDamage, 0, point);
+    } else if (resource >= 0) {
+        harvest(resource, point);
+    }
+}
+
+void Match::harvest(int index, const Vec3& point) {
+    const world::Harvestable& h = (*m_harvestables)[index];
+    int& left = m_harvestLeft[index];
+    if (left <= 0) return;  // agotado
+    const int take = h.perHit < left ? h.perHit : left;
+    left -= take;
+    const int added = m_materials.add(h.resource, take);
+    m_sincePlayerHit = 0.0f;
+    pushEvent(GameEventType::Harvest, 0, static_cast<int>(h.resource), point);
+    m_events[(m_eventCount - 1) % kMaxEvents].amount = added;
 }
 
 void Match::updateBot(int index, float dt) {
@@ -753,6 +969,7 @@ void Match::pushEvent(GameEventType type, int entity, int other, const Vec3& pos
     e.type = type;
     e.entity = entity;
     e.other = other;
+    e.amount = 0;
     e.position = position;
     ++m_eventCount;
 }
@@ -776,12 +993,18 @@ WallPlacement Match::planWall(float yaw) const {
     for (int id = 1; id < entityCount(); ++id) {
         if (alive(id)) bots[n++] = bodyBounds(id);
     }
-    return m_structures.plan(body(0).state().position, yaw, bodyBounds(0), bots, n);
+    WallPlacement p = m_structures.plan(body(0).state().position, yaw, bodyBounds(0), bots, n);
+    if (p.valid && m_materials.get(world::Resource::Wood) < m_config.build.wallCost) {
+        p.valid = false;
+        p.error = PlacementError::NoMaterials;
+    }
+    return p;
 }
 
 int Match::buildWall(float yaw) {
     const int wall = m_structures.place(planWall(yaw));
     if (wall >= 0) {
+        m_materials.spend(world::Resource::Wood, m_config.build.wallCost);
         ++m_stats.wallsBuilt;
         const world::Aabb& b = m_structures.wall(wall).box;
         pushEvent(GameEventType::WallBuilt, 0, -1, (b.min + b.max) * 0.5f);
@@ -837,7 +1060,10 @@ void Match::applyDamage(int victim, float amount, int attacker) {
     if (!alive(victim) || amount <= 0.0f) return;
     if (victim == 0 && m_config.invulnerablePlayer) return;
     CharacterState& s = mutableBody(victim).state();
-    s.health -= amount;
+    // El escudo absorbe primero; lo que sobra pasa a la vida.
+    const float absorbed = s.shield < amount ? s.shield : amount;
+    s.shield -= absorbed;
+    s.health -= amount - absorbed;
     if (victim == 0) {
         m_sincePlayerDamaged = 0.0f;
         pushEvent(GameEventType::PlayerHurt, 0, attacker, chestOf(0));

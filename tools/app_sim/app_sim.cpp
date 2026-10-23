@@ -35,6 +35,7 @@
 #include "gfx/debug_text.h"
 #include "gfx/graphics.h"
 #include "platform/log.h"
+#include "game/fixed_timestep.h"
 #include "soft_gfx.h"
 
 // --- Plataforma simulada --------------------------------------------------------------------
@@ -82,6 +83,8 @@ void close() {}
 // --- Arnes ----------------------------------------------------------------------------------
 
 namespace {
+
+using math3d::Vec3;
 
 // Mismos valores que App::Screen / App::Results.
 enum Screen { kLogin, kLobby, kControls, kLoading, kGame };
@@ -250,7 +253,8 @@ void testAudio(const char* outDir) {
     const assets::Blob clips[] = {assets::sfxDisparo(), assets::sfxImpacto(), assets::sfxHerido(),
                                   assets::sfxEliminacion(), assets::sfxPared(), assets::sfxParedRota(),
                                   assets::sfxRecarga(), assets::sfxMenuMover(), assets::sfxMenuAceptar(),
-                                  assets::sfxVictoria(), assets::sfxDerrota()};
+                                  assets::sfxVictoria(), assets::sfxDerrota(), assets::sfxPico(),
+                                  assets::sfxCuracion()};
     bool clipsOk = true;
     int clipBytes = 0;
     for (const assets::Blob& b : clips) {
@@ -258,8 +262,8 @@ void testAudio(const char* outDir) {
         clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
         clipBytes += static_cast<int>(b.size);
     }
-    printf("  11 efectos, %d KB en total\n", clipBytes / 1024);
-    check(clipsOk, "los 11 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+    printf("  13 efectos, %d KB en total\n", clipBytes / 1024);
+    check(clipsOk, "los 13 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
 
     // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
     static audio::ImaStream music;
@@ -328,6 +332,99 @@ void testAudio(const char* outDir) {
     check(mixer.activeVoices() == 0, "las voces se liberan al terminar el sonido");
     for (int i = 0; i < 70; ++i) mixer.play(audio::Sfx::Shot);
     check(mixer.droppedCommands() == 70 - 63, "con la cola llena se descartan ordenes en vez de bloquear");
+}
+
+// Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
+void testNewControls(Sim& sim) {
+    printf("\n5b) Inventario, consumibles, pico y camara con el mando\n");
+    game::Match& match = sim.app().testMatch();
+    const game::Inventory& inv = match.inventory();
+    sim.wait(0.5f);
+    sim.press(PSP_CTRL_RIGHT);
+    check(inv.selected() == 1 && inv.activeType() == game::ItemType::Bandage, "cruceta derecha: ranura de las vendas");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    check(match.useProgress() < 0.0f && match.lastUseError() == game::UseError::FullHealth,
+          "R con vendas y la vida llena: no se usan (aviso en el HUD)");
+    sim.shot("22_vida_al_maximo");
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(1.0f);
+    sim.shot("23_usando_minipocion");
+    sim.takeAudioPeak();
+    sim.wait(1.2f);
+    check(match.body(0).state().shield == 25.0f && inv.slot(2).count == 2, "R con minipociones: +25 de escudo en 2 s");
+    check(sim.takeAudioPeak() > 3000, "suena el sonido de curacion al terminar");
+
+    // Pico frente a un arbol: se coloca al jugador mirando hacia donde mira la camara.
+    sim.press(PSP_CTRL_TRIANGLE);
+    check(inv.pickaxe(), "TRIANGULO saca el pico");
+    const world::World& world = sim.app().testWorld();
+    const float yaw = sim.app().testCameraYaw();
+    const Vec3 forward{-sinf(yaw), 0.0f, -cosf(yaw)};
+    int tree = -1;
+    for (int i = 0; i < static_cast<int>(world.harvestables().size()) && tree < 0; ++i) {
+        const world::Harvestable& h = world.harvestables()[i];
+        if (h.total != 48) continue;
+        const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+        const Vec3 feet{c.x - forward.x * 1.0f, 0.0f, c.z - forward.z * 1.0f};
+        const world::Aabb spot{{feet.x - 0.4f, 0.1f, feet.z - 0.4f}, {feet.x + 0.4f, 1.8f, feet.z + 0.4f}};
+        if (!world.collision().overlapsAny(spot, world::kBlocksMovement)) tree = i;
+    }
+    const world::Harvestable& h = world.harvestables()[tree];
+    const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+    match.teleport(0, {c.x - forward.x * 1.0f, 0.0f, c.z - forward.z * 1.0f}, yaw);
+    sim.wait(1.0f);  // la camara llega a su sitio
+    const int wood = match.materials().get(world::Resource::Wood);
+    sim.takeAudioPeak();
+    sim.hold(PSP_CTRL_RTRIGGER, 0.55f);
+    sim.shot("24_pico_arbol", PSP_CTRL_RTRIGGER);
+    sim.hold(PSP_CTRL_RTRIGGER, 0.5f);
+    printf("  pico frente a un arbol 1 s: madera %d -> %d\n", wood, match.materials().get(world::Resource::Wood));
+    check(match.materials().get(world::Resource::Wood) >= wood + 16, "R con el pico frente a un arbol da madera");
+    check(sim.takeAudioPeak() > 3000, "los golpes de pico suenan");
+
+    // Camara: al andar de lado se coloca detras; con L sin objetivo el stick la gira.
+    float before = sim.app().testCameraYaw();
+    sim.hold(0, 1.5f, 1.0f, 0.0f);
+    float turned = fabsf(game::wrapAngle(sim.app().testCameraYaw() - before));
+    printf("  1.5 s andando a la derecha: la camara gira %.0f grados\n", static_cast<double>(turned * 57.3f));
+    check(turned > 0.5f, "al andar, la camara se va colocando detras del jugador");
+    // Al pulsar L sin objetivo la camara se recoloca detras y el jugador frena: se mide despues.
+    sim.hold(PSP_CTRL_LTRIGGER, 0.5f);
+    const Vec3 at = match.body(0).state().position;
+    before = sim.app().testCameraYaw();
+    sim.hold(PSP_CTRL_LTRIGGER, 0.6f, 1.0f, 0.0f);
+    turned = fabsf(game::wrapAngle(sim.app().testCameraYaw() - before));
+    const float moved = math3d::length(match.body(0).state().position - at);
+    printf("  L + stick 0.6 s (objetivo fijado: %s): la camara gira %.0f grados, el jugador se mueve %.2f m\n",
+           sim.app().testLockTarget() > 0 ? "si" : "no", static_cast<double>(turned * 57.3f),
+           static_cast<double>(moved));
+    if (sim.app().testLockTarget() <= 0) {
+        check(turned > 0.5f && moved < 0.2f, "L sin objetivo: el stick gira la camara y el jugador no anda");
+    }
+
+    // Construccion: la cruceta elige la pieza; suelo y rampa aun no se colocan.
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.press(PSP_CTRL_RIGHT);
+    const int walls = match.structures().count();
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    sim.shot("25_construccion_suelo");
+    check(sim.app().testBuildPiece() == 1 && match.structures().count() == walls,
+          "en construccion la cruceta elige la pieza (suelo: aun no se coloca)");
+    sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_CIRCLE);
+
+    // Camara libre: TRIANGULO solo en la pagina de depuracion.
+    sim.press(PSP_CTRL_SELECT);
+    sim.press(PSP_CTRL_TRIANGLE);
+    check(sim.app().testFreeCamera() && inv.pickaxe(), "en la pagina de depuracion TRIANGULO abre la camara libre");
+    sim.press(PSP_CTRL_TRIANGLE);
+    for (int i = 0; i < 3; ++i) sim.press(PSP_CTRL_SELECT);
+    check(!sim.app().testFreeCamera(), "y la cierra");
+    sim.press(PSP_CTRL_LEFT);
+    sim.shot("26_hud_inventario");
 }
 
 void loadFont(const char* path) {
@@ -471,7 +568,7 @@ int main(int argc, char** argv) {
     check(match.aliveCount() == 11 && match.elapsed() < 0.5f && match.structures().count() == 0 &&
               sim.app().testWorld().collision().dynamicCount() == 0,
           "la partida nueva empieza limpia (11 vivos, sin paredes ni cajas dinamicas)");
-    sim.wait(1.0f);
+    testNewControls(sim);
     sim.takeAudioPeak();
     killAllBots(sim);
     check(sim.takeAudioPeak() > 4000, "las eliminaciones suenan");

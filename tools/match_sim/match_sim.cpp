@@ -693,6 +693,7 @@ void testFort(world::World& world, game::NavGrid& nav) {
     MatchConfig cfg;
     cfg.botCount = 1;
     cfg.seed = 3;
+    cfg.startMaterials[0] = 100;  // 4 paredes de 10 de madera
     Match m;
     SimContext ctx;
     ctx.world = &world.collision();
@@ -808,6 +809,162 @@ void testEvents(world::World& world, game::NavGrid& nav) {
           "la cola circular conserva los sucesos mas recientes");
 }
 
+// --- 12) Inventario, escudo, curas, pico y materiales ---------------------------------------------
+
+// Pasos de partida con la entrada dada (el jugador quieto salvo lo que digan los comandos).
+void runSteps(Match& m, int steps, const game::PlayerAim& aim = game::PlayerAim{},
+              const game::PlayerCommands& first = game::PlayerCommands{}) {
+    for (int i = 0; i < steps; ++i) {
+        game::PlayerInput in;
+        in.cameraYaw = 0.0f;
+        m.setPlayerInput(in, aim, i == 0 ? first : game::PlayerCommands{});
+        m.step(game::FixedTimestep::kStep);
+    }
+}
+
+int countEvents(const Match& m, u32 from, game::GameEventType type) {
+    int n = 0;
+    for (u32 i = from; i < m.eventCount(); ++i) n += m.event(i).type == type ? 1 : 0;
+    return n;
+}
+
+void testInventory(world::World& world, game::NavGrid& nav) {
+    printf("\n12) Inventario, escudo, curas, pico y materiales\n");
+    using game::ItemType;
+    MatchConfig cfg;
+    cfg.botCount = 1;
+    Match m;
+    m.setHarvestables(&world.harvestables());
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 player{70.0f, 0.0f, 25.0f};
+    m.teleport(0, player, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    const game::Inventory& inv = m.inventory();
+    int trees = 0, rocks = 0, metal = 0;
+    for (const world::Harvestable& h : world.harvestables()) {
+        trees += h.total == 48 ? 1 : 0;
+        rocks += h.resource == world::Resource::Stone ? 1 : 0;
+        metal += h.resource == world::Resource::Metal ? 1 : 0;
+    }
+    printf("  objetos recolectables en el mapa: %d (%d arboles, %d rocas, %d de metal)\n",
+           static_cast<int>(world.harvestables().size()), trees, rocks, metal);
+    check(inv.slot(0).type == ItemType::Scar && inv.selected() == 0 && inv.slot(1).type == ItemType::Bandage &&
+              inv.slot(1).count == 5 && inv.slot(2).type == ItemType::SmallShield && inv.slot(2).count == 3 &&
+              m.materials().get(world::Resource::Wood) == 30,
+          "inventario inicial: SCAR en la mano, 5 vendas, 3 minipociones y 30 de madera");
+
+    // Cruceta: derecha dos veces -> minipociones. R las usa: 2 s despues, +25 de escudo.
+    game::PlayerCommands next;
+    next.cycleSlot = 1;
+    runSteps(m, 1, game::PlayerAim{}, next);
+    runSteps(m, 1, game::PlayerAim{}, next);
+    check(inv.selected() == 2 && inv.activeType() == ItemType::SmallShield && !inv.activeWeapon(),
+          "la cruceta cambia de ranura (SCAR -> vendas -> minipociones)");
+    u32 cursor = m.eventCount();
+    game::PlayerCommands use;
+    use.useItem = true;
+    runSteps(m, 60, game::PlayerAim{}, use);
+    const bool notYet = m.body(0).state().shield == 0.0f && m.useProgress() > 0.4f;
+    runSteps(m, 62);
+    printf("  minipocion: a 1 s escudo %.0f, a 2 s escudo %.0f, quedan %d\n", notYet ? 0.0 : -1.0,
+           static_cast<double>(m.body(0).state().shield), inv.slot(2).count);
+    check(notYet && m.body(0).state().shield == 25.0f && inv.slot(2).count == 2 &&
+              countEvents(m, cursor, game::GameEventType::ItemUsed) == 1,
+          "la minipocion tarda 2 s, da +25 de escudo y gasta una unidad");
+
+    m.applyDamage(0, 30.0f, 1);
+    printf("  30 de dano con 25 de escudo: escudo %.0f, vida %.0f\n", static_cast<double>(m.body(0).state().shield),
+           static_cast<double>(m.body(0).state().health));
+    check(m.body(0).state().shield == 0.0f && m.body(0).state().health == 95.0f,
+          "el escudo absorbe el dano antes que la vida");
+
+    game::PlayerCommands prev;
+    prev.cycleSlot = -1;
+    runSteps(m, 1, game::PlayerAim{}, prev);  // vendas
+    cursor = m.eventCount();
+    runSteps(m, 5, game::PlayerAim{}, use);
+    check(m.useProgress() < 0.0f && m.lastUseError() == game::UseError::FullHealth,
+          "con 95 de vida no se usan vendas (curan hasta 75): aviso 'Vida al maximo'");
+    m.applyDamage(0, 45.0f, 1);  // 50 de vida
+    runSteps(m, 60, game::PlayerAim{}, use);
+    runSteps(m, 1, game::PlayerAim{}, next);  // cambiar de ranura a mitad: se cancela
+    runSteps(m, 200);
+    check(m.body(0).state().health == 50.0f && inv.slot(1).count == 5, "cambiar de ranura cancela la venda sin gastarla");
+    runSteps(m, 1, game::PlayerAim{}, prev);
+    runSteps(m, static_cast<int>(3.5f * 60.0f) + 2, game::PlayerAim{}, use);
+    printf("  vendas desde 50: vida %.0f, quedan %d\n", static_cast<double>(m.body(0).state().health), inv.slot(1).count);
+    check(m.body(0).state().health == 65.0f && inv.slot(1).count == 4, "las vendas tardan 3.5 s y dan +15 de vida");
+
+    // Coste de las paredes: 10 de madera.
+    check(m.buildWall(0.0f) >= 0 && m.materials().get(world::Resource::Wood) == 20, "una pared gasta 10 de madera");
+    m.buildWall(math3d::kPi * 0.5f);
+    m.buildWall(math3d::kPi);
+    const game::WallPlacement plan = m.planWall(-math3d::kPi * 0.5f);
+    check(m.materials().get(world::Resource::Wood) == 0 && plan.error == game::PlacementError::NoMaterials,
+          "sin madera no se construye (aviso 'Falta madera')");
+
+    // Pico: un arbol da 8 de madera por golpe y se agota tras 48.
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {80.0f, 0.0f, -80.0f}, 0.0f);
+    int treeIndex = -1;
+    for (int i = 0; i < static_cast<int>(world.harvestables().size()); ++i) {
+        const world::Harvestable& h = world.harvestables()[i];
+        if (h.total != 48) continue;
+        // Un arbol con hueco al sur para el jugador.
+        const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+        const world::Aabb spot{{c.x - 0.5f, 0.1f, h.box.max.z + 0.3f}, {c.x + 0.5f, 1.8f, h.box.max.z + 1.4f}};
+        if (!world.collision().overlapsAny(spot, world::kBlocksMovement)) {
+            treeIndex = i;
+            break;
+        }
+    }
+    const world::Harvestable& tree = world.harvestables()[treeIndex];
+    const Vec3 tc = (tree.box.min + tree.box.max) * 0.5f;
+    m.teleport(0, {tc.x, 0.0f, tree.box.max.z + 0.9f}, 0.0f);  // al sur, mirando al norte
+    game::PlayerCommands pick;
+    pick.togglePickaxe = true;
+    runSteps(m, 1, game::PlayerAim{}, pick);
+    check(inv.pickaxe() && !inv.activeWeapon(), "TRIANGULO saca el pico (se guarda la SCAR)");
+    game::PlayerAim swing;
+    swing.eye = m.eyeOf(0);
+    swing.direction = {0.0f, 0.0f, -1.0f};
+    swing.fire = true;
+    cursor = m.eventCount();
+    const int woodBefore = m.materials().get(world::Resource::Wood);
+    runSteps(m, 61, swing);  // R mantenido 1 s: golpes en 0, 0.5 y 1.0 s
+    const int swings = countEvents(m, cursor, game::GameEventType::PickaxeSwing);
+    printf("  1 s con R y el pico frente a un arbol: %d golpes, madera %d -> %d, quedan %d en el arbol\n", swings,
+           woodBefore, m.materials().get(world::Resource::Wood), m.harvestLeft(treeIndex));
+    check(swings == 3 && m.materials().get(world::Resource::Wood) == woodBefore + 24 &&
+              countEvents(m, cursor, game::GameEventType::Harvest) == 3,
+          "con R mantenido el pico golpea cada 0.5 s y cada golpe al arbol da 8 de madera");
+    runSteps(m, 60 * 3, swing);
+    check(m.harvestLeft(treeIndex) == 0 && m.materials().get(world::Resource::Wood) == woodBefore + 48,
+          "el arbol se agota tras 48 de madera (los golpes siguientes no dan nada)");
+
+    // Roca (piedra) y bot.
+    int rockIndex = -1;
+    for (int i = 0; i < static_cast<int>(world.harvestables().size()) && rockIndex < 0; ++i) {
+        if (world.harvestables()[i].resource == world::Resource::Stone) rockIndex = i;
+    }
+    const world::Harvestable& rock = world.harvestables()[rockIndex];
+    const Vec3 rc = (rock.box.min + rock.box.max) * 0.5f;
+    m.teleport(0, {rc.x, 0.0f, rock.box.max.z + 0.8f}, 0.0f);
+    m.swingPickaxe();
+    check(m.materials().get(world::Resource::Stone) == rock.perHit, "una roca da piedra");
+    m.teleport(0, player, 0.0f);
+    m.teleport(1, {player.x, 0.0f, player.z - 1.3f}, math3d::kPi);
+    swing.eye = m.eyeOf(0);
+    m.setPlayerInput(game::PlayerInput{}, swing);
+    m.swingPickaxe();
+    printf("  pico contra un bot a 1.3 m: vida del bot %.0f\n", static_cast<double>(m.body(1).state().health));
+    check(m.body(1).state().health == 80.0f, "el pico hace 20 de dano a un bot");
+
+    // Volver a la SCAR con la cruceta y que siga disparando.
+    runSteps(m, 1, game::PlayerAim{}, next);
+    check(!inv.pickaxe() && inv.activeType() != ItemType::None, "la cruceta guarda el pico y vuelve a una ranura");
+}
+
 }  // namespace
 
 int main() {
@@ -830,6 +987,7 @@ int main() {
     testBotsRespectWalls(world, nav);
     testFort(world, nav);
     testEvents(world, nav);
+    testInventory(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

@@ -43,6 +43,7 @@ OBJS = src/main.o \
        src/core/timer.o \
        src/game/character.o \
        src/game/character_model.o \
+       src/game/inventory.o \
        src/game/match.o \
        src/game/nav_grid.o \
        src/game/player.o \

@@ -23,6 +23,8 @@ struct CharacterState {
     float yaw = 0.0f;
     float health = 100.0f;
     float maxHealth = 100.0f;
+    float shield = 0.0f;      // absorbe el dano antes que la vida (pociones de escudo)
+    float maxShield = 100.0f;
     JumpState jumpState = JumpState::Grounded;
     float airTime = 0.0f;   // segundos desde que dejo el suelo (0 en el suelo)
 

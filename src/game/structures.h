@@ -24,6 +24,7 @@ struct BuildConfig {
     float minDistance = 1.0f;    // distancia minima delante de los pies
     float minHeight = 2.2f;      // bajo un dintel la pared se recorta, pero no por debajo de esto
     float removeRange = 7.0f;    // m: alcance para quitar una pared apuntandola
+    int wallCost = 10;           // madera por pared (como en Fortnite)
 };
 
 constexpr int kMaxWallCapacity = 64;  // limite tecnico (cajas dinamicas disponibles)
@@ -36,6 +37,7 @@ enum class PlacementError {
     OverlapsStructure,  // choca con el mapa o con otra pared
     Blocked,            // hay un solido entre el jugador y la pared (no se construye a traves)
     OutOfBounds,
+    NoMaterials,        // no hay madera suficiente (la comprueba la partida)
 };
 
 const char* placementErrorName(PlacementError error);

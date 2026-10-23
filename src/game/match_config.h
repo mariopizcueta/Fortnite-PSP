@@ -1,6 +1,7 @@
 // Parametros configurables de la partida (bots, IA, armas, zona).
 #pragma once
 
+#include "game/inventory.h"
 #include "game/structures.h"
 #include "game/weapon.h"
 #include "math/math3d.h"
@@ -36,6 +37,23 @@ struct MatchConfig {
 
     // Construccion (paredes de madera).
     BuildConfig build;
+
+    // Inventario inicial. Hasta que haya botin (cofres y objetos en el suelo) se empieza
+    // con la SCAR y algunos consumibles para poder usar el escudo y las curas.
+    struct StartItem {
+        ItemType type;
+        int count;
+    };
+    StartItem startItems[Inventory::kSlots] = {
+        {ItemType::Scar, 1}, {ItemType::Bandage, 5}, {ItemType::SmallShield, 3},
+        {ItemType::None, 0}, {ItemType::None, 0}};
+    int startMaterials[static_cast<int>(world::Resource::Count)] = {30, 0, 0};  // madera, piedra, metal
+
+    // Pico (TRIANGULO): golpe cada swingInterval s mientras se mantiene R.
+    float pickaxeInterval = 0.5f;
+    float pickaxeReach = 2.2f;           // m desde el pecho
+    float pickaxeDamage = 20.0f;         // a personajes
+    float pickaxeStructureDamage = 50.0f;  // a paredes construidas
 
     // "Zona" simplificada: los bots exploran dentro de un circulo que se cierra con el
     // tiempo, asi la partida converge hacia el deposito y termina.

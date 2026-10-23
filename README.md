@@ -2,7 +2,8 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 6 (acabado visual y presentación), v0.6.0.** Se juega una partida completa:
+**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales), v0.7.0.** Se juega
+una partida completa:
 1. inicio de sesión;
 2. lobby;
 3. pantalla de carga;
@@ -61,6 +62,16 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, paso 1** (detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md)):
+- **Inventario:** 5 ranuras con armas y consumibles; la cruceta cambia de ranura.
+- **Consumibles:** vendas, botiquín, minipoción y poción de escudo, con su tiempo de uso.
+- **Escudo:** absorbe el daño antes que la vida.
+- **Pico (TRIÁNGULO):** pica árboles, cajas, rocas y contenedores, que dan madera, piedra
+  y metal. También golpea a los bots y a las paredes.
+- **Coste de las paredes:** 10 de madera cada una.
+- **Controles nuevos:** la cámara sigue al stick y L es el modo apuntado.
+- **Sin cambios:** los bots, las colisiones y el disparo.
 
 ## Requisitos
 
@@ -145,41 +156,47 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 
 | Modo          | Botón                                  | Acción                                       |
 |---------------|----------------------------------------|----------------------------------------------|
-| Siempre       | **Stick analógico**                    | Andar / correr (relativo a la cámara)        |
+| Siempre       | **Stick analógico**                    | Andar / correr; la cámara se coloca sola detrás (no al ir hacia atrás) |
 | Siempre       | **X**                                  | Saltar (mantener = salto completo)           |
-| Siempre       | **Cruceta ← → / ↑ ↓**                  | Girar la cámara / subir o bajar la mira      |
-| Siempre       | **CÍRCULO**                            | **Modo construcción on/off**                 |
-| Combate       | **R (mantener)**                       | Disparar la SCAR                             |
+| Siempre       | **L (mantener)**                       | Apuntar: con un enemigo a la vista lo fija (el stick mueve de lado); sin él, el stick mueve la mira |
+| Combate       | **Cruceta ← →**                        | Cambiar de ranura del inventario             |
+| Combate       | **TRIÁNGULO**                          | Sacar / guardar el pico                      |
+| Combate       | **R**                                  | Disparar (arma), golpear (pico, mantener) o usar (consumible) |
 | Combate       | **CUADRADO**                           | Recargar                                     |
-| Combate       | **L (mantener)**                       | Fijar objetivo (o recolocar la cámara)       |
-| Construcción  | **R (pulsar)**                         | Colocar una pared delante                    |
+| Siempre       | **CÍRCULO**                            | **Modo construcción on/off**                 |
+| Construcción  | **Cruceta ← →**                        | Elegir pieza (pared; suelo y rampa aún no)   |
+| Construcción  | **R (pulsar)**                         | Colocar una pared delante (10 de madera)     |
 | Construcción  | **CUADRADO**                           | Quitar la pared apuntada                     |
 | Siempre       | **START**                              | Pausa                                        |
 | Siempre       | **SELECT**                             | HUD: partida → depuración → controles → oculto |
 | Depuración    | **TRIÁNGULO**                          | Cámara libre ↔ tercera persona (dentro: □ niebla, START VSync) |
 
-Detalle en [docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y
+Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
+[docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y
 [docs/JUGADOR.md](docs/JUGADOR.md).
 
 ## Limitaciones conocidas
 
-- **Sin probar en ejecución real en esta fase:** ni PPSSPP ni la PSP. Falta comprobar:
-  - los FPS reales con el HUD nuevo y 10 bots;
-  - el sonido en el hilo de audio real (cortes, latencia, volumen);
-  - el aspecto del tramado de 16 bits en pantalla;
-  - los tiempos de carga reales (el registro los anota).
+- **v0.7.0 sin probar en ejecución real:** ni PPSSPP ni la PSP. Falta comprobar:
+  - el tacto de la cámara que sigue al stick y del modo apuntado con L;
+  - el pico y los consumibles en la consola;
+  - que los FPS no bajen con el HUD del inventario.
+
+  La v0.6.0 se ha probado en la PSP con 30 bots, según el usuario.
 - **Inicio de sesión simulado:** no hay red, cuentas ni partidas online. El nombre es
   siempre "Jugador".
-- **Un arma:** la SCAR, sin inventario.
-  - El pico y las ranuras vacías son decorativos.
-  - Ladrillo y metal valen siempre 0, y la madera cuenta las paredes que quedan.
-  - El escudo siempre es 0 (no hay pociones).
-  - De construcción solo funciona la pared; suelo y rampa se ven, pero no se usan.
+- **Botín pendiente (paso 2):** aún no hay cofres ni objetos en el suelo; se empieza con
+  la SCAR, 5 vendas, 3 minipociones y 30 de madera. El botiquín y la poción de escudo
+  existen, pero todavía no se consiguen.
+- **Objetos agotados:** al picarlos no desaparecen. Las copas de los árboles no tienen
+  colisión y la cámara puede quedar dentro de ellas.
+- **Construcción:** solo funciona la pared; suelo y rampa se eligen con la cruceta, pero
+  aún no se colocan. Piedra y metal se acumulan, pero aún no se usan.
+- **Los bots** no usan pico, escudo ni consumibles.
 - **Zona simplificada:** un círculo que se cierra en 4 min y guía a los bots hacia el
   depósito. Fuera de ella no se pierde vida. El reloj del HUD muestra lo que falta para
   que termine de cerrarse.
-- **Bots:** 10 por defecto. Con más de 10 (hasta 30) falta medir el rendimiento en la
-  PSP. Todos llevan el mismo fusil.
+- **Bots:** 10 por defecto, configurables hasta 30. Todos llevan el mismo fusil.
 - **Texto:** se usa la fuente 8×8 de depuración, sin tildes ni eñes (por eso se lee
   "Contrasena" o "elimino"). Los rótulos grandes (JUGAR, ELIMINADO…) sí las llevan,
   porque son imágenes.
@@ -198,6 +215,7 @@ Detalle en [docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y
 ```
 Makefile                     Build basado en build.mak de PSPSDK
 docs/PRESENTACION.md         Pantallas, HUD, estilo, animaciones, sonido, memoria (fase 6)
+docs/INVENTARIO.md           Inventario, escudo, curas, pico y materiales (fase 7)
 docs/MUNDO.md                Escala, ejes, plano del mapa, colisiones y texturas
 docs/JUGADOR.md              Controles, movimiento, salto, paso fijo y cámara
 docs/BOTS.md                 IA, disparos, partida, rendimiento y verificación
@@ -214,9 +232,9 @@ src/
   audio/                     Mezclador, WAV e IMA ADPCM, canal de pspaudiolib
   camera/                    Tercera persona (colisión, fijar objetivo) y cámara libre
   core/                      Configuración, temporizador, generador aleatorio
-  game/                      Personajes, jugador, bots, partida y sucesos, arma, paredes, A*
+  game/                      Personajes, jugador, bots, partida y sucesos, arma, inventario, paredes, A*
   gfx/                       GU: estado 2D/3D, mallas, texturas, sprites, líneas, texto
-  world/                     Mapa (visual + colisión), texturas, color del minimapa
+  world/                     Mapa (visual + colisión), objetos recolectables, texturas, minimapa
   assets/                    Recursos incrustados (.incbin) y rectángulos del atlas
   input/ math/ platform/ third_party/
 assets/                      Recursos convertidos (los genera make assets)
@@ -254,9 +272,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 48 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 60 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
-  - **Audio:** formato de los 11 efectos. La música decodificada frente a la original,
+  - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
+    sigue al andar, L + stick, piezas de construcción y cámara libre.
+  - **Audio:** formato de los 13 efectos. La música decodificada frente a la original,
     con SNR de 33 dB y sin chasquidos. El panorama, las 8 voces y la cola llena.
   - **Flujo:** inicio de sesión → lobby → controles → lobby → carga → partida (disparos,
     construcción, recarga, páginas del HUD, pausa) → derrota → seguir mirando → fin →
@@ -268,9 +288,10 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 67 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 82 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
-  construcción, IA frente a paredes y sucesos de sonido.
+  construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
+  escudo, curas, pico, materiales y coste de las paredes.
 - **`make physics-test`: 0 fallos.**
 - **`make preview`:** 7 vistas del mapa, 5 de juego con personajes y 1 de construcción,
   con las texturas de `Recursos/Texturas`.
@@ -278,6 +299,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 
 ## Historial de correcciones
 
+- **v0.7.0:** ninguna corrección de errores; solo mecánicas nuevas.
 - **v0.6.0:**
   - **Música:** el mezclador se saltaba una muestra de música en cada bloque de audio.
     Se detectó al escribir el decodificador, antes de publicar.

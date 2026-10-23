@@ -15,7 +15,7 @@ namespace audio {
 
 enum class Sfx : u8 {
     Shot, HitMarker, Hurt, Elimination, WallBuild, WallBreak, Reload,
-    MenuMove, MenuAccept, Victory, Defeat, Count
+    MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal, Count
 };
 
 class Mixer {

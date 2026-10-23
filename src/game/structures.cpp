@@ -18,6 +18,7 @@ const char* placementErrorName(PlacementError error) {
         case PlacementError::OverlapsStructure: return "Choca con otra estructura";
         case PlacementError::Blocked: return "Hay un obstaculo en medio";
         case PlacementError::OutOfBounds: return "Fuera del mapa";
+        case PlacementError::NoMaterials: return "Falta madera (10 por pared)";
     }
     return "?";
 }

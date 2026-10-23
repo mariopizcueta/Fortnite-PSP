@@ -41,11 +41,16 @@ struct CharacterAnim {
     float recoil = 0.0f;       // 1 al disparar, decae
     float flinch = 0.0f;       // 1 al recibir un impacto, decae
     float deathSeconds = 0.0f; // tiempo desde la eliminacion (0 = vivo)
+    float swing = 0.0f;        // 1 al golpear con el pico, decae
 
     void update(const CharacterState& state, bool aiming, bool alive, float dt);
     void onShot() { recoil = 1.0f; }
     void onHit() { flinch = 1.0f; }
+    void onSwing() { swing = 1.0f; }
 };
+
+// Lo que lleva en la mano derecha.
+enum class HeldItem : u8 { Rifle, Pickaxe, Empty };
 
 class CharacterModel {
 public:
@@ -55,7 +60,8 @@ public:
     // Dibuja sombra + personaje. `eliminated`: cae y queda tumbado boca arriba (si la
     // animacion no ha contado la caida, aparece ya tumbado). Requiere gfx::begin3D().
     void draw(const CharacterState& state, const CharacterAnim& anim,
-              const world::TextureLibrary& textures, bool eliminated) const;
+              const world::TextureLibrary& textures, bool eliminated,
+              HeldItem held = HeldItem::Rifle) const;
 
     int triangles() const { return m_triangles; }
 
@@ -69,6 +75,7 @@ private:
                   const world::TextureLibrary& textures) const;
 
     Part m_body, m_leftLeg, m_rightLeg, m_leftArm, m_rightArm;
+    Part m_rightArmPickaxe, m_rightArmEmpty;  // variantes del brazo derecho
     std::vector<world::StaticBatch> m_shadow;
     int m_triangles = 0;
 };

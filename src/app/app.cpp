@@ -1,6 +1,7 @@
 #include "app/app.h"
 
 #include <malloc.h>
+#include <math.h>
 
 #include <psppower.h>
 
@@ -95,6 +96,9 @@ void App::init() {
 
     t0 = core::nowMicros();
     m_nav.build(m_world.collision(), world::kMapHalfSize);
+    m_match.setHarvestables(&m_world.harvestables());
+    platform::log::write("objetos recolectables con el pico: %d",
+                         static_cast<int>(m_world.harvestables().size()));
     platform::log::write("navegacion: %d de %d nodos transitables", m_nav.walkableCount(),
                          m_nav.size() * m_nav.size());
     logStage("navegacion", t0);
@@ -150,6 +154,8 @@ void App::startMatch() {
     m_eventCursor = m_match.eventCount();
     m_playerKiller = -1;
     m_buildMode = false;
+    m_buildPiece = 0;
+    m_harvestAge = 99.0f;
     m_targetWall = -1;
     m_timestep.reset();
     m_playerAnim = game::CharacterAnim{};
@@ -263,9 +269,11 @@ void App::updateGame(const input::Input& in, float dt) {
         playSfx(audio::Sfx::MenuAccept, 0.7f);
         return;
     }
-    // TRIANGULO: camara libre de depuracion. Dentro de ella, CUADRADO = niebla y
-    // START = VSync (el jugador no actua, asi que esos botones estan libres).
-    if (!overlay && in.pressed(PSP_CTRL_TRIANGLE)) {
+    // Camara libre de depuracion: TRIANGULO en la pagina de depuracion del HUD (fuera de
+    // ella TRIANGULO es el pico). Dentro, CUADRADO = niebla y START = VSync.
+    const bool freeCameraToggle = !overlay && in.pressed(PSP_CTRL_TRIANGLE) &&
+                                  (m_freeCameraActive || m_hud == Hud::Debug);
+    if (freeCameraToggle) {
         m_freeCameraActive = !m_freeCameraActive;
         if (m_freeCameraActive) {
             m_freeCamera.set(renderState(0).position + Vec3{0.0f, 1.0f, 0.0f}, m_followCamera.yaw(),
@@ -278,33 +286,58 @@ void App::updateGame(const input::Input& in, float dt) {
     }
 
     const bool control = !overlay && !m_freeCameraActive && m_match.phase() == game::MatchPhase::Playing;
+    game::PlayerCommands commands;
     // CIRCULO: modo construccion. Se desactiva solo si el jugador cae.
     if (control && in.pressed(PSP_CTRL_CIRCLE)) {
         m_buildMode = !m_buildMode;
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
+    // TRIANGULO: sacar / guardar el pico (desde construccion, vuelve al combate con el pico).
+    if (control && !freeCameraToggle && in.pressed(PSP_CTRL_TRIANGLE)) {
+        if (m_buildMode) {
+            m_buildMode = false;
+            if (!m_match.inventory().pickaxe()) commands.togglePickaxe = true;
+        } else {
+            commands.togglePickaxe = true;
+        }
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+    // Cruceta izquierda / derecha: ranura del inventario o pieza de construccion.
+    const int dpad = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    if (control && dpad != 0) {
+        if (m_buildMode) m_buildPiece = (m_buildPiece + kBuildPieces + dpad) % kBuildPieces;
+        else commands.cycleSlot = dpad;
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
     if (!m_match.alive(0)) m_buildMode = false;
-    const bool lockHeld = control && !m_buildMode && in.held(PSP_CTRL_LTRIGGER);
+    // L: modo apuntado. Con un enemigo a la vista lo fija (y el stick mueve); sin el, el
+    // stick gira la camara y sube o baja la mira en lugar de andar.
+    const bool aimHeld = control && in.held(PSP_CTRL_LTRIGGER);
+    const bool stickAims = aimHeld && !(m_lockTarget > 0);
 
     // 1) Entrada del jugador.
     game::PlayerInput playerInput;
     game::PlayerAim aim;
-    game::PlayerCommands commands;
     aim.eye = m_followCamera.eye();
     aim.direction = m_followCamera.lookDirection();
     commands.buildMode = m_buildMode;
     if (control) {
-        playerInput.moveX = in.analogX();
-        playerInput.moveY = in.analogY();
+        if (!stickAims) {
+            playerInput.moveX = in.analogX();
+            playerInput.moveY = in.analogY();
+        }
         playerInput.jumpPressed = in.pressed(PSP_CTRL_CROSS);
         playerInput.jumpHeld = in.held(PSP_CTRL_CROSS);
-        playerInput.aiming = lockHeld;
+        playerInput.aiming = aimHeld;
         if (m_buildMode) {
-            commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);  // una pared por pulsacion
+            // Por ahora solo la pared se puede colocar (suelos y rampas: paso de construccion).
+            commands.placeWall = m_buildPiece == 0 && in.pressed(PSP_CTRL_RTRIGGER);  // una por pulsacion
             commands.removeWall = in.pressed(PSP_CTRL_SQUARE);
-        } else {
-            aim.fire = in.held(PSP_CTRL_RTRIGGER);
+        } else if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
+            aim.fire = in.held(PSP_CTRL_RTRIGGER);  // disparar, o golpes seguidos con el pico
             commands.reload = in.pressed(PSP_CTRL_SQUARE);
+        } else {
+            commands.useItem = in.pressed(PSP_CTRL_RTRIGGER);  // consumible: R lo usa
         }
     }
     playerInput.cameraYaw = m_followCamera.yaw();
@@ -315,6 +348,7 @@ void App::updateGame(const input::Input& in, float dt) {
     for (int i = 0; i < steps; ++i) m_match.step(game::FixedTimestep::kStep);
 
     // 3) Sucesos de la partida -> sonido y reacciones de las animaciones.
+    m_harvestAge += dt;
     processEvents();
 
     // 4) Animaciones (visuales, con el tiempo de frame). Los eliminados tambien: caen.
@@ -325,7 +359,7 @@ void App::updateGame(const input::Input& in, float dt) {
     }
 
     // 5) Camaras y construccion.
-    updateGameCameras(in, dt, control, lockHeld);
+    updateGameCameras(in, dt, control, aimHeld);
     if (m_buildMode) {
         game::PlayerAim view;
         view.eye = m_followCamera.eye();
@@ -339,11 +373,11 @@ void App::updateGame(const input::Input& in, float dt) {
     updatePerformance(dt);
 }
 
-void App::updateGameCameras(const input::Input& in, float dt, bool control, bool lockHeld) {
-    // L: fijar el bot visible mas centrado (o recolocar si no hay ninguno).
+void App::updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld) {
+    // L en combate: fijar el bot visible mas centrado (o recolocar si no hay ninguno).
     Vec3 lockPoint;
     const Vec3* lock = nullptr;
-    if (lockHeld) {
+    if (aimHeld && !m_buildMode) {
         const bool keep = m_lockTarget > 0 && m_match.alive(m_lockTarget) &&
                           m_match.lineOfSight(m_followCamera.eye(), m_match.chestOf(m_lockTarget));
         if (!keep) {
@@ -364,7 +398,21 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     }
     // Tras caer, la camara sigue a quien elimino al jugador (o a otro superviviente).
     const game::CharacterState followed = renderState(spectateTarget());
-    m_followCamera.update(in, followed.position, followed.yaw, dt, recenter, lock, &m_world.collision());
+    camera::CameraInput cam;
+    if (control && aimHeld && !lock) {
+        // Modo apuntado sin objetivo: el stick mueve la mira.
+        cam.turn = in.analogX();
+        cam.look = -in.analogY();
+    } else if (!control || !aimHeld) {
+        // Al andar, la camara se coloca detras poco a poco (no al ir hacia atras, para
+        // poder retroceder sin girar). Mirando a otro tras caer, tambien le sigue.
+        const float ax = control ? in.analogX() : 0.0f, ay = control ? in.analogY() : 0.0f;
+        const float magnitude = sqrtf(ax * ax + ay * ay);
+        const bool backwards = ay > 0.6f * magnitude;
+        cam.followYaw = followed.yaw;
+        cam.follow = control ? (backwards ? 0.0f : magnitude) : (m_match.alive(0) ? 0.0f : 0.6f);
+    }
+    m_followCamera.update(cam, followed.position, followed.yaw, dt, recenter, lock, &m_world.collision());
 }
 
 void App::playSfx(audio::Sfx sfx, float volume, float pan) const {
@@ -431,6 +479,18 @@ void App::processEvents() {
                 break;
             case game::GameEventType::Reload:
                 playSfx(audio::Sfx::Reload, 0.8f);
+                break;
+            case game::GameEventType::PickaxeSwing:
+                m_playerAnim.onSwing();
+                if (e.other == 1) playSfx(audio::Sfx::Pickaxe, 0.9f);
+                break;
+            case game::GameEventType::Harvest:
+                m_harvestResource = e.other;
+                m_harvestAmount = e.amount;
+                m_harvestAge = 0.0f;
+                break;
+            case game::GameEventType::ItemUsed:
+                playSfx(audio::Sfx::Heal, 0.9f);
                 break;
         }
     }
@@ -590,7 +650,12 @@ void App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) cons
     };
     const game::CharacterState player = renderState(0);
     if (visible(player.position)) {
-        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0));
+        // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
+        const game::Inventory& inv = m_match.inventory();
+        const game::HeldItem held = inv.pickaxe()        ? game::HeldItem::Pickaxe
+                                    : inv.activeWeapon() ? game::HeldItem::Rifle
+                                                         : game::HeldItem::Empty;
+        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held);
     }
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);

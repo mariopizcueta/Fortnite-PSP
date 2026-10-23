@@ -37,6 +37,8 @@ const Material kEyes{world::kTexNone, rgba(30, 30, 34), 1.0f};
 const Material kBuckle{world::kTexNone, rgba(170, 172, 168), 1.0f};
 const Material kGun{world::kTexNone, rgba(200, 168, 104), 1.0f};      // tostado del SCAR
 const Material kGunDark{world::kTexNone, rgba(54, 52, 48), 1.0f};
+const Material kHandle{world::kTexNone, rgba(110, 76, 44), 1.0f};       // mango del pico
+const Material kPickHead{world::kTexNone, rgba(120, 150, 200), 1.0f};   // cabeza azulada (Recursos/HUD/Pico.png)
 const Material kShadow{world::kTexNone, rgba(0, 0, 0, 110), 1.0f};
 
 constexpr float kHipY = 0.95f;
@@ -59,12 +61,18 @@ void buildLeg(world::SceneBuilder& b, const CharacterPalette& p, bool strap) {
 }
 
 // Brazo en coordenadas del hombro (la mano queda en -0.58). El derecho lleva el rifle,
-// alineado con el brazo: al levantar el brazo 90 grados apunta hacia delante.
-void buildArm(world::SceneBuilder& b, const CharacterPalette& p, bool armband, bool rifle) {
+// alineado con el brazo: al levantar el brazo 90 grados apunta hacia delante. El pico va
+// tambien en la prolongacion del brazo, con la cabeza perpendicular.
+void buildArm(world::SceneBuilder& b, const CharacterPalette& p, bool armband, HeldItem held) {
     box(b, flat(p.skin), {-0.07f, -0.46f, -0.07f}, {0.07f, 0.03f, 0.07f});
     if (armband) box(b, flat(p.armband), {-0.08f, -0.14f, -0.08f}, {0.08f, -0.08f, 0.08f});
     box(b, flat(p.glove), {-0.08f, -0.60f, -0.08f}, {0.08f, -0.44f, 0.08f});
-    if (rifle) {
+    if (held == HeldItem::Pickaxe) {
+        box(b, kHandle, {-0.025f, -1.25f, -0.025f}, {0.025f, -0.45f, 0.025f});
+        box(b, kPickHead, {-0.035f, -1.30f, -0.34f}, {0.035f, -1.18f, 0.14f});
+        box(b, kPickHead, {-0.025f, -1.27f, -0.42f}, {0.025f, -1.21f, -0.34f});  // punta
+    }
+    if (held == HeldItem::Rifle) {
         box(b, kGun, {-0.045f, -1.10f, -0.06f}, {0.045f, -0.40f, 0.05f});      // cuerpo
         box(b, kGunDark, {-0.025f, -1.32f, -0.03f}, {0.025f, -1.10f, 0.02f});  // canon
         box(b, kGunDark, {-0.035f, -0.78f, 0.05f}, {0.035f, -0.68f, 0.18f});   // cargador
@@ -118,6 +126,7 @@ int countTriangles(const std::vector<world::StaticBatch>& batches) {
 void CharacterAnim::update(const CharacterState& state, bool aiming, bool alive, float dt) {
     idleTime += dt;
     recoil = smoothToward(recoil, 0.0f, 14.0f, dt);
+    swing = smoothToward(swing, 0.0f, 6.0f, dt);
     flinch = smoothToward(flinch, 0.0f, 8.0f, dt);
     if (!alive) {
         deathSeconds += dt;
@@ -150,10 +159,15 @@ void CharacterAnim::update(const CharacterState& state, bool aiming, bool alive,
     // Retroceso: el rifle sube un poco con cada disparo.
     armR += 0.30f * recoil;
     armL += 0.20f * recoil;
-    const float rate = 14.0f;
-    leftLeg = smoothToward(leftLeg, legL, rate, dt);
-    rightLeg = smoothToward(rightLeg, legR, rate, dt);
-    leftArm = smoothToward(leftArm, armL, rate, dt);
+    float rate = 14.0f;
+    if (swing > 0.03f) {
+        // Golpe de pico: el brazo baja desde encima de la cabeza hasta delante del pecho.
+        armR = 0.8f + 1.9f * swing;
+        rate = 30.0f;
+    }
+    leftLeg = smoothToward(leftLeg, legL, 14.0f, dt);
+    rightLeg = smoothToward(rightLeg, legR, 14.0f, dt);
+    leftArm = smoothToward(leftArm, armL, 14.0f, dt);
     rightArm = smoothToward(rightArm, armR, rate, dt);
 }
 
@@ -165,10 +179,14 @@ bool CharacterModel::build(const CharacterPalette& palette) {
     b.flushGroup(m_leftLeg.batches);
     buildLeg(b, palette, false);
     b.flushGroup(m_rightLeg.batches);
-    buildArm(b, palette, false, false);
+    buildArm(b, palette, false, HeldItem::Empty);
     b.flushGroup(m_leftArm.batches);
-    buildArm(b, palette, true, true);  // brazalete y rifle en el brazo derecho
+    buildArm(b, palette, true, HeldItem::Rifle);  // brazalete y rifle en el brazo derecho
     b.flushGroup(m_rightArm.batches);
+    buildArm(b, palette, true, HeldItem::Pickaxe);
+    b.flushGroup(m_rightArmPickaxe.batches);
+    buildArm(b, palette, true, HeldItem::Empty);  // con un consumible en la mano
+    b.flushGroup(m_rightArmEmpty.batches);
     buildShadow(b);
     b.flushGroup(m_shadow);
 
@@ -177,6 +195,8 @@ bool CharacterModel::build(const CharacterPalette& palette) {
     m_rightLeg.pivot = {kHipX, kHipY, 0.0f};
     m_leftArm.pivot = {-kShoulderX, kShoulderY, 0.0f};
     m_rightArm.pivot = {kShoulderX, kShoulderY, 0.0f};
+    m_rightArmPickaxe.pivot = m_rightArm.pivot;
+    m_rightArmEmpty.pivot = m_rightArm.pivot;
 
     m_triangles = 0;
     for (const Part* p : {&m_body, &m_leftLeg, &m_rightLeg, &m_leftArm, &m_rightArm}) {
@@ -186,7 +206,7 @@ bool CharacterModel::build(const CharacterPalette& palette) {
 }
 
 void CharacterModel::destroy() {
-    for (Part* p : {&m_body, &m_leftLeg, &m_rightLeg, &m_leftArm, &m_rightArm}) {
+    for (Part* p : {&m_body, &m_leftLeg, &m_rightLeg, &m_leftArm, &m_rightArm, &m_rightArmPickaxe, &m_rightArmEmpty}) {
         for (world::StaticBatch& batch : p->batches) gfx::destroyMesh(batch.mesh);
         p->batches.clear();
     }
@@ -204,7 +224,7 @@ void CharacterModel::drawPart(const Part& part, const Mat4& model,
 }
 
 void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim,
-                          const world::TextureLibrary& textures, bool eliminated) const {
+                          const world::TextureLibrary& textures, bool eliminated, HeldItem held) const {
     const Vec3& pos = state.position;
     if (!eliminated) {
         // Sombra circular bajo los pies: encoge al subir, para leer la altura del salto.
@@ -243,7 +263,10 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     drawPart(m_leftLeg, joint(m_leftLeg, still ? 0.0f : anim.leftLeg), textures);
     drawPart(m_rightLeg, joint(m_rightLeg, still ? 0.0f : anim.rightLeg), textures);
     drawPart(m_leftArm, joint(m_leftArm, still ? 0.2f : anim.leftArm), textures);
-    drawPart(m_rightArm, joint(m_rightArm, still ? -0.2f : anim.rightArm), textures);
+    const Part& rightArm = held == HeldItem::Pickaxe ? m_rightArmPickaxe
+                           : held == HeldItem::Empty ? m_rightArmEmpty
+                                                     : m_rightArm;
+    drawPart(rightArm, joint(rightArm, still ? -0.2f : anim.rightArm), textures);
     gfx::setModelMatrix(Mat4::identity());
 }
 

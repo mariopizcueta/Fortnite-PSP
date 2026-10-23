@@ -84,6 +84,21 @@ void heldButtonsString(u32 buttons, char* out, size_t capacity) {
     if (len == 0) strcpy(out, "(ninguno)");
 }
 
+constexpr float kHarvestPopupSeconds = 0.9f;
+constexpr const char* kBuildPieceNames[] = {"Pared", "Suelo", "Rampa"};
+
+// Fondo de ranura segun la rareza (gris, verde, azul, morado, dorado como en Fortnite).
+u32 rarityColor(game::Rarity r) {
+    switch (r) {
+        case game::Rarity::Common: return rgba(150, 156, 164, 190);
+        case game::Rarity::Uncommon: return rgba(70, 160, 60, 200);
+        case game::Rarity::Rare: return rgba(50, 120, 210, 200);
+        case game::Rarity::Epic: return rgba(150, 70, 200, 200);
+        case game::Rarity::Legendary: return rgba(214, 138, 40, 200);
+    }
+    return rgba(0, 0, 0, 50);
+}
+
 // Caja de ranura al estilo de la referencia: fondo translucido y borde claro.
 void slotBox(float x, float y, float size, u32 fill, u32 border) {
     gfx::fillRect(x, y, size, size, fill);
@@ -211,22 +226,28 @@ void App::renderMinimap() const {
 
 void App::renderVitals() const {
     const game::CharacterState& p = m_match.body(0).state();
-    // Municion "30 | 120" en grande (como la referencia de gameplay).
-    const game::Weapon& w = m_match.playerWeapon();
-    const u32 ammoColor = w.ammo() == 0 ? kErrorRed : (w.reloading() ? kLightGrey : kWhite);
-    float x = 18.0f;
-    x += drawBigNumber(x, 210, w.ammo(), 3.0f, ammoColor) + 7.0f;
-    gfx::fillRect(x, 208, 2, 19, kLightGrey);
-    x += 8.0f;
-    if (w.reserve() >= 0) drawBigNumber(x, 210, w.reserve(), 3.0f, kWhite);
-    if (w.reloading()) {
-        gfx::fillRect(18, 229, 120, 3, rgba(0, 0, 0, 200));
-        gfx::fillRect(18, 229, 120 * w.reloadProgress(), 3, config::kColorGold);
+    // Municion "30 | 120" en grande (como la referencia de gameplay), solo con un arma.
+    if (const game::Weapon* w = m_match.inventory().activeWeapon()) {
+        const u32 ammoColor = w->ammo() == 0 ? kErrorRed : (w->reloading() ? kLightGrey : kWhite);
+        float x = 18.0f;
+        x += drawBigNumber(x, 210, w->ammo(), 3.0f, ammoColor) + 7.0f;
+        gfx::fillRect(x, 208, 2, 19, kLightGrey);
+        x += 8.0f;
+        if (w->reserve() >= 0) drawBigNumber(x, 210, w->reserve(), 3.0f, kWhite);
+        if (w->reloading()) {
+            gfx::fillRect(18, 229, 120, 3, rgba(0, 0, 0, 200));
+            gfx::fillRect(18, 229, 120 * w->reloadProgress(), 3, config::kColorGold);
+        }
     }
 
-    // Escudo (siempre 0: no hay pociones en esta version) y vida.
+    // Escudo y vida.
     gfx::fillRect(kBarX, kShieldY, kBarW, 10, rgba(0, 0, 0, 150));
     gfx::fillRect(kBarX, kHealthY, kBarW, 10, rgba(0, 0, 0, 150));
+    const float shield = p.maxShield > 0.0f ? p.shield / p.maxShield : 0.0f;
+    if (shield > 0.0f) {
+        gfx::fillRect(kBarX + 1, kShieldY + 1, (kBarW - 2) * shield, 8, kShieldBlue);
+        gfx::fillRect(kBarX + 1, kShieldY + 1, (kBarW - 2) * shield, 2, rgba(255, 255, 255, 60));
+    }
     const float ratio = p.maxHealth > 0.0f ? p.health / p.maxHealth : 0.0f;
     if (ratio > 0.0f) {
         gfx::fillRect(kBarX + 1, kHealthY + 1, (kBarW - 2) * ratio, 8, ratio > 0.3f ? kHealthGreen : kErrorRed);
@@ -236,14 +257,28 @@ void App::renderVitals() const {
         m_atlas.draw(atlas::kIconEscudo, 16, kShieldY - 1);
         m_atlas.draw(atlas::kIconVida, 16, kHealthY - 1);
     }
+
+    // Consumible en uso: barra en el centro, bajo la mira.
+    const float use = m_match.useProgress();
+    if (use >= 0.0f) {
+        gfx::fillRect(180, 166, 120, 6, rgba(0, 0, 0, 170));
+        gfx::fillRect(181, 167, 118 * use, 4, kShieldBlue);
+    }
+    // Material conseguido con el pico: icono y "+N" a la derecha de la mira.
+    if (m_harvestAge < kHarvestPopupSeconds && m_atlas.ready()) {
+        const atlas::Rect* icons[] = {&atlas::kMatMadera, &atlas::kMatLadrillo, &atlas::kMatMetal};
+        const u32 alpha = static_cast<u32>(255.0f * (1.0f - m_harvestAge / kHarvestPopupSeconds));
+        m_atlas.draw(*icons[m_harvestResource % 3], 262, 112 - m_harvestAge * 12.0f, 1.0f, rgba(255, 255, 255, alpha));
+    }
 }
 
 void App::renderSlots() const {
-    // Ranuras de construccion: pared, suelo, rampa y una vacia. Solo la pared funciona.
+    // Ranuras de construccion: pared, suelo, rampa y una vacia. La cruceta elige la pieza;
+    // por ahora solo la pared se puede colocar.
     const assets::ui::Rect* buildIcons[] = {&atlas::kPared, &atlas::kSuelo, &atlas::kRampa};
     for (int i = 0; i < 5; ++i) {
         const float x = kBuildSlotX + i * kBuildSlotStep + (i == 4 ? 4.0f : 0.0f);
-        const bool selected = m_buildMode && i == 0;
+        const bool selected = m_buildMode && i == m_buildPiece;
         const u32 fill = i < 3 ? rgba(90, 170, 230, m_buildMode ? 150 : 70) : rgba(0, 0, 0, 50);
         slotBox(x, kBuildRowY, kBuildSlotSize, fill, rgba(255, 255, 255, m_buildMode ? 200 : 110));
         if (selected) ui::frame(x - 2, kBuildRowY - 2, kBuildSlotSize + 4, kBuildSlotSize + 4, 2, kWhite);
@@ -253,19 +288,33 @@ void App::renderSlots() const {
         }
     }
 
-    // Ranuras de armas: pico y SCAR legendaria (fondo dorado); el resto, vacias.
+    // Fila de objetos: el pico (TRIANGULO) y las 5 ranuras del inventario (cruceta), con
+    // el fondo del color de la rareza.
+    const game::Inventory& inv = m_match.inventory();
     for (int i = 0; i < kWeaponSlots; ++i) {
-        const bool selected = !m_buildMode && i == 1;
+        const bool selected = !m_buildMode && (i == 0 ? inv.pickaxe() : !inv.pickaxe() && inv.selected() == i - 1);
         const float x = kWeaponSlotX + i * kWeaponSlotStep;
         const float y = kWeaponRowY - (selected ? 3.0f : 0.0f);
+        const game::ItemType type = i == 0 ? game::ItemType::None : inv.slot(i - 1).type;
         u32 fill = rgba(0, 0, 0, 50);
         if (i == 0) fill = rgba(170, 180, 200, 170);
-        if (i == 1) fill = rgba(214, 138, 40, 200);
+        else if (type != game::ItemType::None) fill = rarityColor(game::itemDef(type).rarity);
         slotBox(x, y, kWeaponSlotSize, fill, rgba(255, 255, 255, 170));
         if (selected) ui::frame(x - 2, y - 2, kWeaponSlotSize + 4, kWeaponSlotSize + 4, 2, kWhite);
         if (!m_atlas.ready()) continue;
-        if (i == 0) m_atlas.draw(atlas::kPico, x + 4, y + 4);
-        if (i == 1) m_atlas.draw(atlas::kScar, x + 1, y + 6, 0.66f);
+        if (i == 0) {
+            m_atlas.draw(atlas::kPico, x + 4, y + 4);
+            continue;
+        }
+        switch (type) {
+            case game::ItemType::Scar: m_atlas.draw(atlas::kScar, x + 1, y + 6, 0.66f); break;
+            case game::ItemType::Bandage: m_atlas.draw(atlas::kVendas, x + 5, y + 3); break;
+            case game::ItemType::Medkit: m_atlas.draw(atlas::kBotiquin, x + 5, y + 3); break;
+            case game::ItemType::SmallShield: m_atlas.draw(atlas::kMinipocion, x + 5, y + 3); break;
+            case game::ItemType::ShieldPotion: m_atlas.draw(atlas::kPocionEscudo, x + 5, y + 3); break;
+            case game::ItemType::None:
+            case game::ItemType::Count: break;
+        }
     }
 }
 
@@ -323,9 +372,12 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     if (m_buildMode) {
         const game::StructureSystem& s = m_match.structures();
         char banner[48];
-        snprintf(banner, sizeof(banner), "Paredes %d/%d", s.count(), s.config().maxWalls);
+        snprintf(banner, sizeof(banner), "%s  -  Paredes %d/%d", kBuildPieceNames[m_buildPiece], s.count(),
+                 s.config().maxWalls);
         printCenteredShadow(44, kWhite, banner);
-        if (!m_wallPlan.valid) {
+        if (m_buildPiece != 0) {
+            printCenteredShadow(55, kErrorRed, "Aun no disponible: solo paredes");
+        } else if (!m_wallPlan.valid) {
             printCenteredShadow(55, kErrorRed, game::placementErrorName(m_wallPlan.error));
         } else if (m_targetWall >= 0) {
             printCenteredShadow(55, config::kColorGold, "R: colocar  []: quitar esta  O: salir");
@@ -359,25 +411,58 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     gfx::text::printShadow(376, 89, kWhite, "%s", time);
     gfx::text::printShadow(428, 89, kWhite, "%d", m_match.aliveCount());
     gfx::text::printShadow(464, 89, kWhite, "%d", m_match.playerKills());
-    const game::StructureSystem& s = m_match.structures();
-    gfx::text::printShadow(400, 126, kWhite, "%2d", s.config().maxWalls - s.count());
-    gfx::text::printShadow(431, 126, kLightGrey, "0");
-    gfx::text::printShadow(457, 126, kLightGrey, "0");
+    // Materiales: madera, piedra y metal.
+    const game::Materials& mats = m_match.materials();
+    const int wood = mats.get(world::Resource::Wood);
+    gfx::text::printShadow(wood >= 100 ? 400 : 404, 126, kWhite, "%d", wood);
+    gfx::text::printShadow(mats.get(world::Resource::Stone) >= 10 ? 427 : 431, 126, kLightGrey, "%d",
+                           mats.get(world::Resource::Stone));
+    gfx::text::printShadow(mats.get(world::Resource::Metal) >= 10 ? 453 : 457, 126, kLightGrey, "%d",
+                           mats.get(world::Resource::Metal));
 
-    // Municion y estado del arma; escudo y vida.
-    const game::Weapon& w = m_match.playerWeapon();
-    if (w.reloading()) gfx::text::printShadow(18, 198, config::kColorGold, "RECARGANDO");
-    else if (w.empty()) gfx::text::printShadow(18, 198, kErrorRed, "SIN BALAS");
-    else if (w.ammo() == 0) gfx::text::printShadow(18, 198, kErrorRed, "[] recargar");
+    // Estado del arma (solo con un arma en la mano).
+    const game::Inventory& inv = m_match.inventory();
+    if (const game::Weapon* w = inv.activeWeapon()) {
+        if (w->reloading()) gfx::text::printShadow(18, 198, config::kColorGold, "RECARGANDO");
+        else if (w->empty()) gfx::text::printShadow(18, 198, kErrorRed, "SIN BALAS");
+        else if (w->ammo() == 0) gfx::text::printShadow(18, 198, kErrorRed, "[] recargar");
+    }
     const game::CharacterState& p = m_match.body(0).state();
-    gfx::text::print(static_cast<int>(kBarX) + 4, static_cast<int>(kShieldY) + 1, kLightGrey, "0|100");
+    gfx::text::print(static_cast<int>(kBarX) + 4, static_cast<int>(kShieldY) + 1, kWhite, "%.0f|%.0f", p.shield,
+                     p.maxShield);
     gfx::text::print(static_cast<int>(kBarX) + 4, static_cast<int>(kHealthY) + 1, kWhite, "%.0f|%.0f",
                      p.health, p.maxHealth);
-    // Balas en reserva sobre la ranura de la SCAR.
-    if (w.reserve() >= 0) {
-        const int sx = static_cast<int>(kWeaponSlotX + kWeaponSlotStep) + 34 - 8 * (w.reserve() >= 100 ? 3 : 2);
-        gfx::text::printShadow(sx - 1, static_cast<int>(kWeaponRowY) + 25 - (m_buildMode ? 0 : 3), kWhite, "%d",
-                               w.reserve());
+
+    // Cantidades en las ranuras: balas en reserva del arma y unidades de los consumibles.
+    for (int i = 0; i < game::Inventory::kSlots; ++i) {
+        const game::InventorySlot& slot = inv.slot(i);
+        if (slot.type == game::ItemType::None) continue;
+        const bool weapon = game::itemDef(slot.type).kind == game::ItemKind::Weapon;
+        const int n = weapon ? slot.weapon.reserve() : slot.count;
+        if (n < 0 || (!weapon && n <= 1 && game::itemDef(slot.type).maxStack == 1)) continue;
+        const bool selected = !m_buildMode && !inv.pickaxe() && inv.selected() == i;
+        const int sx = static_cast<int>(kWeaponSlotX + (i + 1) * kWeaponSlotStep) + 33 - 8 * (n >= 100 ? 3 : n >= 10 ? 2 : 1);
+        gfx::text::printShadow(sx, static_cast<int>(kWeaponRowY) + 25 - (selected ? 3 : 0), kWhite, "%d", n);
+    }
+    // Nombre de lo que se lleva en la mano, sobre la fila de objetos.
+    if (!m_buildMode && m_match.alive(0)) {
+        const char* name = inv.pickaxe() ? "Pico" : game::itemDef(inv.activeType()).name;
+        if (name[0]) gfx::text::printShadow(static_cast<int>(kWeaponSlotX), static_cast<int>(kWeaponRowY) - 12, kWhite,
+                                            "%s", name);
+    }
+    // Consumible en uso, o por que no se puede usar.
+    const float use = m_match.useProgress();
+    if (use >= 0.0f) {
+        const game::ItemDef& def = game::itemDef(m_match.usingItem());
+        char line[48];
+        snprintf(line, sizeof(line), "Usando %s  %.1f s", def.name, (1.0f - use) * def.useSeconds);
+        printCenteredShadow(154, kWhite, line);
+    } else if (m_match.sinceUseError() < 1.5f) {
+        printCenteredShadow(154, kErrorRed, game::useErrorName(m_match.lastUseError()));
+    }
+    // Material conseguido con el pico.
+    if (m_harvestAge < kHarvestPopupSeconds) {
+        gfx::text::printShadow(280, static_cast<int>(116 - m_harvestAge * 12.0f), kWhite, "+%d", m_harvestAmount);
     }
 }
 
@@ -432,6 +517,8 @@ void App::overlayDebug(const FrameInfo& frame) const {
                      s.shotsBlockedByWorld);
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Paredes +%d -%d rotas %d", s.wallsBuilt, s.wallsRemoved, s.wallsDestroyed);
+    y += kLineHeight;
+    gfx::text::print(x, y, config::kColorGold, "^: camara libre");
 
     // Lista de bots: estado, vida, objetivo y distancia.
     y = 24;
@@ -491,25 +578,27 @@ void App::overlayControlsPage(const FrameInfo& frame) const {
     gfx::text::print(x, y, kWhite, "Stick moverse");
     gfx::text::print(col, y, kWhite, "X saltar");
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "R disparar");
+    gfx::text::print(x, y, kWhite, "R disparar / usar");
     gfx::text::print(col, y, kWhite, "[] recargar");
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "L fijar objetivo");
-    gfx::text::print(col, y, kWhite, "Cruceta camara");
+    gfx::text::print(x, y, kWhite, "L apuntar / fijar");
+    gfx::text::print(col, y, kWhite, "^ pico");
+    y += kLineHeight;
+    gfx::text::print(x, y, kWhite, "Cruceta < > objeto");
+    gfx::text::print(col, y, kWhite, "(L + stick: mira)");
     y += kLineHeight + 3;
     gfx::text::print(x, y, config::kColorGold, "CONSTRUCCION (O)");
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "R colocar pared");
     gfx::text::print(col, y, kWhite, "[] quitar pared");
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "O volver al combate");
+    gfx::text::print(x, y, kWhite, "Cruceta < > pieza");
+    gfx::text::print(col, y, kWhite, "O combate");
     y += kLineHeight + 3;
     gfx::text::print(x, y, config::kColorGold, "PARTIDA");
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "START pausa");
     gfx::text::print(col, y, kWhite, "SELECT HUD");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "^ camara libre (depuracion)");
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "L+R+START 1 s: salir del juego");
     y += kLineHeight + 3;
