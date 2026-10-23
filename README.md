@@ -2,8 +2,8 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales) + personaje nuevo,
-v0.7.1.** Se juega
+**Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales) + personaje nuevo +
+recursos del usuario, v0.7.2.** Se juega
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +63,16 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, recursos nuevos (v0.7.2):**
+- **Ayudas de controles:** todas usan los iconos de los botones de `Recursos/Texturas PSP`.
+- **Inicio de sesión:** solo "Pulsa (X) para iniciar" y una barra de carga.
+- **Sonidos de `Sonidos Limpios`:** disparo de la SCAR, Victory Royale, caída del
+  jugador, beber minipoción y poción de escudo, y pasos. Los que aún no tienen mecánica
+  no se usan.
+- **Ranuras:** vendas, botiquín y poción de escudo con sus imágenes de `Recursos/HUD`.
+
+Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md#ayudas-de-controles-con-los-botones-de-la-psp).
 
 **Fase 7, mejora del personaje** (detalle en [docs/JUGADOR.md](docs/JUGADOR.md#modelo-del-personaje-fase-7)):
 deja de ser un conjunto de cajas.
@@ -189,6 +199,8 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 
 ## Limitaciones conocidas
 
+- **v0.7.2 sin probar en ejecución real:** falta oír en la PSP los sonidos nuevos (sobre
+  todo los pasos y beber) y comprobar que los iconos de botón se leen en la pantalla.
 - **v0.7.1 sin probar en ejecución real:** ni PPSSPP ni la PSP. Falta comprobar los FPS
   con el personaje nuevo y 30 bots: cada modelo cercano tiene 1292 triángulos y cada
   lejano 564, frente a 348 antes (ver la página de depuración).
@@ -268,13 +280,16 @@ Recursos/ Referencias/       Recursos directos / material de referencia
   - `Loadscreen - match.png`: pantalla de carga, `PIC1.PNG` e `ICON0.PNG`.
   - `fortnite_PNG25.png`: logotipo del lobby.
   - `HUD/`: iconos de construcción (Pared, Suelo, Rampa, Pico), rótulo de victoria,
-    materiales (`Wood_icon`, `stone_orig`, `Metal_icon`), ranura de la minipoción e
-    iconos originales (vivos, bajas, zona, escudo, vida, vendas, botiquín y poción de
-    escudo, de `tools/generate_hud.py`).
+    materiales (`Wood_icon`, `stone_orig`, `Metal_icon`), ranuras de los consumibles
+    (`Vendas.webp`, `botiquin.jpg`, `escudo grande.jpg`, `minipocion.png`) e iconos
+    originales (vivos, bajas, zona, escudo y vida, de `tools/generate_hud.py`).
+  - `Texturas PSP/`: botones de la PSP para las ayudas de controles.
   - `Weapons/AssaultRiffleLegendary.png`: ranura de la SCAR en el HUD.
 - **`Texturas/`:** 16 texturas originales de 32×32 (`tools/generate_textures.py`).
 - **`Sonidos/`:**
   - efectos originales (`tools/generate_sounds.py`);
+  - `Sonidos Limpios/`: sonidos del usuario (ver docs/PRESENTACION.md; los que aún no
+    tienen mecánica no se empaquetan);
   - `main title song.wav`, la música del menú.
 
 **`Referencias/`**, solo como guía:
@@ -287,11 +302,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 60 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 62 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
-  - **Audio:** formato de los 13 efectos. La música decodificada frente a la original,
+  - **Audio:** formato de los 17 efectos. La música decodificada frente a la original,
     con SNR de 33 dB y sin chasquidos. El panorama, las 8 voces y la cola llena.
   - **Flujo:** inicio de sesión → lobby → controles → lobby → carga → partida (disparos,
     construcción, recarga, páginas del HUD, pausa) → derrota → seguir mirando → fin →
@@ -303,7 +318,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 82 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 83 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
   escudo, curas, pico, materiales y coste de las paredes.
@@ -314,6 +329,8 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 
 ## Historial de correcciones
 
+- **v0.7.2:** sin correcciones de errores; recursos del usuario (sonidos, botones,
+  ranuras) y login simplificado.
 - **v0.7.1:** sin correcciones de errores; personaje nuevo e iconos de `Recursos`.
 - **v0.7.0:** ninguna corrección de errores; solo mecánicas nuevas.
 - **v0.6.0:**

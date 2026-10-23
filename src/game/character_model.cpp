@@ -565,7 +565,12 @@ void CharacterAnim::update(const CharacterState& state, bool aiming, bool alive,
     float armL, armR, elbowL, elbowR, inL = 0.0f, inR = 0.0f;
     if (state.grounded()) {
         // La fase avanza con la distancia recorrida: los pies no "patinan".
+        const float before = walkPhase;
         walkPhase += speed * dt * (2.0f * math3d::kPi / kStrideLength);
+        // Un pie apoya en las fases 0 y pi (piernas cruzandose bajo el cuerpo).
+        if (speed > 1.0f && static_cast<int>(walkPhase / math3d::kPi) != static_cast<int>(before / math3d::kPi)) {
+            ++footsteps;
+        }
         if (walkPhase > 2.0f * math3d::kPi) walkPhase -= 2.0f * math3d::kPi;
         const float amplitude = 0.65f * math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f);
         const float s = sinf(walkPhase) * amplitude;

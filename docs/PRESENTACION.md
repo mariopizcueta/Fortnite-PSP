@@ -25,10 +25,12 @@ arranque ──► INICIO DE SESIÓN ──X──► "Conectando..." (1,8 s) �
 
 - **Arranque:** antes de construir el escenario se dibuja la imagen de inicio de sesión
   con "Cargando..." y "Construyendo el escenario...": la pantalla nunca se queda en negro.
-- **Inicio de sesión** (`Recursos/loginscreen.png`): imita la pantalla de Fortnite. Panel
-  "Inicia sesión con tu cuenta", campos Usuario ("Jugador") y Contraseña, y botón amarillo
-  INICIAR SESIÓN. Con X se simula la conexión ("Conectando...", "Comprobando la
-  versión...", "Cargando el perfil...") y se entra en el lobby. No hay red ni cuentas.
+- **Inicio de sesión** (`Recursos/loginscreen.png`): sin usuario ni contraseña (v0.7.2).
+  - **En reposo:** bajo el logotipo parpadea "Pulsa (X) para iniciar", con el icono del
+    botón.
+  - **Al pulsar X:** aparece una barra de carga amarilla con los pasos de una conexión
+    simulada ("Conectando...", "Comprobando la versión...", "Cargando el perfil...").
+  - **Al terminar:** se entra en el lobby. No hay red ni cuentas.
 - **Lobby** (`Referencias/Lobby.png`): barra azul marino con el logotipo y el mapa
   ("POLVORÍN POLVORIENTO"), fondo azul con retícula triangular, suelo de arena y el
   personaje sobre una plataforma octogonal con un halo azul que late. El nombre va sobre
@@ -112,14 +114,46 @@ Distribución tomada de `Referencias/Referencia gameplay.png` y `Referencias/HUD
 Disparos e impactos llegan a las animaciones por los sucesos de la partida (ver más
 abajo).
 
+## Ayudas de controles con los botones de la PSP
+
+Todas las referencias a controles se dibujan con los iconos de `Recursos/Texturas PSP`
+(X, círculo, cuadrado, triángulo, L, R, START, SELECT, flechas, cruceta y stick).
+- **Preparación:** se reducen a 10-13 px y se les añade un contorno claro de 1 px para
+  que se lean sobre los paneles oscuros.
+- **Dónde aparecen:** inicio de sesión, pie del lobby, confirmación de salida, consejos
+  de la pantalla de carga, pausa, resultados, ayudas de construcción, aviso de recargar,
+  página de depuración y página de controles. En esta última, además, el mando dibujado
+  usa los iconos, que se iluminan al pulsar.
+- **Implementación:** `ui::Hint` (botón + texto) con `ui::drawHintIcons()` (iconos, parte
+  GU) y `ui::printHints()` (texto, parte CPU). Las dos calculan la misma disposición.
+
 ## Sonido
 
 **Formatos compatibles con la PSP, sin bibliotecas externas:**
-- **Efectos:** 11 WAV PCM de 16 bits, mono, 22 050 Hz (`Recursos/Sonidos/*.wav`, 243 KB
-  en total). Se reproducen directamente desde el ejecutable, sin copiarlos.
-  - **Origen:** sonidos originales sintetizados por `tools/generate_sounds.py`.
-  - **Lista:** disparo, impacto, herido, eliminación, pared, pared rota, recarga, menú
-    (mover y aceptar), victoria y derrota.
+- **Efectos:** 17 WAV PCM de 16 bits, mono, 22 050 Hz (950 KB en total). Se reproducen
+  directamente desde el ejecutable, sin copiarlos.
+  - **Sonidos del usuario** (`Recursos/Sonidos/Sonidos Limpios`, convertidos por
+    `tools/prepare_assets.py` con `afconvert` y sin el silencio inicial):
+
+    | Sonido                                 | Uso                                                           |
+    |----------------------------------------|---------------------------------------------------------------|
+    | `scardisparo.wav`                      | Disparo (sustituye al sintetizado)                            |
+    | `Fortnite Victory Royale.mp3`          | Victoria (sustituye a la sintonía sintetizada)                |
+    | `muertejugadorfortnite.wav`            | Al caer el jugador                                            |
+    | `miniescudo.wav`                       | Mientras se bebe una minipoción (se corta si se cancela)      |
+    | `pociondeescudogrande.wav`             | Mientras se bebe una poción de escudo (se corta si se cancela) |
+    | `Fortnite Running Sound Effect.wav`    | Pasos: se extrae un único paso (0,22 s) y suena en cada pisada |
+
+  - **Sin usar todavía:** `Chestopening`, `Fortnite Chest(sin abrir)`, `Opertura ala
+    delta`, `Saltar del autobus`, `Fortnite bailemp3`, `Fortnite fusil de tirador de
+    cerrojo` y `avisotormenta`. Se quedan en Recursos y no se empaquetan hasta que exista
+    su mecánica (cofres, ala delta, autobús, bailes, francotirador, fases de la
+    tormenta).
+  - **Sonidos sintetizados** (`tools/generate_sounds.py`): impacto, herido, eliminación,
+    pared, pared rota, recarga, menú (mover y aceptar), derrota, pico y curación (vendas
+    y botiquín).
+- **Pasos:** suenan los del jugador, siempre, y los de los bots a menos de 14 m, con
+  volumen y panorama según dónde estén.
 - **Música del menú:** `Recursos/Sonidos/main title song.wav`.
   - **Conversión:** pasa de 48 kHz estéreo (22 MB) a 22 050 Hz mono con `afconvert` y a
     IMA ADPCM por bloques (formato propio "IMA1", 4:1). Ocupa 1,2 MB.
@@ -150,10 +184,14 @@ abajo).
 | Pared construida / quitada| Golpe de madera                                                |
 | Pared rota                | Madera rompiéndose, con volumen por distancia                  |
 | Recarga                   | Sonido de recarga                                              |
+| Caída del jugador         | `muertejugadorfortnite`                                        |
+| Empezar / cancelar un consumible | Sonido de beber de la minipoción o de la poción de escudo; se corta al cancelar (`Mixer::stop`) |
+| Terminar vendas o botiquín| Sonido de curación                                             |
+| Pisada (animación)        | Un paso de la grabación de carrera                             |
 
 ## Memoria, carga y estabilidad
 
-**Recursos en el EBOOT** (2,8 MB en total):
+**Recursos en el EBOOT** (3.5 MB en total en la v0.7.2):
 
 | Recurso                                 | En el EBOOT | En RAM al usarse                     |
 |-----------------------------------------|-------------|--------------------------------------|
@@ -162,7 +200,7 @@ abajo).
 | Atlas de interfaz                       | 40 KB PNG   | 288 KB (RGBA)                        |
 | Texturas del mundo (16 × 32×32)         | 13 KB PNG   | 32 KB (5551)                         |
 | Minimapa                                | (se genera) | 32 KB (5551)                         |
-| Efectos de sonido                       | 243 KB      | 0 (se leen del EBOOT)                |
+| Efectos de sonido (17)                  | 950 KB      | 0 (se leen del EBOOT)                |
 | Música                                  | 1 245 KB    | 8 KB de búfer de bloque              |
 
 - **Imágenes a pantalla completa:** al pasarlas a 16 bits (`loadPngFromMemory(…,

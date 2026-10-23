@@ -69,49 +69,12 @@ def health():
     return img
 
 
-SHIELD_BLUE = (70, 150, 235, 255)
-SHIELD_LIGHT = (170, 220, 255, 255)
-GLASS = (200, 220, 230, 255)
-
-
-def bandage():
-    # Rollo de venda: cilindro blanco con la tira colgando.
-    img = canvas(24, 24)
-    d = ImageDraw.Draw(img)
-    d.rectangle((6, 6, 17, 17), fill=(236, 232, 220, 255), outline=OUTLINE)
-    d.line((6, 10, 17, 10), fill=(200, 190, 170, 255))
-    d.line((6, 14, 17, 14), fill=(200, 190, 170, 255))
-    d.rectangle((15, 16, 19, 22), fill=(236, 232, 220, 255), outline=OUTLINE)
-    return img
-
-
-def medkit():
-    # Botiquin: maletin blanco con cruz roja.
-    img = canvas(24, 24)
-    d = ImageDraw.Draw(img)
-    d.rectangle((9, 3, 14, 6), outline=OUTLINE)
-    d.rectangle((2, 6, 21, 20), fill=(240, 240, 240, 255), outline=OUTLINE)
-    d.rectangle((10, 8, 13, 18), fill=(210, 40, 40, 255))
-    d.rectangle((7, 11, 16, 15), fill=(210, 40, 40, 255))
-    return img
-
-
-def shield_potion():
-    # Pocion de escudo: botella alta de liquido azul.
-    img = canvas(24, 24)
-    d = ImageDraw.Draw(img)
-    d.rectangle((9, 1, 14, 6), fill=GLASS, outline=OUTLINE)
-    d.rectangle((5, 6, 18, 22), fill=SHIELD_BLUE, outline=OUTLINE)
-    d.rectangle((7, 9, 9, 18), fill=SHIELD_LIGHT)
-    return img
-
-
-# Los materiales, la SCAR y la minipocion ya no se generan: estan en Recursos (Wood_icon,
-# stone_orig, Metal_icon, Weapons/AssaultRiffleLegendary, minipocion), dados por el usuario.
+# Los materiales, la SCAR y los consumibles ya no se generan: estan en Recursos (Wood_icon,
+# stone_orig, Metal_icon, Weapons/AssaultRiffleLegendary, minipocion, Vendas.webp,
+# botiquin.jpg, "escudo grande.jpg"), dados por el usuario.
 ICONS = {
     "icono_vivos": person, "icono_bajas": kills, "icono_zona": zone, "icono_escudo": shield,
     "icono_vida": health,
-    "vendas": bandage, "botiquin": medkit, "pocion_escudo": shield_potion,
 }
 
 

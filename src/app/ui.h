@@ -30,5 +30,28 @@ private:
 // Marco de `thickness` pixeles alrededor del rectangulo.
 void frame(float x, float y, float w, float h, float thickness, u32 color);
 
+// --- Ayudas de controles con los botones de la PSP (Recursos/Texturas PSP) ---------------
+
+enum class Button : u8 {
+    Cross, Circle, Square, Triangle, L, R, Start, Select, Up, Down, Left, Right, Dpad, Stick
+};
+
+// Un boton y lo que hace. Con texto vacio, el siguiente boton va pegado (combinaciones
+// como L + R + START o izquierda/derecha).
+struct Hint {
+    Button button;
+    const char* text;
+};
+
+const assets::ui::Rect& buttonRect(Button button);
+
+// Ancho en pixeles de una fila de ayudas (para centrarla).
+int hintsWidth(const Hint* hints, int count);
+// Los iconos van en la parte GU del frame y el texto en la de CPU (despues de endFrame):
+// las dos funciones calculan la misma disposicion. `y` es la linea del texto (8 px de
+// alto); los iconos se centran con ella.
+void drawHintIcons(const Atlas& atlas, int x, int y, const Hint* hints, int count, u32 tint = 0xFFFFFFFF);
+void printHints(int x, int y, u32 color, const Hint* hints, int count);
+
 }  // namespace ui
 }  // namespace app

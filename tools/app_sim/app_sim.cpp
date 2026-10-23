@@ -254,7 +254,8 @@ void testAudio(const char* outDir) {
                                   assets::sfxEliminacion(), assets::sfxPared(), assets::sfxParedRota(),
                                   assets::sfxRecarga(), assets::sfxMenuMover(), assets::sfxMenuAceptar(),
                                   assets::sfxVictoria(), assets::sfxDerrota(), assets::sfxPico(),
-                                  assets::sfxCuracion()};
+                                  assets::sfxCuracion(), assets::sfxMuerteJugador(), assets::sfxMiniescudo(),
+                                  assets::sfxPocionEscudo(), assets::sfxPaso()};
     bool clipsOk = true;
     int clipBytes = 0;
     for (const assets::Blob& b : clips) {
@@ -262,8 +263,8 @@ void testAudio(const char* outDir) {
         clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
         clipBytes += static_cast<int>(b.size);
     }
-    printf("  13 efectos, %d KB en total\n", clipBytes / 1024);
-    check(clipsOk, "los 13 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+    printf("  17 efectos, %d KB en total\n", clipBytes / 1024);
+    check(clipsOk, "los 17 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
 
     // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
     static audio::ImaStream music;
@@ -330,6 +331,12 @@ void testAudio(const char* outDir) {
     check(mixer.activeVoices() == audio::Mixer::kVoices, "con 12 sonidos a la vez suenan 8 (se reutiliza la voz mas antigua)");
     for (int i = 0; i < 4 * 2000 / 1024 + 2; ++i) mixer.mix(out, 1024);
     check(mixer.activeVoices() == 0, "las voces se liberan al terminar el sonido");
+    mixer.play(audio::Sfx::Shot);
+    mixer.play(audio::Sfx::Shot);
+    mixer.mix(out, 64);
+    mixer.stop(audio::Sfx::Shot);
+    mixer.mix(out, 64);
+    check(mixer.activeVoices() == 0, "stop() corta un sonido que esta sonando (beber al cancelar)");
     for (int i = 0; i < 70; ++i) mixer.play(audio::Sfx::Shot);
     check(mixer.droppedCommands() == 70 - 63, "con la cola llena se descartan ordenes en vez de bloquear");
 }
@@ -386,7 +393,11 @@ void testNewControls(Sim& sim) {
 
     // Camara: al andar de lado se coloca detras; con L sin objetivo el stick la gira.
     float before = sim.app().testCameraYaw();
+    const u32 steps = sim.app().testFootsteps();
     sim.hold(0, 1.5f, 1.0f, 0.0f);
+    const u32 taken = sim.app().testFootsteps() - steps;
+    printf("  1.5 s corriendo: %u pisadas con sonido\n", static_cast<unsigned>(taken));
+    check(taken >= 8 && taken <= 14, "cada pisada suena (unas 6 por segundo corriendo)");
     float turned = fabsf(game::wrapAngle(sim.app().testCameraYaw() - before));
     printf("  1.5 s andando a la derecha: la camara gira %.0f grados\n", static_cast<double>(turned * 57.3f));
     check(turned > 0.5f, "al andar, la camara se va colocando detras del jugador");
@@ -459,10 +470,10 @@ int main(int argc, char** argv) {
     printf("\n1) Inicio de sesion\n");
     sim.wait(0.5f);
     check(sim.screen() == kLogin, "la aplicacion arranca en la pantalla de inicio de sesion");
+    sim.shot("01_login");
     sim.takeAudioPeak();
     sim.wait(0.5f);
     check(sim.takeAudioPeak() > 1000, "la musica del menu suena desde el inicio");
-    sim.shot("01_login");
     sim.press(PSP_CTRL_CROSS);
     sim.wait(0.7f);
     sim.shot("02_login_conectando");

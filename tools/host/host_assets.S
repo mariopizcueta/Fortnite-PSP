@@ -30,4 +30,8 @@ _asset_\name\()_end:
     ASSET sfx_derrota, "assets/sounds/derrota.wav"
     ASSET sfx_pico, "assets/sounds/pico.wav"
     ASSET sfx_curacion, "assets/sounds/curacion.wav"
+    ASSET sfx_muerte_jugador, "assets/sounds/muerte_jugador.wav"
+    ASSET sfx_miniescudo, "assets/sounds/miniescudo.wav"
+    ASSET sfx_pocion_escudo, "assets/sounds/pocion_escudo.wav"
+    ASSET sfx_paso, "assets/sounds/paso.wav"
     ASSET music_menu, "assets/sounds/musica_menu.ima"

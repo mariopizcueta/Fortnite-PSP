@@ -173,9 +173,17 @@ SOUNDS = {
 }
 
 
+# Sustituidos por sonidos dados por el usuario (Recursos/Sonidos/Sonidos Limpios, ver
+# tools/prepare_assets.py). Se siguen calculando para no alterar el generador aleatorio:
+# asi los demas efectos salen identicos.
+REPLACED = {"disparo", "victoria"}
+
+
 def main():
     for name, fn in SOUNDS.items():
-        save(name, fn())
+        x = fn()
+        if name not in REPLACED:
+            save(name, x)
 
 
 if __name__ == "__main__":

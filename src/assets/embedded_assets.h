@@ -25,6 +25,10 @@ FORTNITEPSP_ASSET(sfx_victoria)
 FORTNITEPSP_ASSET(sfx_derrota)
 FORTNITEPSP_ASSET(sfx_pico)
 FORTNITEPSP_ASSET(sfx_curacion)
+FORTNITEPSP_ASSET(sfx_muerte_jugador)
+FORTNITEPSP_ASSET(sfx_miniescudo)
+FORTNITEPSP_ASSET(sfx_pocion_escudo)
+FORTNITEPSP_ASSET(sfx_paso)
 FORTNITEPSP_ASSET(music_menu)
 
 namespace assets {
@@ -59,6 +63,11 @@ FORTNITEPSP_BLOB(sfxVictoria, sfx_victoria)
 FORTNITEPSP_BLOB(sfxDerrota, sfx_derrota)
 FORTNITEPSP_BLOB(sfxPico, sfx_pico)
 FORTNITEPSP_BLOB(sfxCuracion, sfx_curacion)
+// Sonidos de Recursos/Sonidos/Sonidos Limpios (convertidos por tools/prepare_assets.py).
+FORTNITEPSP_BLOB(sfxMuerteJugador, sfx_muerte_jugador)
+FORTNITEPSP_BLOB(sfxMiniescudo, sfx_miniescudo)
+FORTNITEPSP_BLOB(sfxPocionEscudo, sfx_pocion_escudo)
+FORTNITEPSP_BLOB(sfxPaso, sfx_paso)
 FORTNITEPSP_BLOB(musicMenu, music_menu)
 
 #undef FORTNITEPSP_BLOB

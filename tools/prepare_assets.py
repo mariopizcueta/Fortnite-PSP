@@ -21,7 +21,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 RES = ROOT / "Recursos"
@@ -94,6 +94,41 @@ def slot_art(path, size=32, margin=0.06):
     return img.resize((size, size), Image.LANCZOS).convert("RGBA")
 
 
+def button(name, height):
+    """Boton de PSP de Recursos/Texturas PSP, recortado y a `height` px de alto."""
+    img = alpha_crop(Image.open(RES / "Texturas PSP" / name).convert("RGBA"), 8)
+    width = max(1, round(img.width * height / img.height))
+    img = img.resize((width, height), Image.LANCZOS)
+    # Contorno claro de 1 px: los botones son oscuros y deben leerse sobre los paneles
+    # azul marino de los menus y sobre el escenario.
+    out = Image.new("RGBA", (width + 2, height + 2), (0, 0, 0, 0))
+    halo = Image.new("RGBA", out.size, (235, 240, 250, 0))
+    alpha = Image.new("L", out.size, 0)
+    alpha.paste(img.getchannel("A"), (1, 1))
+    halo.putalpha(alpha.filter(ImageFilter.MaxFilter(3)).point(lambda v: 210 if v > 60 else 0))
+    out.alpha_composite(halo)
+    out.alpha_composite(img, (1, 1))
+    return out
+
+
+BUTTONS = {
+    "BtnCross": ("PlayStation_button_X.svg.webp", 13),
+    "BtnCircle": ("PlayStation_button_C.svg.webp", 13),
+    "BtnSquare": ("PlayStation_button_S.svg.webp", 13),
+    "BtnTriangle": ("PlayStation_button_T.svg.webp", 13),
+    "BtnL": ("PlayStation_Portable_button_L.svg.webp", 10),
+    "BtnR": ("PlayStation_Portable_button_R.svg.webp", 10),
+    "BtnStart": ("PlayStation_Portable_button_Start.svg.webp", 12),
+    "BtnSelect": ("PlayStation_Portable_button_Select.svg.webp", 12),
+    "BtnUp": ("PlayStation_Portable_button_Up.svg.webp", 13),
+    "BtnDown": ("PlayStation_Portable_button_Down.svg.webp", 13),
+    "BtnLeft": ("PlayStation_Portable_button_Left.svg.webp", 10),
+    "BtnRight": ("PlayStation_Portable_button_Right.svg.webp", 10),
+    "BtnDpad": ("PlayStation_Directional_button.svg.webp", 13),
+    "BtnStick": ("PlayStation_Portable_button_Analog_Stick.svg.webp", 13),
+}
+
+
 def victory_banner():
     banner = alpha_crop(Image.open(RES / "HUD" / "Victory_Royale_Old_-_Fortnite.webp").convert("RGBA"))
     return banner.resize((round(banner.width * 1.5), round(banner.height * 1.5)), Image.NEAREST)
@@ -134,6 +169,9 @@ def ui_atlas():
         # Ranuras completas (con su fondo de rareza) dadas en Recursos.
         "SlotScar": slot_art(RES / "Weapons" / "AssaultRiffleLegendary.png"),
         "SlotMinipocion": slot_art(RES / "HUD" / "minipocion.png"),
+        "SlotVendas": slot_art(RES / "HUD" / "Vendas.webp", margin=0.0),
+        "SlotBotiquin": slot_art(RES / "HUD" / "botiquin.jpg", margin=0.0),
+        "SlotPocionEscudo": slot_art(RES / "HUD" / "escudo grande.jpg", margin=0.0),
         # Materiales (Recursos/HUD/Wood_icon.png, stone_orig.png, Metal_icon.png).
         "MatMadera": icon("Wood_icon.png", 18),
         "MatLadrillo": icon("stone_orig.png", 18),
@@ -143,10 +181,10 @@ def ui_atlas():
         "IconZona": Image.open(RES / "HUD" / "icono_zona.png").convert("RGBA"),
         "IconEscudo": Image.open(RES / "HUD" / "icono_escudo.png").convert("RGBA"),
         "IconVida": Image.open(RES / "HUD" / "icono_vida.png").convert("RGBA"),
-        "Vendas": Image.open(RES / "HUD" / "vendas.png").convert("RGBA"),
-        "Botiquin": Image.open(RES / "HUD" / "botiquin.png").convert("RGBA"),
-        "PocionEscudo": Image.open(RES / "HUD" / "pocion_escudo.png").convert("RGBA"),
     }
+    # Botones de la PSP (Recursos/Texturas PSP) para las ayudas de controles.
+    for name, (source, height) in BUTTONS.items():
+        items[name] = button(source, height)
     # Empaquetado por estantes en un atlas de 512 px de ancho. La altura es solo la usada
     # (multiplo de 8): la GE declara la potencia de 2 pero en RAM solo van esas filas.
     width = 512
@@ -268,9 +306,76 @@ def read_wav(path):
         return data.reshape(-1, w.getnchannels()), w.getframerate()
 
 
+# Sonidos de Recursos/Sonidos/Sonidos Limpios que ya tienen uso en el juego -> nombre en
+# assets/sounds. Los demas (cofre, ala delta, autobus, baile, francotirador, aviso de la
+# tormenta) se conservan en Recursos pero no se empaquetan hasta que exista su mecanica.
+CLEAN_SOUNDS = {
+    "disparo": "scardisparo.wav",                       # sustituye al disparo sintetizado
+    "victoria": "Fortnite Victory Royale.mp3",          # sustituye a la sintonia sintetizada
+    "muerte_jugador": "muertejugadorfortnite.wav",
+    "miniescudo": "miniescudo.wav",
+    "pocion_escudo": "pociondeescudogrande.wav",
+}
+STEP_SOURCE = "Fortnite Running Sound Effect.wav"
+
+
+def to_mono_22050(path):
+    """Cualquier formato que entienda afconvert (wav, mp3) -> muestras int16 mono 22050 Hz."""
+    with tempfile.TemporaryDirectory() as tmp:
+        mono = Path(tmp) / "mono.wav"
+        subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@22050", "-c", "1", str(path), str(mono)],
+                       check=True)
+        data, rate = read_wav(mono)
+    return data[:, 0].astype(np.int32), rate
+
+
+def trim_start(x, threshold=0.03, keep=0.004):
+    """Quita el silencio inicial (el sonido debe empezar con el suceso)."""
+    peak = np.max(np.abs(x)) or 1
+    start = int(np.argmax(np.abs(x) > threshold * peak))
+    return x[max(0, start - int(keep * 22050)):]
+
+
+def write_wav(path, x, rate=22050):
+    data = np.clip(x, -32768, 32767).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(data.tobytes())
+
+
+def footstep(x):
+    """Un unico paso de la grabacion de carrera: el golpe de energia mediana (ni el mas
+    flojo ni el mas fuerte), 0.22 s con caida suave. Se dispara en cada pisada."""
+    win = int(0.01 * 22050)
+    env = np.array([np.sqrt(np.mean(x[i:i + win] ** 2.0)) for i in range(0, len(x) - win, win)])
+    threshold = 0.35 * env.max()
+    onsets = [i for i in range(1, len(env)) if env[i] > threshold and env[i - 1] <= threshold]
+    strengths = [env[i:i + 8].max() for i in onsets]
+    chosen = onsets[int(np.argsort(strengths)[len(strengths) // 2])]
+    start = max(0, chosen * win - int(0.008 * 22050))
+    step = x[start:start + int(0.22 * 22050)].astype(np.float64)
+    fade = int(0.06 * 22050)
+    step[-fade:] *= np.linspace(1.0, 0.0, fade)
+    step *= 0.8 * 32767 / (np.max(np.abs(step)) or 1)
+    return step.astype(np.int32), len(onsets)
+
+
 def sounds():
     out = ASSETS / "sounds"
     out.mkdir(parents=True, exist_ok=True)
+    clean = RES / "Sonidos" / "Sonidos Limpios"
+    for name, source in CLEAN_SOUNDS.items():
+        x, rate = to_mono_22050(clean / source)
+        x = trim_start(x)
+        write_wav(out / f"{name}.wav", x, rate)
+        print(f"  assets/sounds/{name}.wav  {len(x) / rate:.2f} s  (de Sonidos Limpios/{source})")
+    x, rate = to_mono_22050(clean / STEP_SOURCE)
+    step, found = footstep(x)
+    write_wav(out / "paso.wav", step, rate)
+    print(f"  assets/sounds/paso.wav  {len(step) / rate:.2f} s  (1 de {found} pasos de {STEP_SOURCE})")
+
     for wav in sorted((RES / "Sonidos").glob("*.wav")):
         if wav.name == "main title song.wav":
             continue

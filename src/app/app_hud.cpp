@@ -49,18 +49,67 @@ constexpr u32 kListedButtons[] = {
 };
 
 // Mando dibujado en la pagina de controles.
-struct ButtonBox {
+// Mando dibujado en la pagina de controles con los iconos de Recursos/Texturas PSP
+// (centro de cada icono); se iluminan al pulsar el boton.
+struct PadButton {
     u32 mask;
-    float x, y, w, h;
+    ui::Button button;
+    float cx, cy;
 };
-constexpr ButtonBox kButtonBoxes[] = {
-    {PSP_CTRL_LTRIGGER, 320, 44, 44, 10}, {PSP_CTRL_RTRIGGER, 422, 44, 44, 10},
-    {PSP_CTRL_UP, 336, 64, 12, 12},       {PSP_CTRL_DOWN, 336, 92, 12, 12},
-    {PSP_CTRL_LEFT, 322, 78, 12, 12},     {PSP_CTRL_RIGHT, 350, 78, 12, 12},
-    {PSP_CTRL_TRIANGLE, 438, 64, 12, 12}, {PSP_CTRL_CROSS, 438, 92, 12, 12},
-    {PSP_CTRL_SQUARE, 424, 78, 12, 12},   {PSP_CTRL_CIRCLE, 452, 78, 12, 12},
-    {PSP_CTRL_SELECT, 366, 110, 24, 8},   {PSP_CTRL_START, 396, 110, 24, 8},
+constexpr PadButton kPadButtons[] = {
+    {PSP_CTRL_LTRIGGER, ui::Button::L, 342, 50},     {PSP_CTRL_RTRIGGER, ui::Button::R, 444, 50},
+    {PSP_CTRL_UP, ui::Button::Up, 342, 72},          {PSP_CTRL_DOWN, ui::Button::Down, 342, 100},
+    {PSP_CTRL_LEFT, ui::Button::Left, 328, 86},      {PSP_CTRL_RIGHT, ui::Button::Right, 356, 86},
+    {PSP_CTRL_TRIANGLE, ui::Button::Triangle, 444, 72}, {PSP_CTRL_CROSS, ui::Button::Cross, 444, 100},
+    {PSP_CTRL_SQUARE, ui::Button::Square, 430, 86},  {PSP_CTRL_CIRCLE, ui::Button::Circle, 458, 86},
+    {PSP_CTRL_SELECT, ui::Button::Select, 378, 118}, {PSP_CTRL_START, ui::Button::Start, 408, 118},
 };
+
+// Filas de la pagina de controles: titulos o una o dos ayudas (columna izquierda y derecha).
+struct ControlRow {
+    const char* title;  // si no es nullptr, la fila es un titulo
+    ui::Hint left[3];
+    int leftCount;
+    ui::Hint right[2];
+    int rightCount;
+};
+using B = ui::Button;
+const ControlRow kControlRows[] = {
+    {"COMBATE", {}, 0, {}, 0},
+    {nullptr, {{B::Stick, "moverse"}}, 1, {{B::Cross, "saltar"}}, 1},
+    {nullptr, {{B::R, "disparar / usar"}}, 1, {{B::Square, "recargar"}}, 1},
+    {nullptr, {{B::L, "apuntar / fijar"}}, 1, {{B::Triangle, "pico"}}, 1},
+    {nullptr, {{B::Left, ""}, {B::Right, "objeto"}}, 2, {{B::L, ""}, {B::Stick, "mira"}}, 2},
+    {"CONSTRUCCION", {}, 0, {}, 0},
+    {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pared"}}, 1},
+    {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "quitar pared"}}, 1},
+    {"PARTIDA", {}, 0, {}, 0},
+    {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "HUD"}}, 1},
+    {nullptr, {{B::L, ""}, {B::R, ""}, {B::Start, "1 s: salir del juego"}}, 3, {}, 0},
+};
+constexpr int kControlsX = 14, kControlsColumn = 14 + 8 * 19, kControlsTop = 40;
+constexpr int kTitleHeight = 12, kHintRowHeight = 14;
+
+// Recorre las filas con su altura: fn(fila, y). Devuelve la y siguiente.
+template <typename Fn>
+int forEachControlRow(Fn&& fn) {
+    int y = kControlsTop;
+    for (const ControlRow& row : kControlRows) {
+        if (row.title && row.title != kControlRows[0].title) y += 3;
+        fn(row, y);
+        y += row.title ? kTitleHeight : kHintRowHeight;
+    }
+    return y + 3;
+}
+
+const ui::Hint kHudPageHint[] = {{B::Select, "siguiente pagina del HUD"}};
+const ui::Hint kBackHint[] = {{B::Circle, "volver al lobby"}};
+const ui::Hint kFreeCameraHint[] = {{B::Triangle, "camara libre"}};
+constexpr int kFreeCameraHintY = 256;
+const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
+const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "quitar esta"}, {B::Circle, "salir"}};
+const ui::Hint kBuildHintsShort[] = {{B::R, "colocar pared"}, {B::Circle, "combate"}};
+
 constexpr float kStickBoxX = 361.0f;
 constexpr float kStickBoxY = 130.0f;
 constexpr float kStickBoxSize = 56.0f;
@@ -99,6 +148,20 @@ u32 rarityColor(game::Rarity r) {
     return rgba(0, 0, 0, 50);
 }
 
+// Imagen de la ranura de cada objeto (Recursos/HUD y Recursos/Weapons), o nullptr.
+const assets::ui::Rect* slotArt(game::ItemType type) {
+    switch (type) {
+        case game::ItemType::Scar: return &assets::ui::kSlotScar;
+        case game::ItemType::Bandage: return &assets::ui::kSlotVendas;
+        case game::ItemType::Medkit: return &assets::ui::kSlotBotiquin;
+        case game::ItemType::SmallShield: return &assets::ui::kSlotMinipocion;
+        case game::ItemType::ShieldPotion: return &assets::ui::kSlotPocionEscudo;
+        case game::ItemType::None:
+        case game::ItemType::Count: break;
+    }
+    return nullptr;
+}
+
 // Caja de ranura al estilo de la referencia: fondo translucido y borde claro.
 void slotBox(float x, float y, float size, u32 fill, u32 border) {
     gfx::fillRect(x, y, size, size, fill);
@@ -108,6 +171,16 @@ void slotBox(float x, float y, float size, u32 fill, u32 border) {
 }  // namespace
 
 // --- HUD: parte dibujada con GU -------------------------------------------------------------
+
+const ui::Hint* App::buildHints(int* count) const {
+    // Ayuda bajo el rotulo de construccion (solo cuando la pared se puede colocar).
+    if (m_targetWall >= 0) {
+        *count = 3;
+        return kBuildHints;
+    }
+    *count = 2;
+    return kBuildHintsShort;
+}
 
 void App::renderGameHud() const {
     // Destello rojo al recibir un impacto.
@@ -120,6 +193,11 @@ void App::renderGameHud() const {
         // Rotulo CONSTRUCCION sobre una franja azul: el modo se ve siempre.
         gfx::fillRect(150, 18, 180, 22, kBuildBlue);
         if (m_atlas.ready()) m_atlas.drawCentered(atlas::kConstruccion, 240, 20);
+        if (m_buildPiece == 0 && m_wallPlan.valid) {
+            int n = 0;
+            const ui::Hint* hints = buildHints(&n);
+            ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55, hints, n);
+        }
     }
     renderCrosshair();
     renderMinimap();
@@ -237,6 +315,8 @@ void App::renderVitals() const {
         if (w->reloading()) {
             gfx::fillRect(18, 229, 120, 3, rgba(0, 0, 0, 200));
             gfx::fillRect(18, 229, 120 * w->reloadProgress(), 3, config::kColorGold);
+        } else if (!w->empty() && w->ammo() == 0) {
+            ui::drawHintIcons(m_atlas, 18, 198, kReloadHint, 1);
         }
     }
 
@@ -296,35 +376,19 @@ void App::renderSlots() const {
         const float x = kWeaponSlotX + i * kWeaponSlotStep;
         const float y = kWeaponRowY - (selected ? 3.0f : 0.0f);
         const game::ItemType type = i == 0 ? game::ItemType::None : inv.slot(i - 1).type;
-        // La SCAR y la minipocion tienen la ranura completa dibujada (Recursos), con su
-        // fondo de rareza; el resto, fondo del color de la rareza e icono encima.
-        const atlas::Rect* art = type == game::ItemType::Scar          ? &atlas::kSlotScar
-                                 : type == game::ItemType::SmallShield ? &atlas::kSlotMinipocion
-                                                                       : nullptr;
-        u32 fill = rgba(0, 0, 0, 50);
-        if (i == 0) fill = rgba(170, 180, 200, 170);
-        else if (type != game::ItemType::None) fill = rarityColor(game::itemDef(type).rarity);
+        // Cada objeto tiene su ranura completa dibujada en Recursos (con su fondo de rareza).
+        const atlas::Rect* art = slotArt(type);
         if (art && m_atlas.ready()) {
             m_atlas.draw(*art, x + 1, y + 1);
             ui::frame(x, y, kWeaponSlotSize, kWeaponSlotSize, 1, rgba(255, 255, 255, 170));
         } else {
+            u32 fill = rgba(0, 0, 0, 50);
+            if (i == 0) fill = rgba(170, 180, 200, 170);
+            else if (type != game::ItemType::None) fill = rarityColor(game::itemDef(type).rarity);
             slotBox(x, y, kWeaponSlotSize, fill, rgba(255, 255, 255, 170));
         }
         if (selected) ui::frame(x - 2, y - 2, kWeaponSlotSize + 4, kWeaponSlotSize + 4, 2, kWhite);
-        if (!m_atlas.ready()) continue;
-        if (i == 0) {
-            m_atlas.draw(atlas::kPico, x + 4, y + 4);
-            continue;
-        }
-        switch (type) {
-            case game::ItemType::Scar:
-            case game::ItemType::SmallShield: break;  // ya dibujadas con su ranura
-            case game::ItemType::Bandage: m_atlas.draw(atlas::kVendas, x + 5, y + 3); break;
-            case game::ItemType::Medkit: m_atlas.draw(atlas::kBotiquin, x + 5, y + 3); break;
-            case game::ItemType::ShieldPotion: m_atlas.draw(atlas::kPocionEscudo, x + 5, y + 3); break;
-            case game::ItemType::None:
-            case game::ItemType::Count: break;
-        }
+        if (i == 0 && m_atlas.ready()) m_atlas.draw(atlas::kPico, x + 4, y + 4);
     }
 }
 
@@ -389,10 +453,11 @@ void App::overlayGameHud(const FrameInfo& frame) const {
             printCenteredShadow(55, kErrorRed, "Aun no disponible: solo paredes");
         } else if (!m_wallPlan.valid) {
             printCenteredShadow(55, kErrorRed, game::placementErrorName(m_wallPlan.error));
-        } else if (m_targetWall >= 0) {
-            printCenteredShadow(55, config::kColorGold, "R: colocar  []: quitar esta  O: salir");
         } else {
-            printCenteredShadow(55, kLightGrey, "R: colocar pared  O: combate");
+            int n = 0;
+            const ui::Hint* hints = buildHints(&n);
+            ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55,
+                           m_targetWall >= 0 ? config::kColorGold : kLightGrey, hints, n);
         }
     }
     if (!m_match.alive(0)) {
@@ -435,7 +500,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     if (const game::Weapon* w = inv.activeWeapon()) {
         if (w->reloading()) gfx::text::printShadow(18, 198, config::kColorGold, "RECARGANDO");
         else if (w->empty()) gfx::text::printShadow(18, 198, kErrorRed, "SIN BALAS");
-        else if (w->ammo() == 0) gfx::text::printShadow(18, 198, kErrorRed, "[] recargar");
+        else if (w->ammo() == 0) ui::printHints(18, 198, kErrorRed, kReloadHint, 1);
     }
     const game::CharacterState& p = m_match.body(0).state();
     gfx::text::print(static_cast<int>(kBarX) + 4, static_cast<int>(kShieldY) + 1, kWhite, "%.0f|%.0f", p.shield,
@@ -474,6 +539,13 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     if (m_harvestAge < kHarvestPopupSeconds) {
         gfx::text::printShadow(280, static_cast<int>(116 - m_harvestAge * 12.0f), kWhite, "+%d", m_harvestAmount);
     }
+}
+
+void App::renderDebugPage() const {
+    gfx::fillRect(0, 0, gfx::kScreenWidth, 16, kBar);
+    gfx::fillRect(4, 20, 232, 248, kPanel);
+    gfx::fillRect(240, 20, 236, 248, kPanel);
+    ui::drawHintIcons(m_atlas, 8, kFreeCameraHintY, kFreeCameraHint, 1);
 }
 
 void App::overlayDebug(const FrameInfo& frame) const {
@@ -529,7 +601,6 @@ void App::overlayDebug(const FrameInfo& frame) const {
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Paredes +%d -%d rotas %d", s.wallsBuilt, s.wallsRemoved, s.wallsDestroyed);
     y += kLineHeight;
-    gfx::text::print(x, y, config::kColorGold, "^: camara libre");
 
     // Lista de bots: estado, vida, objetivo y distancia.
     y = 24;
@@ -547,6 +618,7 @@ void App::overlayDebug(const FrameInfo& frame) const {
         y += 10;
     }
     if (m_match.botCount() > maxRows) gfx::text::print(bx, y, kLightGrey, "... (%d mas)", m_match.botCount() - maxRows);
+    ui::printHints(8, kFreeCameraHintY, config::kColorGold, kFreeCameraHint, 1);
 }
 
 // --- Pagina de controles (lobby -> CONTROLES, y SELECT en la partida) -----------------------
@@ -561,81 +633,66 @@ void App::renderControlsPage(const FrameInfo& frame) const {
     gfx::fillRect(312, 36, 162, 208, rgba(0, 0, 0, 150));
     gfx::fillRect(0, 250, gfx::kScreenWidth, 22, kNavy);
 
-    for (const ButtonBox& b : kButtonBoxes) {
-        gfx::fillRect(b.x, b.y, b.w, b.h, (buttons & b.mask) ? kButtonOn : kButtonOff);
+    forEachControlRow([&](const ControlRow& row, int y) {
+        if (row.title) return;
+        ui::drawHintIcons(m_atlas, kControlsX, y, row.left, row.leftCount);
+        ui::drawHintIcons(m_atlas, kControlsColumn, y, row.right, row.rightCount);
+    });
+
+    // Mando: cada boton con su icono, apagado si no se pulsa.
+    if (m_atlas.ready()) {
+        for (const PadButton& b : kPadButtons) {
+            const assets::ui::Rect& r = ui::buttonRect(b.button);
+            const bool on = (buttons & b.mask) != 0;
+            if (on) gfx::fillRect(b.cx - r.w * 0.5f - 2, b.cy - r.h * 0.5f - 2, r.w + 4, r.h + 4, kButtonOn);
+            m_atlas.draw(r, b.cx - r.w * 0.5f, b.cy - r.h * 0.5f, 1.0f, on ? kWhite : rgba(255, 255, 255, 120));
+        }
     }
 
-    // Stick analogico: caja, cruz central y punto con la posicion normalizada.
+    // Stick analogico: icono, cruz central y punto con la posicion normalizada.
     const float half = kStickBoxSize / 2.0f;
     const float cx = kStickBoxX + half;
     const float cy = kStickBoxY + half;
     gfx::fillRect(kStickBoxX, kStickBoxY, kStickBoxSize, kStickBoxSize, kButtonOff);
+    if (m_atlas.ready()) {
+        const assets::ui::Rect& stick = atlas::kBtnStick;
+        m_atlas.draw(stick, cx - stick.w * 1.5f, cy - stick.h * 1.5f, 3.0f, rgba(255, 255, 255, 150));
+    }
     gfx::fillRect(kStickBoxX, cy, kStickBoxSize, 1, kButtonOff);
     gfx::fillRect(cx, kStickBoxY, 1, kStickBoxSize, kButtonOff);
     const float dotX = cx + frame.input.analogX() * (half - 3.0f);
     const float dotY = cy + frame.input.analogY() * (half - 3.0f);
     gfx::fillRect(dotX - 3.0f, dotY - 3.0f, 6, 6, kButtonOn);
+
+    const ui::Hint* footer = m_screen == Screen::Game ? kHudPageHint : kBackHint;
+    ui::drawHintIcons(m_atlas, 8, 257, footer, 1);
 }
 
 void App::overlayControlsPage(const FrameInfo& frame) const {
     const input::Input& in = frame.input;
     gfx::text::print(400, 12, kLightGrey, "%5.1f FPS", frame.timer.fps());
 
-    int y = 42;
-    const int x = 14;
-    const int col = x + 8 * 19;
-    gfx::text::print(x, y, config::kColorGold, "COMBATE");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Stick moverse");
-    gfx::text::print(col, y, kWhite, "X saltar");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "R disparar / usar");
-    gfx::text::print(col, y, kWhite, "[] recargar");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "L apuntar / fijar");
-    gfx::text::print(col, y, kWhite, "^ pico");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Cruceta < > objeto");
-    gfx::text::print(col, y, kWhite, "(L + stick: mira)");
-    y += kLineHeight + 3;
-    gfx::text::print(x, y, config::kColorGold, "CONSTRUCCION (O)");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "R colocar pared");
-    gfx::text::print(col, y, kWhite, "[] quitar pared");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Cruceta < > pieza");
-    gfx::text::print(col, y, kWhite, "O combate");
-    y += kLineHeight + 3;
-    gfx::text::print(x, y, config::kColorGold, "PARTIDA");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "START pausa");
-    gfx::text::print(col, y, kWhite, "SELECT HUD");
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "L+R+START 1 s: salir del juego");
-    y += kLineHeight + 3;
+    int y = forEachControlRow([&](const ControlRow& row, int rowY) {
+        if (row.title) {
+            gfx::text::print(kControlsX, rowY, config::kColorGold, "%s", row.title);
+            return;
+        }
+        ui::printHints(kControlsX, rowY, kWhite, row.left, row.leftCount);
+        ui::printHints(kControlsColumn, rowY, kWhite, row.right, row.rightCount);
+    });
 
     char held[40];
     heldButtonsString(in.rawButtons(), held, 26);
-    gfx::text::print(x, y, config::kColorGold, "PRUEBA DEL MANDO");
+    gfx::text::print(kControlsX, y, config::kColorGold, "PRUEBA DEL MANDO");
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Pulsado: %s", held);
+    gfx::text::print(kControlsX, y, kWhite, "Pulsado: %s", held);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Ultimo : %s  total %u", m_lastButton, static_cast<unsigned>(m_pressCount));
-    y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Stick %+.2f, %+.2f  CPU %d/%d MHz", in.analogX(), in.analogY(), m_cpuMhz,
+    gfx::text::print(kControlsX, y, kWhite, "Stick %+.2f, %+.2f  CPU %d/%d MHz", in.analogX(), in.analogY(), m_cpuMhz,
                      m_busMhz);
-
-    gfx::text::print(339, 45, kWhite, "L");
-    gfx::text::print(441, 45, kWhite, "R");
-    gfx::text::print(366, 120, kLightGrey, "SEL");
-    gfx::text::print(396, 120, kLightGrey, "STA");
     gfx::text::print(357, 192, kLightGrey, "ANALOGICO");
 
-    if (m_screen == Screen::Game) {
-        gfx::text::print(8, 257, kWhite, "SELECT: siguiente pagina del HUD");
-    } else {
-        gfx::text::print(8, 257, kWhite, "O: volver al lobby");
-    }
+    const ui::Hint* footer = m_screen == Screen::Game ? kHudPageHint : kBackHint;
+    ui::printHints(8, 257, kWhite, footer, 1);
 }
 
 }  // namespace app

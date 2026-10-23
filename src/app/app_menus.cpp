@@ -22,14 +22,21 @@ constexpr int kMinBots = 5;
 
 const char* const kLoginSteps[] = {"Conectando...", "Comprobando la version...", "Cargando el perfil..."};
 
-const char* const kTips[] = {
-    "Pulsa O para construir: una pared te cubre al instante.",
-    "Manten L para fijar al enemigo mas cercano.",
-    "La zona se cierra hacia el deposito: no te quedes fuera.",
-    "[] recarga la SCAR: 30 balas por cargador.",
-    "Las paredes paran las balas, pero se pueden romper.",
+// Consejos de la pantalla de carga: con el boton dibujado cuando hablan de uno.
+struct Tip {
+    bool hasButton;
+    ui::Hint hint;
+};
+const Tip kTips[] = {
+    {true, {ui::Button::Circle, "construir: una pared te cubre al instante."}},
+    {true, {ui::Button::L, "mantenido: fija al enemigo mas cercano."}},
+    {false, {ui::Button::Cross, "La zona se cierra hacia el deposito: no te quedes fuera."}},
+    {true, {ui::Button::Square, "recarga la SCAR: 30 balas por cargador."}},
+    {false, {ui::Button::Cross, "Las paredes paran las balas, pero se pueden romper."}},
+    {true, {ui::Button::Triangle, "saca el pico: los arboles dan madera."}},
 };
 constexpr int kTipCount = sizeof(kTips) / sizeof(kTips[0]);
+constexpr int kTipX = 100, kTipY = 238;
 
 // Botones del lobby (columna derecha, como el boton JUGAR de Fortnite).
 constexpr float kLobbyColumnX = 312.0f;
@@ -39,6 +46,17 @@ struct LobbyButton {
 };
 constexpr LobbyButton kLobbyButtons[] = {{70.0f, 42.0f}, {146.0f, 28.0f}, {180.0f, 28.0f}};
 constexpr float kBotsSelectorY = 116.0f;
+
+// Ayudas de controles (iconos de Recursos/Texturas PSP).
+const ui::Hint kLobbyHints[] = {{ui::Button::Dpad, "elegir"}, {ui::Button::Cross, "aceptar"}, {ui::Button::Stick, "girar"}};
+const ui::Hint kExitHints[] = {{ui::Button::Cross, "salir"}, {ui::Button::Circle, "cancelar"}};
+const ui::Hint kPauseHints[] = {{ui::Button::Start, ""}, {ui::Button::Circle, "continuar"}};
+const ui::Hint kResultsHints[] = {{ui::Button::Cross, "lobby"}, {ui::Button::Square, "otra partida"},
+                                  {ui::Button::Circle, "seguir mirando"}};
+constexpr int kLobbyHintCount = 3, kExitHintCount = 2, kPauseHintCount = 2;
+constexpr int kHintsY = 258;
+
+int centeredHintsX(const ui::Hint* hints, int count) { return (gfx::kScreenWidth - ui::hintsWidth(hints, count)) / 2; }
 
 // Opciones de la pausa.
 constexpr const char* kPauseItems[] = {"CONTINUAR", "VOLVER AL LOBBY"};
@@ -73,38 +91,44 @@ void App::updateLogin(const input::Input& in, float dt) {
     }
 }
 
+// Pantalla de inicio: la imagen de Recursos/loginscreen.png, "Pulsa (X) para iniciar" bajo
+// el logotipo y, al pulsar, una barra de carga (la conexion es simulada).
+constexpr int kLoginCenterX = 158;  // centro del logotipo en la imagen
+constexpr int kLoginTextY = 236;
+constexpr const char* kLoginPrompt = "Pulsa ";
+const ui::Hint kLoginHint[] = {{ui::Button::Cross, "para iniciar"}};
+
+int loginPromptX() {
+    return kLoginCenterX - (gfx::text::width(kLoginPrompt) + ui::hintsWidth(kLoginHint, 1)) / 2;
+}
+
 void App::renderLogin() const {
     if (m_login.pixels) gfx::drawTexture(m_login, 0.0f, 0.0f);
-    // Panel de acceso bajo el logotipo (Referencias: pantalla de inicio de Fortnite).
-    gfx::fillRect(24, 150, 268, 118, rgba(8, 18, 48, 215));
-    gfx::fillRect(24, 150, 268, 2, rgba(90, 160, 255));
-    gfx::fillRect(36, 170, 244, 18, rgba(236, 240, 248));
-    gfx::fillRect(36, 194, 244, 18, rgba(236, 240, 248));
+    gfx::fillRect(0, 224, gfx::kScreenWidth, 36, rgba(8, 18, 48, 170));
     if (m_loginStage == 0) {
-        drawButton(36, 220, 244, 32, kYellow, true, m_blinkTime);
-        if (m_atlas.ready()) m_atlas.drawCentered(atlas::kIniciarSesion, 158, 223);
+        // Parpadea suavemente, como el "pulsa para empezar" de las consolas.
+        if (fmodf(m_blinkTime, 1.2f) < 0.85f) {
+            ui::drawHintIcons(m_atlas, loginPromptX() + gfx::text::width(kLoginPrompt), kLoginTextY, kLoginHint, 1);
+        }
     } else {
-        drawButton(36, 220, 244, 32, kYellowDark, false, m_blinkTime);
-        // Barra de progreso que se llena durante la "conexion".
         const float t = m_loginTimer / kConnectSeconds;
-        gfx::fillRect(44, 244, 228, 4, rgba(0, 0, 0, 120));
-        gfx::fillRect(44, 244, 228 * (t < 1.0f ? t : 1.0f), 4, kWhite);
+        gfx::fillRect(40, 250, 236, 5, rgba(0, 0, 0, 140));
+        gfx::fillRect(40, 250, 236 * (t < 1.0f ? t : 1.0f), 5, kYellow);
     }
 }
 
 void App::overlayLogin() const {
     gfx::text::printShadow(6, 4, kLightGrey, "v%s", config::kVersion);
-    gfx::text::printShadow(36, 157, kWhite, "Inicia sesion con tu cuenta");
-    gfx::text::print(42, 175, kDimGrey, "Usuario:");
-    gfx::text::print(42 + 8 * 12, 175, kNavy, "%s", kPlayerName);
-    gfx::text::print(42, 199, kDimGrey, "Contrasena:");
-    gfx::text::print(42 + 8 * 12, 199, kNavy, "********");
     if (m_loginStage == 0) {
-        gfx::text::printShadow(36, 257, kLightGrey, "X: iniciar sesion");
+        if (fmodf(m_blinkTime, 1.2f) < 0.85f) {
+            const int x = loginPromptX();
+            gfx::text::printShadow(x, kLoginTextY, kWhite, "%s", kLoginPrompt);
+            ui::printHints(x + gfx::text::width(kLoginPrompt), kLoginTextY, kWhite, kLoginHint, 1);
+        }
     } else {
         int step = static_cast<int>(m_loginTimer / (kConnectSeconds / 3.0f));
         if (step > 2) step = 2;
-        gfx::text::print(48, 228, kWhite, "%s", kLoginSteps[step]);
+        printCenteredAt(kLoginCenterX, 234, kWhite, kLoginSteps[step]);
     }
 }
 
@@ -194,11 +218,13 @@ void App::renderLobby() {
         m_atlas.drawCentered(atlas::kSalir, cx, kLobbyButtons[2].y + 3);
     }
     gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
+    ui::drawHintIcons(m_atlas, 8, kHintsY, kLobbyHints, kLobbyHintCount);
 
     if (m_confirmExit) {
         gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 140));
         gfx::fillRect(120, 100, 240, 72, kNavy);
         ui::frame(120, 100, 240, 72, 2, rgba(90, 160, 255));
+        ui::drawHintIcons(m_atlas, centeredHintsX(kExitHints, kExitHintCount), 140, kExitHints, kExitHintCount);
     }
 }
 
@@ -216,12 +242,12 @@ void App::overlayLobby() const {
     if (m_botCount > game::kDefaultBots) printCenteredAt(cx, 216, kLightGrey, "(mas de 10: mide FPS)");
     if (!m_worldReady) printCenteredAt(cx, 232, kErrorRed, "ERROR: sin escenario");
 
-    gfx::text::print(8, 258, kLightGrey, "Cruceta: elegir  X: aceptar  Stick: girar");
+    ui::printHints(8, kHintsY, kLightGrey, kLobbyHints, kLobbyHintCount);
     gfx::text::print(400, 258, kDimGrey, "v%s", config::kVersion);
 
     if (m_confirmExit) {
         printCentered(114, kWhite, "Salir de FortnitePSP?");
-        printCentered(136, config::kColorGold, "X: salir      O: cancelar");
+        ui::printHints(centeredHintsX(kExitHints, kExitHintCount), 140, config::kColorGold, kExitHints, kExitHintCount);
     }
 }
 
@@ -271,6 +297,7 @@ void App::renderLoading() const {
     if (m_loadscreen.pixels) gfx::drawTexture(m_loadscreen, 0.0f, 0.0f);
     gfx::fillRect(0, 232, gfx::kScreenWidth, 40, rgba(8, 14, 36, 220));
     if (m_atlas.ready()) m_atlas.draw(atlas::kCargando, 12, 244, 0.85f);
+    if (kTips[m_tip].hasButton) ui::drawHintIcons(m_atlas, kTipX, kTipY, &kTips[m_tip].hint, 1);
     float t = m_loadingTimer / kLoadingSeconds;
     if (t > 1.0f) t = 1.0f;
     if (!m_loadingStarted && t > 0.4f) t = 0.4f;
@@ -279,7 +306,9 @@ void App::renderLoading() const {
 }
 
 void App::overlayLoading() const {
-    gfx::text::printShadow(100, 238, kLightGrey, "%s", kTips[m_tip]);
+    const Tip& tip = kTips[m_tip];
+    if (tip.hasButton) ui::printHints(kTipX, kTipY, kLightGrey, &tip.hint, 1);
+    else gfx::text::printShadow(kTipX, kTipY, kLightGrey, "%s", tip.hint.text);
     gfx::text::printShadow(100, 262, kDimGrey, "Polvorin Polvoriento - %d bots", m_botCount);
 }
 
@@ -309,6 +338,7 @@ void App::renderPause() const {
         const bool selected = m_pauseItem == i;
         drawButton(156, 110 + i * 34, 168, 24, selected ? kYellow : rgba(20, 44, 100), selected, m_blinkTime);
     }
+    ui::drawHintIcons(m_atlas, centeredHintsX(kPauseHints, kPauseHintCount), 176, kPauseHints, kPauseHintCount);
 }
 
 void App::overlayPause() const {
@@ -316,7 +346,7 @@ void App::overlayPause() const {
     for (int i = 0; i < 2; ++i) {
         printCentered(118 + i * 34, m_pauseItem == i ? kNavy : kWhite, kPauseItems[i]);
     }
-    printCentered(178, kLightGrey, "START / O: continuar");
+    ui::printHints(centeredHintsX(kPauseHints, kPauseHintCount), 176, kLightGrey, kPauseHints, kPauseHintCount);
 }
 
 // --- Resultados -------------------------------------------------------------------------
@@ -360,6 +390,11 @@ void App::updateResults(const input::Input& in, float dt) {
     }
 }
 
+int App::resultsHintCount() const {
+    // "Seguir mirando" solo en la derrota mientras la partida sigue.
+    return m_results == Results::Defeat && m_match.phase() != game::MatchPhase::Finished ? 3 : 2;
+}
+
 void App::renderResults() const {
     const bool victory = m_results == Results::Victory;
     gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 90));
@@ -384,6 +419,10 @@ void App::renderResults() const {
 
     // Opciones.
     gfx::fillRect(0, 222, gfx::kScreenWidth, 30, rgba(0, 0, 0, 150));
+    if (m_resultsTime >= kResultsInputDelay) {
+        const int n = resultsHintCount();
+        ui::drawHintIcons(m_atlas, centeredHintsX(kResultsHints, n), 233, kResultsHints, n);
+    }
 }
 
 void App::overlayResults() const {
@@ -419,11 +458,8 @@ void App::overlayResults() const {
     }
 
     if (m_resultsTime < kResultsInputDelay) return;
-    if (!victory && phase != game::MatchPhase::Finished) {
-        printCentered(227, kWhite, "X: lobby   []: otra partida   O: seguir mirando");
-    } else {
-        printCentered(227, kWhite, "X: volver al lobby     []: otra partida");
-    }
+    const int n = resultsHintCount();
+    ui::printHints(centeredHintsX(kResultsHints, n), 233, kWhite, kResultsHints, n);
 }
 
 }  // namespace app

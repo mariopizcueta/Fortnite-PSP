@@ -886,10 +886,14 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     check(m.useProgress() < 0.0f && m.lastUseError() == game::UseError::FullHealth,
           "con 95 de vida no se usan vendas (curan hasta 75): aviso 'Vida al maximo'");
     m.applyDamage(0, 45.0f, 1);  // 50 de vida
+    cursor = m.eventCount();
     runSteps(m, 60, game::PlayerAim{}, use);
     runSteps(m, 1, game::PlayerAim{}, next);  // cambiar de ranura a mitad: se cancela
     runSteps(m, 200);
     check(m.body(0).state().health == 50.0f && inv.slot(1).count == 5, "cambiar de ranura cancela la venda sin gastarla");
+    check(countEvents(m, cursor, game::GameEventType::UseStarted) == 1 &&
+              countEvents(m, cursor, game::GameEventType::UseCanceled) == 1,
+          "empezar y cancelar el uso emiten sucesos (el sonido de beber empieza y se corta)");
     runSteps(m, 1, game::PlayerAim{}, prev);
     runSteps(m, static_cast<int>(3.5f * 60.0f) + 2, game::PlayerAim{}, use);
     printf("  vendas desde 50: vida %.0f, quedan %d\n", static_cast<double>(m.body(0).state().health), inv.slot(1).count);

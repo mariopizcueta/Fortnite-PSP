@@ -20,6 +20,7 @@ using math3d::Vec3;
 constexpr float kLockAngleDegrees = 35.0f;  // L: objetivo dentro de este cono
 constexpr float kLockDistance = 45.0f;
 constexpr float kSoundRange = 60.0f;
+constexpr float kFootstepRange = 14.0f;        // m: pasos de los bots que se oyen
 constexpr float kCharacterLodDistance = 10.0f;  // m: bots mas lejos con el modelo simple        // m: mas lejos no se oyen disparos de bots
 
 // Aparicion del jugador: al sur del muro, mirando al deposito.
@@ -161,6 +162,8 @@ void App::startMatch() {
     m_timestep.reset();
     m_playerAnim = game::CharacterAnim{};
     for (game::CharacterAnim& a : m_botAnims) a = game::CharacterAnim{};
+    m_playerSteps = 0;
+    for (u32& s : m_botSteps) s = 0;
     m_followCamera.reset(m_match.body(0).state().position, kPlayerSpawnYaw);
     m_freeCameraActive = false;
     m_lockTarget = -1;
@@ -358,6 +361,7 @@ void App::updateGame(const input::Input& in, float dt) {
         const game::Bot& b = m_match.bot(i);
         m_botAnims[i].update(renderState(i + 1), b.aiming, b.state != game::BotState::Eliminated, dt);
     }
+    playFootsteps();
 
     // 5) Camaras y construccion.
     updateGameCameras(in, dt, control, aimHeld);
@@ -436,6 +440,23 @@ void App::playSpatial(audio::Sfx sfx, const Vec3& position, float maxVolume) con
     playSfx(sfx, volume, pan);
 }
 
+void App::playFootsteps() {
+    // Una pisada = un paso de Sonidos Limpios/Fortnite Running Sound Effect. Los del
+    // jugador, siempre; los de los bots, solo cerca (avisan de que alguien se acerca).
+    if (m_playerAnim.footsteps != m_playerSteps) {
+        m_playerSteps = m_playerAnim.footsteps;
+        playSfx(audio::Sfx::Footstep, 0.45f);
+    }
+    for (int i = 0; i < m_match.botCount(); ++i) {
+        if (m_botAnims[i].footsteps == m_botSteps[i]) continue;
+        m_botSteps[i] = m_botAnims[i].footsteps;
+        const Vec3 p = renderState(i + 1).position;
+        if (math3d::length(p - renderState(0).position) < kFootstepRange) {
+            playSpatial(audio::Sfx::Footstep, p, 0.35f);
+        }
+    }
+}
+
 void App::processEvents() {
     const u32 count = m_match.eventCount();
     // Si se acumularon mas de los que caben (frame muy largo), se pierden los mas viejos.
@@ -466,7 +487,10 @@ void App::processEvents() {
                 m_playerAnim.onHit();
                 break;
             case game::GameEventType::Eliminated:
-                if (e.entity == 0) m_playerKiller = e.other;
+                if (e.entity == 0) {
+                    m_playerKiller = e.other;
+                    playSfx(audio::Sfx::PlayerDeath, 1.0f);
+                }
                 if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
                 break;
             case game::GameEventType::WallBuilt:
@@ -491,8 +515,23 @@ void App::processEvents() {
                 m_harvestAge = 0.0f;
                 break;
             case game::GameEventType::ItemUsed:
-                playSfx(audio::Sfx::Heal, 0.9f);
+                // Las pociones de escudo ya suenan mientras se beben (Sonidos Limpios).
+                if (e.other == static_cast<int>(game::ItemType::Bandage) ||
+                    e.other == static_cast<int>(game::ItemType::Medkit)) {
+                    playSfx(audio::Sfx::Heal, 0.9f);
+                }
                 break;
+            case game::GameEventType::UseStarted:
+            case game::GameEventType::UseCanceled: {
+                const audio::Sfx drink = e.other == static_cast<int>(game::ItemType::SmallShield) ? audio::Sfx::DrinkSmallShield
+                                         : e.other == static_cast<int>(game::ItemType::ShieldPotion)
+                                             ? audio::Sfx::DrinkShieldPotion
+                                             : audio::Sfx::Count;
+                if (drink == audio::Sfx::Count || !m_audioReady) break;
+                if (e.type == game::GameEventType::UseStarted) playSfx(drink, 0.9f);
+                else audio::mixer().stop(drink);
+                break;
+            }
         }
     }
 }
@@ -630,9 +669,7 @@ void App::renderGame(const FrameInfo& frame) {
             if (m_results == Results::None) renderGameHud();
             break;
         case Hud::Debug:
-            gfx::fillRect(0, 0, gfx::kScreenWidth, 16, kBar);
-            gfx::fillRect(4, 20, 232, 248, kPanel);
-            gfx::fillRect(240, 20, 236, 248, kPanel);
+            renderDebugPage();
             break;
         case Hud::Controls:
             renderControlsPage(frame);

@@ -63,6 +63,8 @@ enum class GameEventType : u8 {
     PickaxeSwing,  // entity = 0, other = 1 si ha golpeado algo
     Harvest,       // entity = 0, other = world::Resource, amount = material conseguido
     ItemUsed,      // entity = 0, other = ItemType (consumible terminado)
+    UseStarted,    // entity = 0, other = ItemType (empieza a usarse un consumible)
+    UseCanceled,   // entity = 0, other = ItemType (se interrumpe sin gastarlo)
 };
 
 struct GameEvent {

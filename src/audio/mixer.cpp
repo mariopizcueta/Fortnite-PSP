@@ -23,16 +23,31 @@ void Mixer::setMasterVolume(float volume) { m_masterVolume = clampInt(static_cas
 
 void Mixer::play(Sfx id, float volume, float pan) {
     if (volume <= 0.003f) return;
+    Command c;
+    c.op = 0;
+    c.sfx = static_cast<u8>(id);
+    c.volume = static_cast<u8>(clampInt(static_cast<int>(volume * 255.0f), 0, 255));
+    c.pan = static_cast<s8>(clampInt(static_cast<int>(pan * 127.0f), -127, 127));
+    push(c);
+}
+
+void Mixer::stop(Sfx id) {
+    Command c;
+    c.op = 1;
+    c.sfx = static_cast<u8>(id);
+    c.volume = 0;
+    c.pan = 0;
+    push(c);
+}
+
+void Mixer::push(const Command& command) {
     const int head = m_head;
     const int next = (head + 1) % kQueue;
     if (next == m_tail) {  // cola llena: se descarta (mejor que bloquear el juego)
         ++m_dropped;
         return;
     }
-    Command& c = m_queue[head];
-    c.sfx = static_cast<u8>(id);
-    c.volume = static_cast<u8>(clampInt(static_cast<int>(volume * 255.0f), 0, 255));
-    c.pan = static_cast<s8>(clampInt(static_cast<int>(pan * 127.0f), -127, 127));
+    m_queue[head] = command;
     compilerBarrier();
     m_head = next;
 }
@@ -40,6 +55,12 @@ void Mixer::play(Sfx id, float volume, float pan) {
 void Mixer::startVoice(const Command& c) {
     const SoundClip& clip = m_clips[c.sfx];
     if (!clip.samples || clip.count <= 0) return;
+    if (c.op == 1) {
+        for (Voice& v : m_voices) {
+            if (v.samples == clip.samples) v.samples = nullptr;
+        }
+        return;
+    }
     // Voz libre o, si no hay, la mas antigua.
     Voice* target = &m_voices[0];
     for (Voice& v : m_voices) {

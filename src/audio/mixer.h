@@ -15,7 +15,8 @@ namespace audio {
 
 enum class Sfx : u8 {
     Shot, HitMarker, Hurt, Elimination, WallBuild, WallBreak, Reload,
-    MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal, Count
+    MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal,
+    PlayerDeath, DrinkSmallShield, DrinkShieldPotion, Footstep, Count
 };
 
 class Mixer {
@@ -29,6 +30,8 @@ public:
     // --- Hilo del juego -------------------------------------------------------------
     // volume 0..1, pan -1 (izquierda) .. +1 (derecha).
     void play(Sfx id, float volume = 1.0f, float pan = 0.0f);
+    // Corta todas las voces que esten sonando ese efecto (p. ej. beber al cancelar).
+    void stop(Sfx id);
     void playMusic(bool playing) { m_musicPlaying = playing ? 1 : 0; }
     void setMusicVolume(float volume);
     void setMasterVolume(float volume);
@@ -43,6 +46,7 @@ public:
 
 private:
     struct Command {
+        u8 op;      // 0 = reproducir, 1 = parar
         u8 sfx;
         u8 volume;  // 0..255
         s8 pan;     // -127..127
@@ -57,6 +61,7 @@ private:
     };
 
     void startVoice(const Command& c);
+    void push(const Command& c);
 
     SoundClip m_clips[static_cast<int>(Sfx::Count)];
     ImaStream* m_music = nullptr;

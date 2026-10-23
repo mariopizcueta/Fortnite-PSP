@@ -38,6 +38,10 @@ bool init() {
     load(Sfx::Defeat, assets::sfxDerrota());
     load(Sfx::Pickaxe, assets::sfxPico());
     load(Sfx::Heal, assets::sfxCuracion());
+    load(Sfx::PlayerDeath, assets::sfxMuerteJugador());
+    load(Sfx::DrinkSmallShield, assets::sfxMiniescudo());
+    load(Sfx::DrinkShieldPotion, assets::sfxPocionEscudo());
+    load(Sfx::Footstep, assets::sfxPaso());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

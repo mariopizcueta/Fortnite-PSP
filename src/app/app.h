@@ -63,6 +63,7 @@ public:
     int testLockTarget() const { return m_lockTarget; }
     bool testFreeCamera() const { return m_freeCameraActive; }
     int testBuildPiece() const { return m_buildPiece; }
+    u32 testFootsteps() const { return m_playerSteps; }
 #endif
 
 private:
@@ -84,6 +85,7 @@ private:
     void updateGame(const input::Input& in, float dt);
     void updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld);
     void processEvents();
+    void playFootsteps();
     void playSfx(audio::Sfx sfx, float volume = 1.0f, float pan = 0.0f) const;
     // Efecto con volumen por distancia (hasta 60 m) y panoramica respecto a la camara.
     void playSpatial(audio::Sfx sfx, const math3d::Vec3& position, float maxVolume) const;
@@ -117,10 +119,13 @@ private:
     void renderPause() const;
     void overlayPause() const;
     void renderResults() const;
+    int resultsHintCount() const;
     void overlayResults() const;
 
     // --- app_hud.cpp ------------------------------------------------------------------
     void renderGameHud() const;
+    const ui::Hint* buildHints(int* count) const;
+    void renderDebugPage() const;
     void renderCrosshair() const;
     void renderMinimap() const;
     void renderVitals() const;
@@ -158,6 +163,8 @@ private:
     bool m_modelsReady = false;
     game::CharacterAnim m_playerAnim;
     game::CharacterAnim m_botAnims[game::kMaxBots];
+    u32 m_playerSteps = 0;  // pisadas ya sonadas (CharacterAnim::footsteps)
+    u32 m_botSteps[game::kMaxBots] = {};
     int m_lockTarget = -1;
     int m_matchesPlayed = 0;
     u32 m_eventCursor = 0;   // sucesos de la partida ya procesados (sonido, animaciones)

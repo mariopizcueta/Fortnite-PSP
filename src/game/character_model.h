@@ -58,6 +58,7 @@ struct CharacterAnim {
     float flinch = 0.0f;       // 1 al recibir un impacto, decae
     float deathSeconds = 0.0f; // tiempo desde la eliminacion (0 = vivo)
     float swing = 0.0f;        // 1 al golpear con el pico, decae
+    u32 footsteps = 0;         // pisadas dadas (sube cada vez que un pie apoya: sonido de pasos)
 
     void update(const CharacterState& state, bool aiming, bool alive, float dt);
     void onShot() { recoil = 1.0f; }

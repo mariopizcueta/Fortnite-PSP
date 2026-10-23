@@ -396,10 +396,15 @@ bool Match::startUse() {
     m_useSlot = slot;
     m_useTimer = 0.0f;
     m_useDuration = def.useSeconds > 0.05f ? def.useSeconds : 0.05f;
+    pushEvent(GameEventType::UseStarted, 0, static_cast<int>(m_inventory.slot(slot).type), chestOf(0));
     return true;
 }
 
-void Match::cancelUse() { m_useSlot = -1; }
+void Match::cancelUse() {
+    if (m_useSlot < 0) return;
+    pushEvent(GameEventType::UseCanceled, 0, static_cast<int>(m_inventory.slot(m_useSlot).type), chestOf(0));
+    m_useSlot = -1;
+}
 
 const Weapon& Match::playerWeapon() const {
     static const Weapon kNoWeapon;
