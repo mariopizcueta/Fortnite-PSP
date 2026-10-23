@@ -15,6 +15,7 @@
 //
 // Uso: sh tools/app_sim/build_and_run.sh   (o: make app-sim). Sale con 1 si algo falla.
 #include <malloc.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,7 +28,9 @@
 #include <pspthreadman.h>
 
 #include "app/app.h"
+#include "assets/embedded_assets.h"
 #include "audio/audio_system.h"
+#include "audio/sound_data.h"
 #include "core/config.h"
 #include "gfx/debug_text.h"
 #include "gfx/graphics.h"
@@ -228,6 +231,105 @@ void killAllBots(Sim& sim) {
     }
 }
 
+// --- 0) Audio: formatos, decodificador IMA y mezclador -------------------------------------
+
+std::vector<unsigned char> readFile(const char* path) {
+    std::vector<unsigned char> data;
+    FILE* f = fopen(path, "rb");
+    if (!f) return data;
+    fseek(f, 0, SEEK_END);
+    data.resize(static_cast<size_t>(ftell(f)));
+    fseek(f, 0, SEEK_SET);
+    if (fread(data.data(), 1, data.size(), f) != data.size()) data.clear();
+    fclose(f);
+    return data;
+}
+
+void testAudio(const char* outDir) {
+    printf("\n0) Audio\n");
+    const assets::Blob clips[] = {assets::sfxDisparo(), assets::sfxImpacto(), assets::sfxHerido(),
+                                  assets::sfxEliminacion(), assets::sfxPared(), assets::sfxParedRota(),
+                                  assets::sfxRecarga(), assets::sfxMenuMover(), assets::sfxMenuAceptar(),
+                                  assets::sfxVictoria(), assets::sfxDerrota()};
+    bool clipsOk = true;
+    int clipBytes = 0;
+    for (const assets::Blob& b : clips) {
+        audio::SoundClip clip;
+        clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
+        clipBytes += static_cast<int>(b.size);
+    }
+    printf("  11 efectos, %d KB en total\n", clipBytes / 1024);
+    check(clipsOk, "los 11 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+
+    // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
+    static audio::ImaStream music;
+    const assets::Blob blob = assets::musicMenu();
+    check(music.open(blob.data, blob.size) && music.rate() == 22050, "la musica IMA ADPCM se abre (22050 Hz)");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/music_ref.wav", outDir);
+    const std::vector<unsigned char> refFile = readFile(path);
+    audio::SoundClip ref;
+    if (!refFile.empty() && audio::parseWav(refFile.data(), refFile.size(), &ref)) {
+        // Chasquido = salto brusco del error entre dos muestras seguidas. En los cambios de
+        // bloque el decodificador se reinicia: ahi el salto no debe ser mayor que en el resto.
+        double signal = 0.0, noise = 0.0;
+        int jumpAtBoundary = 0, jumpElsewhere = 0, boundaryError = 0;
+        int previousError = 0;
+        for (int i = 0; i < ref.count && i < music.totalSamples(); ++i) {
+            const int e = music.next() - ref.samples[i];
+            signal += static_cast<double>(ref.samples[i]) * ref.samples[i];
+            noise += static_cast<double>(e) * e;
+            const int jump = abs(e - previousError);
+            const bool boundary = i % 2041 == 0;
+            if (boundary && abs(e) > boundaryError) boundaryError = abs(e);
+            int& worst = boundary ? jumpAtBoundary : jumpElsewhere;
+            if (i > 0 && jump > worst) worst = jump;
+            previousError = e;
+        }
+        const double snr = 10.0 * log10(signal / (noise > 0.0 ? noise : 1.0));
+        printf("  musica: %d muestras (%.1f s), referencia %d; SNR %.1f dB; salto maximo del error: %d en "
+               "cambios de bloque, %d en el resto\n",
+               music.totalSamples(), music.totalSamples() / 22050.0, ref.count, snr, jumpAtBoundary, jumpElsewhere);
+        check(music.totalSamples() == ref.count, "la musica decodificada dura lo mismo que la original");
+        check(snr > 25.0, "el audio decodificado se parece al original (SNR > 25 dB)");
+        check(boundaryError == 0 && jumpAtBoundary <= jumpElsewhere,
+              "cada bloque empieza en la muestra exacta y sin chasquidos al cambiar de bloque");
+    } else {
+        printf("  (sin %s: no se compara con la original)\n", path);
+    }
+    music.rewind();
+    const s16 first = music.next();
+    music.rewind();
+    for (int i = 0; i < music.totalSamples(); ++i) music.next();
+    check(music.next() == first, "al acabar, la musica vuelve a empezar (bucle)");
+
+    // Mezclador: panorama, limite de voces y cola llena.
+    static s16 tone[2000];
+    for (int i = 0; i < 2000; ++i) tone[i] = static_cast<s16>(i % 40 < 20 ? 8000 : -8000);
+    audio::Mixer mixer;
+    audio::SoundClip clip;
+    clip.samples = tone;
+    clip.count = 2000;
+    clip.rate = 22050;
+    mixer.setClip(audio::Sfx::Shot, clip);
+    s16 out[1024 * 2];
+    mixer.play(audio::Sfx::Shot, 1.0f, -1.0f);
+    mixer.mix(out, 1024);
+    int left = 0, right = 0;
+    for (int i = 0; i < 1024; ++i) {
+        left = abs(out[i * 2]) > left ? abs(out[i * 2]) : left;
+        right = abs(out[i * 2 + 1]) > right ? abs(out[i * 2 + 1]) : right;
+    }
+    check(left > 4000 && right == 0, "panorama a la izquierda: solo suena el canal izquierdo");
+    for (int i = 0; i < 12; ++i) mixer.play(audio::Sfx::Shot);
+    mixer.mix(out, 64);
+    check(mixer.activeVoices() == audio::Mixer::kVoices, "con 12 sonidos a la vez suenan 8 (se reutiliza la voz mas antigua)");
+    for (int i = 0; i < 4 * 2000 / 1024 + 2; ++i) mixer.mix(out, 1024);
+    check(mixer.activeVoices() == 0, "las voces se liberan al terminar el sonido");
+    for (int i = 0; i < 70; ++i) mixer.play(audio::Sfx::Shot);
+    check(mixer.droppedCommands() == 70 - 63, "con la cola llena se descartan ordenes en vez de bloquear");
+}
+
 void loadFont(const char* path) {
     static unsigned char font[2048];
     FILE* f = fopen(path, "rb");
@@ -248,6 +350,8 @@ int main(int argc, char** argv) {
     loadFont(path);
     snprintf(path, sizeof(path), "%s/fortnitepsp_log.txt", outDir);
     g_logFile = fopen(path, "w");
+
+    testAudio(outDir);
 
     Sim sim(outDir);
     const unsigned heapBefore = heapBytes();

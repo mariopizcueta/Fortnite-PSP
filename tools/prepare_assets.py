@@ -137,7 +137,8 @@ def ui_atlas():
         "IconEscudo": Image.open(RES / "HUD" / "icono_escudo.png").convert("RGBA"),
         "IconVida": Image.open(RES / "HUD" / "icono_vida.png").convert("RGBA"),
     }
-    # Empaquetado por estantes en un atlas de 512 px de ancho (altura potencia de 2).
+    # Empaquetado por estantes en un atlas de 512 px de ancho. La altura es solo la usada
+    # (multiplo de 8): la GE declara la potencia de 2 pero en RAM solo van esas filas.
     width = 512
     order = sorted(items, key=lambda k: -items[k].height)
     rects, x, y, shelf = {}, 0, 0, 0
@@ -148,9 +149,7 @@ def ui_atlas():
         rects[name] = (x, y, img.width, img.height)
         x += img.width + 1
         shelf = max(shelf, img.height)
-    height = 1
-    while height < y + shelf:
-        height *= 2
+    height = (y + shelf + 7) // 8 * 8
     atlas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     for name, (rx, ry, _, _) in rects.items():
         atlas.alpha_composite(items[name], (rx, ry))

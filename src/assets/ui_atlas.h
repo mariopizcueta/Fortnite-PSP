@@ -10,7 +10,7 @@ struct Rect {
 };
 
 constexpr int kAtlasWidth = 512;
-constexpr int kAtlasHeight = 256;
+constexpr int kAtlasHeight = 144;
 constexpr Rect kVictory{0, 0, 292, 46};
 constexpr Rect kDefeat{0, 47, 292, 46};
 constexpr Rect kLogoSmall{293, 47, 112, 37};

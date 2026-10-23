@@ -53,20 +53,30 @@ void uploadTexture(const Texture& texture) {
     if (texture.pixels) sceKernelDcacheWritebackRange(texture.pixels, textureBytes(texture));
 }
 
-bool loadPngFromMemory(Texture& out, const void* data, size_t size) {
+bool loadPngFromMemory(Texture& out, const void* data, size_t size, int psm) {
     int w = 0, h = 0, channels = 0;
     unsigned char* decoded = stbi_load_from_memory(static_cast<const stbi_uc*>(data),
                                                    static_cast<int>(size), &w, &h, &channels, 4);
     if (!decoded) return false;
 
     Texture tex;
-    if (!createTexture(tex, w, h, GU_PSM_8888)) {
+    if (!createTexture(tex, w, h, psm == GU_PSM_5551 ? GU_PSM_5551 : GU_PSM_8888)) {
         stbi_image_free(decoded);
         return false;
     }
-    auto* dst = static_cast<u32*>(tex.pixels);
-    for (int y = 0; y < h; ++y) {
-        memcpy(dst + y * tex.stride, decoded + y * w * 4, static_cast<size_t>(w) * 4);
+    if (tex.psm == GU_PSM_5551) {
+        auto* dst = static_cast<u16*>(tex.pixels);
+        for (int y = 0; y < h; ++y) {
+            const unsigned char* src = decoded + y * w * 4;
+            for (int x = 0; x < w; ++x, src += 4) {
+                dst[y * tex.stride + x] = pack5551(src[0], src[1], src[2], src[3] >= 128 ? 1 : 0);
+            }
+        }
+    } else {
+        auto* dst = static_cast<u32*>(tex.pixels);
+        for (int y = 0; y < h; ++y) {
+            memcpy(dst + y * tex.stride, decoded + y * w * 4, static_cast<size_t>(w) * 4);
+        }
     }
     stbi_image_free(decoded);
 

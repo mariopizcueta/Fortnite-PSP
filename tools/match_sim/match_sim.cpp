@@ -8,7 +8,8 @@
 //   4. vida, eliminaciones, contador de vivos y victoria;
 //   5. partidas completas con 10 y 30 bots: terminan con una sola entidad, el contador de
 //      vivos siempre cuadra, nadie se mete dentro de un solido, ningun impacto atraviesa
-//      paredes y los bots no se quedan atascados; ademas mide el coste de la IA.
+//      paredes y los bots no se quedan atascados; ademas mide el coste de la IA;
+//   6. (fases 5 y 6) arma, disparo desde la camara, construccion y sucesos de sonido.
 //
 // Uso: sh tools/match_sim/build_and_run.sh   (o: make match-sim). Sale con 1 si algo falla.
 #include <math.h>
@@ -736,6 +737,77 @@ void testFort(world::World& world, game::NavGrid& nav) {
     check(ctx.hitsThroughWalls == 0, "ningun disparo del bot atraviesa la pared (raycast independiente)");
 }
 
+// --- 11) Sucesos de la partida -----------------------------------------------------------------
+
+void testEvents(world::World& world, game::NavGrid& nav) {
+    printf("\n11) Sucesos de la partida (de ellos salen los sonidos y las reacciones de las animaciones)\n");
+    using game::GameEventType;
+    MatchConfig cfg;
+    cfg.botCount = 2;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 player{70.0f, 0.0f, 25.0f};
+    m.teleport(0, player, 0.0f);
+    m.teleport(1, {70.0f, 0.0f, 15.0f}, 0.0f);
+    m.teleport(2, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    check(m.eventCount() == 0, "una partida nueva empieza sin sucesos");
+
+    u32 cursor = 0;
+    auto count = [&](GameEventType type, int entity, int other) {
+        int n = 0;
+        for (u32 i = cursor; i < m.eventCount(); ++i) {
+            const game::GameEvent& e = m.event(i);
+            if (e.type == type && (entity == -2 || e.entity == entity) && (other == -2 || e.other == other)) ++n;
+        }
+        return n;
+    };
+
+    game::PlayerAim aim;
+    aim.eye = cameraEyeBehind(player);
+    aim.direction = math3d::normalize(m.chestOf(1) - aim.eye);
+    for (int i = 0; i < 3; ++i) m.playerShot(aim, 36.0f, 80.0f);
+    check(count(GameEventType::Shot, 0, -2) == 3 && count(GameEventType::HitEntity, 1, 0) == 3 &&
+              count(GameEventType::Eliminated, 1, 0) == 1,
+          "3 disparos del jugador: 3 x disparo, 3 x impacto en el bot 1 y su eliminacion");
+
+    cursor = m.eventCount();
+    m.applyDamage(0, 10.0f, 2);
+    check(count(GameEventType::PlayerHurt, 0, 2) == 1, "el dano al jugador emite 'jugador herido' con el atacante");
+
+    cursor = m.eventCount();
+    const int wall = m.buildWall(0.0f);
+    check(wall >= 0 && count(GameEventType::WallBuilt, -2, -2) == 1, "construir emite 'pared construida'");
+    game::PlayerAim at;
+    at.eye = m.eyeOf(0);
+    at.direction = math3d::normalize(Vec3{0.0f, -0.25f, -1.0f});
+    cursor = m.eventCount();
+    check(m.removeWallAt(at) && count(GameEventType::WallRemoved, -2, -2) == 1, "quitar una pared emite 'pared quitada'");
+
+    // Gastar balas con el gatillo y recargar a mano.
+    m.teleport(0, player, 0.0f);
+    game::PlayerAim fire;
+    fire.eye = cameraEyeBehind(player);
+    fire.direction = {0.0f, 0.0f, -1.0f};
+    fire.fire = true;
+    for (int i = 0; i < 30; ++i) {
+        m.setPlayerInput(game::PlayerInput{}, fire);
+        m.step(game::FixedTimestep::kStep);
+    }
+    cursor = m.eventCount();
+    game::PlayerCommands reload;
+    reload.reload = true;
+    m.setPlayerInput(game::PlayerInput{}, game::PlayerAim{}, reload);
+    m.step(game::FixedTimestep::kStep);
+    check(count(GameEventType::Reload, 0, -2) == 1, "recargar emite 'recarga'");
+
+    // La cola es circular: con muchos sucesos, los ultimos kMaxEvents siguen accesibles.
+    const u32 before = m.eventCount();
+    for (int i = 0; i < Match::kMaxEvents + 10; ++i) m.playerShot(fire, 0.0f, 5.0f);
+    const game::GameEvent& last = m.event(m.eventCount() - 1);
+    check(m.eventCount() == before + Match::kMaxEvents + 10 && last.type == GameEventType::Shot && last.entity == 0,
+          "la cola circular conserva los sucesos mas recientes");
+}
+
 }  // namespace
 
 int main() {
@@ -757,6 +829,7 @@ int main() {
     testBuilding(world, nav);
     testBotsRespectWalls(world, nav);
     testFort(world, nav);
+    testEvents(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

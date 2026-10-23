@@ -57,14 +57,21 @@ void App::init() {
     const u64 bootStart = core::nowMicros();
     u64 t0 = bootStart;
     const assets::Blob login = assets::loginPng();
-    if (!gfx::loadPngFromMemory(m_login, login.data, login.size)) platform::log::write("ERROR: login.png");
+    // Las imagenes a pantalla completa son opacas: a 16 bits ocupan la mitad (255 KB).
+    if (!gfx::loadPngFromMemory(m_login, login.data, login.size, GU_PSM_5551)) {
+        platform::log::write("ERROR: login.png");
+    }
     presentBootFrame("Cargando...");
 
     const assets::Blob loading = assets::loadscreenPng();
-    if (!gfx::loadPngFromMemory(m_loadscreen, loading.data, loading.size)) {
+    if (!gfx::loadPngFromMemory(m_loadscreen, loading.data, loading.size, GU_PSM_5551)) {
         platform::log::write("ERROR: loadscreen.png");
     }
     if (!m_atlas.load()) platform::log::write("ERROR: ui_atlas.png");
+    platform::log::write("imagenes: inicio %u KB, carga %u KB, atlas de interfaz %u KB",
+                         static_cast<unsigned>(gfx::textureBytes(m_login) / 1024),
+                         static_cast<unsigned>(gfx::textureBytes(m_loadscreen) / 1024),
+                         static_cast<unsigned>(m_atlas.bytes() / 1024));
     logStage("imagenes de interfaz", t0);
 
     t0 = core::nowMicros();
@@ -167,6 +174,8 @@ void App::startMatch() {
 }
 
 void App::goToLobby() {
+    // La imagen de inicio de sesion ya no se vuelve a usar.
+    if (m_login.pixels) gfx::destroyTexture(m_login);
     m_screen = Screen::Lobby;
     m_paused = false;
     m_results = Results::None;

@@ -15,6 +15,13 @@ if [ ! -f "$OUT/msx_font.bin" ] && [ -x "$PSPDEV/bin/psp-ar" ]; then
         "$PSPDEV/bin/psp-objcopy" -O binary --only-section=.data font.o msx_font.bin && rm -f font.o)
 fi
 
+# Musica de referencia para la prueba del decodificador: la misma conversion que
+# tools/prepare_assets.py (afconvert a 22050 Hz mono) antes de codificarla en IMA ADPCM.
+SONG="$ROOT/Recursos/Sonidos/main title song.wav"
+if [ ! -f "$OUT/music_ref.wav" ] && [ -f "$SONG" ] && command -v afconvert >/dev/null 2>&1; then
+    afconvert -f WAVE -d LEI16@22050 -c 1 "$SONG" "$OUT/music_ref.wav"
+fi
+
 c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     -I"$ROOT/tools/scene_preview/stubs" -I"$ROOT/tools/host" -I"$ROOT/src" \
     "$ROOT/tools/app_sim/app_sim.cpp" \

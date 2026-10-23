@@ -14,6 +14,7 @@ public:
     bool load();
     void destroy();
     bool ready() const { return m_texture.pixels != nullptr; }
+    size_t bytes() const { return gfx::textureBytes(m_texture); }
 
     // Dibuja un elemento del atlas con la esquina superior izquierda en (x, y).
     void draw(const assets::ui::Rect& r, float x, float y, float scale = 1.0f,
