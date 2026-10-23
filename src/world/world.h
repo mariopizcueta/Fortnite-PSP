@@ -31,6 +31,9 @@ public:
     // Muro de la tormenta (translucido): despues de todo lo opaco.
     RenderStats drawStormWall(const math3d::Frustum& frustum, const math3d::Vec3& eye,
                               float maxDistance) const;
+    // Muro de la tormenta que se cierra: cilindro de radio `radius` alrededor de `center`.
+    RenderStats drawStormCircle(const math3d::Frustum& frustum, const math3d::Vec3& eye, float maxDistance,
+                                const math3d::Vec3& center, float radius) const;
 
     const CollisionWorld& collision() const { return m_collision; }
     // Para anadir y quitar las paredes construidas (cajas dinamicas) durante la partida.
@@ -56,6 +59,7 @@ private:
     TextureLibrary m_textures;
     std::vector<StaticBatch> m_static;  // geometria visual, en coordenadas de mundo
     std::vector<StaticBatch> m_stormWall;
+    std::vector<StaticBatch> m_stormCircle;  // cilindro de radio 1 (se escala en XZ)
     CollisionWorld m_collision;         // geometria de colision
     std::vector<math3d::Vec3> m_pointsOfInterest;
     std::vector<Harvestable> m_harvestables;
@@ -72,6 +76,9 @@ u32 mapColorAt(float x, float z);
 void buildGround(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out);
 // Muro de la tormenta en el limite del mapa (translucido; se dibuja aparte, con mezcla).
 void buildStormWall(SceneBuilder& visual, std::vector<StaticBatch>& out);
+// Cilindro de radio 1 para la tormenta que se cierra (muchos lados y franjas: escalado a
+// 125 m sus triangulos siguen siendo de pocos metros).
+void buildStormCircle(SceneBuilder& visual, std::vector<StaticBatch>& out);
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision,
                      std::vector<StaticBatch>& out, std::vector<math3d::Vec3>& pointsOfInterest,
                      std::vector<Harvestable>& harvestables);

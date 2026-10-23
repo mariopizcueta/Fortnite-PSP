@@ -66,6 +66,24 @@ def screens():
     w, h = match.size
     crop = match.crop((int(w * 0.22), int(h * 0.02), int(w * 0.78), int(h * 0.98)))
     save(cover(crop, ICON0_SIZE), ASSETS / "pbp" / "ICON0.PNG")
+    scope()
+
+
+def scope():
+    """Mirilla del francotirador (Recursos/mirilla.png) a media resolucion (240x136; se
+    dibuja a 2x). Fuera del aro, negro opaco (en el original es transparente); dentro,
+    transparente. Las lineas finas de la reticula desaparecen al reducir: el juego dibuja
+    la suya."""
+    img = Image.open(RES / "mirilla.png").convert("RGBA")
+    cx, cy, ring = 836, 465, 575  # centro del aro y radio entre el borde interior y el exterior
+    px = img.load()
+    for y in range(img.height):
+        for x in range(img.width):
+            if px[x, y][3] < 128 and (x - cx) ** 2 + (y - cy) ** 2 > ring * ring:
+                px[x, y] = (0, 0, 0, 255)
+    small = img.resize((240, 136), Image.LANCZOS)
+    small.putalpha(small.getchannel("A").point(lambda v: 255 if v > 140 else 0))
+    save(small, ASSETS / "images" / "mirilla.png")
 
 
 

@@ -26,6 +26,7 @@ bool World::build() {
     m_harvestables.clear();
     buildStructures(builder, m_collision, m_static, m_pointsOfInterest, m_harvestables);
     buildStormWall(builder, m_stormWall);
+    buildStormCircle(builder, m_stormCircle);
     if (builder.failed()) return false;
     m_collision.build(kMapHalfSize);
     m_harvestByCollider.assign(m_collision.count(), -1);
@@ -51,6 +52,8 @@ void World::destroy() {
     m_static.clear();
     for (StaticBatch& b : m_stormWall) gfx::destroyMesh(b.mesh);
     m_stormWall.clear();
+    for (StaticBatch& b : m_stormCircle) gfx::destroyMesh(b.mesh);
+    m_stormCircle.clear();
     m_collision.clear();
     m_pointsOfInterest.clear();
     m_harvestables.clear();
@@ -87,6 +90,27 @@ RenderStats World::drawStormWall(const math3d::Frustum& frustum, const math3d::V
         stats.trianglesDrawn += b.triangles;
     }
     gfx::setBlend(false);
+    return stats;
+}
+
+RenderStats World::drawStormCircle(const math3d::Frustum& frustum, const math3d::Vec3& eye, float maxDistance,
+                                   const math3d::Vec3& center, float radius) const {
+    RenderStats stats;
+    if (radius < 0.5f) return stats;
+    gfx::setModelMatrix(math3d::Mat4::translation(center) * math3d::Mat4::scale({radius, 1.0f, radius}));
+    gfx::bindTexture(nullptr);
+    gfx::setBlend(true);
+    for (const StaticBatch& b : m_stormCircle) {
+        const math3d::Vec3 c{center.x + b.center.x * radius, b.center.y, center.z + b.center.z * radius};
+        const float r = b.radius * (radius > 1.0f ? radius : 1.0f);
+        if (math3d::length(c - eye) - r > maxDistance) continue;
+        if (!frustum.sphereVisible(c, r)) continue;
+        gfx::drawMesh(b.mesh);
+        ++stats.batchesDrawn;
+        stats.trianglesDrawn += b.triangles;
+    }
+    gfx::setBlend(false);
+    gfx::setModelMatrix(math3d::Mat4::identity());
     return stats;
 }
 

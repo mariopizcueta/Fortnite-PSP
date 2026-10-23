@@ -379,11 +379,11 @@ void Match::updateAirdrops(float dt) {
     if (m_nextAirdrop < 2 && m_time >= m_config.airdropTimes[m_nextAirdrop]) {
         ++m_nextAirdrop;
         Vec3 p;
-        const float radius = fminf(zoneRadius() * 0.6f, 50.0f);
+        const float radius = fmaxf(fminf(m_storm.nextRadius() * 0.6f, 50.0f), 2.0f);
         bool found = false;
         for (int attempt = 0; attempt < 10 && !found; ++attempt) {
-            found = m_nav->randomPointNear(m_config.zoneCenter, radius, m_rng, &p) &&
-                    world::stormDepth(p.x, p.z) < -10.0f;
+            found = m_nav->randomPointNear(m_storm.nextCenter(), radius, m_rng, &p) &&
+                    stormDepthAt(p.x, p.z) < -10.0f;
         }
         if (found) {
             const int c = addContainer(ContainerKind::Airdrop, p + Vec3{0.0f, 60.0f, 0.0f}, m_rng.range(0.0f, 6.28f));

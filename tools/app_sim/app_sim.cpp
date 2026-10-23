@@ -440,15 +440,24 @@ void testNewControls(Sim& sim) {
         check(turned > 0.5f && moved < 0.2f, "L sin objetivo: el stick gira la camara y el jugador no anda");
     }
 
-    // Construccion: la cruceta elige la pieza; suelo y rampa aun no se colocan.
+    // Construccion: la cruceta elige la pieza; R coloca el suelo y despues la rampa.
     sim.press(PSP_CTRL_CIRCLE);
     sim.press(PSP_CTRL_RIGHT);
-    const int walls = match.structures().count();
+    const int pieces = match.structures().count();
+    const bool floorValid = match.planWall(sim.app().testCameraYaw(), game::PieceType::Floor).valid;
     sim.press(PSP_CTRL_RTRIGGER);
     sim.wait(0.2f);
     sim.shot("25_construccion_suelo");
-    check(sim.app().testBuildPiece() == 1 && match.structures().count() == walls,
-          "en construccion la cruceta elige la pieza (suelo: aun no se coloca)");
+    printf("  suelo: %s, piezas %d -> %d\n", floorValid ? "valido" : "no valido", pieces, match.structures().count());
+    check(sim.app().testBuildPiece() == 1 && floorValid && match.structures().count() == pieces + 1,
+          "en construccion la cruceta elige la pieza y R coloca un suelo");
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    sim.shot("25b_construccion_rampa");
+    check(sim.app().testBuildPiece() == 2 && match.structures().count() == pieces + 2,
+          "y con la rampa elegida, R coloca una rampa");
+    sim.press(PSP_CTRL_LEFT);
     sim.press(PSP_CTRL_LEFT);
     sim.press(PSP_CTRL_CIRCLE);
 
@@ -461,6 +470,32 @@ void testNewControls(Sim& sim) {
     check(!sim.app().testFreeCamera(), "y la cierra");
     sim.press(PSP_CTRL_LEFT);
     sim.shot("26_hud_inventario");
+
+    // Mira segun lo que se lleva y mirilla del francotirador (L).
+    auto select = [&](game::ItemType type) {
+        for (int k = 0; k < 7; ++k) {
+            if (!inv.pickaxe() && inv.activeType() == type) return true;
+            sim.press(PSP_CTRL_RIGHT);
+        }
+        return false;
+    };
+    if (select(game::ItemType::Bandage)) sim.shot("26b_mira_curativo");
+    const int noRoomShotgun = match.giveItem(game::ItemType::Shotgun, 1, game::Rarity::Rare);
+    const int noRoomSniper = match.giveItem(game::ItemType::Sniper, 1, game::Rarity::Legendary);
+    printf("  escopeta %s, francotirador %s\n", noRoomShotgun ? "sin sitio" : "dada", noRoomSniper ? "sin sitio" : "dado");
+    if (!noRoomShotgun && select(game::ItemType::Shotgun)) sim.shot("26c_mira_escopeta");
+    check(!noRoomSniper && select(game::ItemType::Sniper), "se lleva el francotirador en la mano");
+    check(!sim.app().testScoped(), "sin L no se mira por la mirilla");
+    sim.hold(PSP_CTRL_LTRIGGER, 0.4f);
+    const Vec3 head = match.body(0).state().position + Vec3{0.0f, 1.62f, 0.0f};
+    const float eyeToHead = math3d::length(sim.app().testCameraEye() - head);
+    sim.shot("26d_mirilla", PSP_CTRL_LTRIGGER);
+    printf("  con L: mirilla %s, ojo de la camara a %.2f m de la cabeza\n", sim.app().testScoped() ? "si" : "no",
+           static_cast<double>(eyeToHead));
+    check(sim.app().testScoped() && eyeToHead < 0.5f, "L con el francotirador: vista por la mirilla desde la cabeza");
+    sim.wait(0.2f);
+    check(!sim.app().testScoped(), "al soltar L se vuelve a la tercera persona");
+    select(game::ItemType::AssaultRifle);
 }
 
 void loadFont(const char* path) {
@@ -669,12 +704,15 @@ int main(int argc, char** argv) {
     printf("\n6) Estabilidad: 8 partidas mas alternando victoria, derrota, reinicio y abandono\n");
     unsigned heapFirst = 0, heapLast = 0, heapMax = 0;
     bool flowOk = true, navOk = true;
-    const int walkable = sim.app().testNavWalkable();
+    // Referencia: la rejilla al empezar la primera de estas partidas (ya sin las piezas
+    // de las pruebas anteriores, que la nueva partida retira).
+    int walkable = -1;
     for (int round = 0; round < 8; ++round) {
         sim.wait(0.3f);
         sim.press(PSP_CTRL_CROSS);  // JUGAR
         flowOk &= sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
         flowOk &= match.aliveCount() == 11 && sim.app().testWorld().collision().dynamicCount() == 0;
+        if (walkable < 0) walkable = sim.app().testNavWalkable();
         navOk &= sim.app().testNavWalkable() == walkable;
         // Algo de construccion y disparos en cada partida.
         sim.press(PSP_CTRL_CIRCLE);
@@ -762,6 +800,46 @@ int main(int argc, char** argv) {
     sim.shot("29_derrota_tormenta");
     sim.press(PSP_CTRL_CROSS);
     check(sim.screen() == kLobby, "vuelta al lobby");
+
+    printf("\n6c) Tormenta que se cierra\n");
+    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
+    sim.press(PSP_CTRL_CROSS);  // saltar del autobus
+    sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 40.0f);
+    // Lejos de los bots (cazan hasta 80 m) hasta que empiece el segundo cierre.
+    match.teleport(0, {-68.0f, 0.0f, 68.0f}, 0.0f);
+    const bool closing = sim.waitUntil([&] { return match.storm().phase() >= 2 || !match.alive(0); }, 130.0f);
+    const game::StormZone& storm = match.storm();
+    printf("  a los %.0f s: cierre %d, radio %.0f m, %s\n", static_cast<double>(match.elapsed()), storm.phase(),
+           static_cast<double>(storm.radius()), match.alive(0) ? "jugador vivo" : "jugador eliminado");
+    check(closing && storm.phase() >= 2 && storm.radius() < 92.0f, "la tormenta se cierra en partida (HUD con su tiempo)");
+    if (match.alive(0)) {
+        // A 8 m del borde, mirando hacia la tormenta (del centro de la zona hacia el del mapa).
+        Vec3 dir = math3d::length(storm.center()) > 1.0f ? math3d::normalize(Vec3{0, 0, 0} - storm.center()) : Vec3{1, 0, 0};
+        dir.y = 0.0f;
+        const float faceYaw = atan2f(-dir.x, -dir.z);
+        match.teleport(0, storm.center() + dir * (storm.radius() - 8.0f), faceYaw);
+        sim.press(PSP_CTRL_LTRIGGER);  // recoloca la camara detras
+        sim.wait(0.6f);
+        sim.shot("29b_tormenta_cerrandose");
+        match.teleport(0, storm.center() + dir * (storm.radius() + 4.0f), faceYaw);
+        const float before = match.body(0).state().health;
+        sim.wait(1.2f);
+        sim.shot("29c_dentro_tormenta_cerrandose");
+        printf("  fuera de la zona: vida %.0f -> %.0f, niebla hasta %.0f m\n", static_cast<double>(before),
+               static_cast<double>(match.body(0).state().health), static_cast<double>(sim.app().testFogEnd()));
+        check(match.inStorm(0) && match.body(0).state().health < before && sim.app().testFogEnd() < 60.0f,
+              "fuera de la zona: dano de la fase y niebla morada");
+    }
+    sim.wait(1.5f);
+    if (sim.results() != kNone) {
+        sim.press(PSP_CTRL_CROSS);
+    } else {
+        sim.press(PSP_CTRL_START);
+        sim.press(PSP_CTRL_DOWN);
+        sim.press(PSP_CTRL_CROSS);
+    }
+    check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
 
     printf("\n7) Salir desde el lobby\n");
     sim.press(PSP_CTRL_DOWN);

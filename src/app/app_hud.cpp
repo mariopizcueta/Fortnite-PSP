@@ -82,7 +82,7 @@ const ControlRow kControlRows[] = {
     {nullptr, {{B::L, "apuntar / fijar"}}, 1, {{B::Triangle, "pico"}}, 1},
     {nullptr, {{B::Left, ""}, {B::Right, "objeto"}}, 2, {{B::L, ""}, {B::Stick, "mira"}}, 2},
     {"CONSTRUCCION", {}, 0, {}, 0},
-    {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pared"}}, 1},
+    {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pieza"}}, 1},
     {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "quitar pared"}}, 1},
     {"PARTIDA", {}, 0, {}, 0},
     {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "HUD"}}, 1},
@@ -109,7 +109,7 @@ const ui::Hint kFreeCameraHint[] = {{B::Triangle, "camara libre"}};
 constexpr int kFreeCameraHintY = 256;
 const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
 const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "quitar esta"}, {B::Circle, "salir"}};
-const ui::Hint kBuildHintsShort[] = {{B::R, "colocar pared"}, {B::Circle, "combate"}};
+const ui::Hint kBuildHintsShort[] = {{B::R, "colocar"}, {B::Circle, "combate"}};
 const ui::Hint kBusHint[] = {{B::Cross, "Saltar del autobus"}};
 const ui::Hint kGliderHint[] = {{B::Cross, "Abrir el ala delta"}};
 constexpr int kPromptY = 180;
@@ -227,6 +227,7 @@ void App::renderGameHud() const {
         gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(120, 40, 180, static_cast<u32>(55.0f + 30.0f * pulse)));
     }
     // Destello rojo al recibir un impacto.
+    if (sniperScoped()) renderScope();
     const float hurt = m_match.sincePlayerDamaged();
     if (hurt < 0.35f) {
         gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight,
@@ -236,7 +237,7 @@ void App::renderGameHud() const {
         // Rotulo CONSTRUCCION sobre una franja azul: el modo se ve siempre.
         gfx::fillRect(150, 18, 180, 22, kBuildBlue);
         if (m_atlas.ready()) m_atlas.drawCentered(atlas::kConstruccion, 240, 20);
-        if (m_buildPiece == 0 && m_wallPlan.valid) {
+        if (m_wallPlan.valid) {
             int n = 0;
             const ui::Hint* hints = buildHints(&n);
             ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55, hints, n);
@@ -298,6 +299,18 @@ void App::renderAirHud() const {
     }
 }
 
+void App::renderScope() const {
+    // Recursos/mirilla.png a pantalla completa (aro y reticula); un punto rojo en el centro.
+    if (m_scope.pixels) {
+        // El centro del aro esta en la fila 465 de 941 del original: 1.6 px mas arriba.
+        gfx::drawTextureRect(m_scope, 0.0f, 0.0f, 240.0f, 136.0f, 0.0f, 1.6f, gfx::kScreenWidth, gfx::kScreenHeight);
+    } else {
+        gfx::fillRect(239, 100, 2, 72, rgba(0, 0, 0));
+        gfx::fillRect(200, 135, 80, 2, rgba(0, 0, 0));
+    }
+    gfx::fillRect(239, 135, 2, 2, rgba(230, 40, 30));
+}
+
 void App::renderCrosshair() const {
     if (!m_match.alive(0) || m_freeCameraActive) return;
     if (m_buildMode) {
@@ -312,13 +325,31 @@ void App::renderCrosshair() const {
         }
         return;
     }
-    // Mira (roja si la ayuda de punteria tiene un objetivo) y marcador de impacto.
+    if (sniperScoped()) return;  // la mirilla lleva su propia reticula
+    // Mira segun lo que se lleva en la mano (roja si la ayuda de punteria tiene un
+    // objetivo): escopeta, cuadrada; curativos, redonda; el resto, la cruz.
     const u32 c = m_match.playerAssistTarget() >= 0 || m_lockTarget > 0 ? kCrosshairLocked : kCrosshair;
-    gfx::fillRect(229, 135, 7, 2, c);
-    gfx::fillRect(244, 135, 7, 2, c);
-    gfx::fillRect(239, 125, 2, 7, c);
-    gfx::fillRect(239, 140, 2, 7, c);
-    gfx::fillRect(239, 135, 2, 2, c);
+    const game::Inventory& inv = m_match.inventory();
+    const game::ItemType held = inv.pickaxe() ? game::ItemType::None : inv.slot(inv.selected()).type;
+    if (held == game::ItemType::Shotgun) {
+        gfx::fillRect(228, 124, 24, 2, c);
+        gfx::fillRect(228, 146, 24, 2, c);
+        gfx::fillRect(228, 126, 2, 20, c);
+        gfx::fillRect(250, 126, 2, 20, c);
+        gfx::fillRect(239, 135, 2, 2, c);
+    } else if (held != game::ItemType::None && !game::isWeapon(held)) {
+        for (int i = 0; i < 28; ++i) {
+            const float a = 2.0f * math3d::kPi * i / 28;
+            gfx::fillRect(239.0f + cosf(a) * 9.0f, 135.0f + sinf(a) * 9.0f, 2, 2, c);
+        }
+        gfx::fillRect(239, 135, 2, 2, c);
+    } else {
+        gfx::fillRect(229, 135, 7, 2, c);
+        gfx::fillRect(244, 135, 7, 2, c);
+        gfx::fillRect(239, 125, 2, 7, c);
+        gfx::fillRect(239, 140, 2, 7, c);
+        gfx::fillRect(239, 135, 2, 2, c);
+    }
     if (m_match.sincePlayerHit() < 0.15f) {
         for (int k = 0; k < 4; ++k) {
             gfx::fillRect(233 - k, 129 - k, 2, 2, kWhite);
@@ -349,16 +380,24 @@ void App::renderMinimap() const {
         return *sx >= kMapX && *sx < kMapX + kMapSize - 1 && *sy >= kMapY && *sy < kMapY + kMapSize - 1;
     };
 
-    // Borde de la zona: puntos blancos sobre el circulo.
-    const Vec3& center = m_matchConfig.zoneCenter;
-    const float radius = m_match.zoneRadius();
-    const int points = radius * pxPerMeter > 40.0f ? 96 : 48;
-    for (int i = 0; i < points; ++i) {
-        const float a = 2.0f * math3d::kPi * i / points;
-        float sx, sy;
-        if (toMap(center.x + cosf(a) * radius, center.z + sinf(a) * radius, &sx, &sy)) {
-            gfx::fillRect(sx, sy, 2, 2, kWhite);
+    // Tormenta: borde actual en morado y, si se cierra, el circulo siguiente en blanco.
+    auto circle = [&](const Vec3& center, float radius, u32 color) {
+        if (radius < 0.5f) return;
+        const int points = radius * pxPerMeter > 40.0f ? 96 : 48;
+        for (int i = 0; i < points; ++i) {
+            const float a = 2.0f * math3d::kPi * i / points;
+            float sx, sy;
+            if (toMap(center.x + cosf(a) * radius, center.z + sinf(a) * radius, &sx, &sy)) {
+                gfx::fillRect(sx, sy, 2, 2, color);
+            }
         }
+    };
+    const game::StormZone& storm = m_match.storm();
+    if (storm.closes()) {
+        circle(storm.center(), storm.radius(), rgba(190, 110, 255));
+        if (storm.nextRadius() < storm.radius() - 0.5f) circle(storm.nextCenter(), storm.nextRadius(), kWhite);
+    } else {
+        circle(storm.center(), storm.radius(), kWhite);
     }
 
     // Flecha del jugador (o de a quien se sigue tras caer), con el norte arriba.
@@ -576,6 +615,9 @@ void App::overlayGameHud(const FrameInfo& frame) const {
             ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, color, hint, n);
         }
     }
+    if (m_stormMessage > 0.0f && fmodf(m_stormMessage, 0.8f) > 0.2f) {
+        printCenteredShadow(107, rgba(210, 150, 255), "La tormenta se esta cerrando!");
+    }
     if (m_airdropMessage > 0.0f && fmodf(m_airdropMessage, 0.8f) > 0.2f) {
         printCenteredShadow(96, rgba(120, 190, 255), "Suministro aereo en camino!");
     }
@@ -584,12 +626,10 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     if (m_buildMode) {
         const game::StructureSystem& s = m_match.structures();
         char banner[48];
-        snprintf(banner, sizeof(banner), "%s  -  Paredes %d/%d", kBuildPieceNames[m_buildPiece], s.count(),
+        snprintf(banner, sizeof(banner), "%s  -  Construcciones %d/%d", kBuildPieceNames[m_buildPiece], s.count(),
                  s.config().maxWalls);
         printCenteredShadow(44, kWhite, banner);
-        if (m_buildPiece != 0) {
-            printCenteredShadow(55, kErrorRed, "Aun no disponible: solo paredes");
-        } else if (!m_wallPlan.valid) {
+        if (!m_wallPlan.valid) {
             printCenteredShadow(55, kErrorRed, game::placementErrorName(m_wallPlan.error));
         } else {
             int n = 0;
@@ -603,12 +643,13 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         snprintf(line, sizeof(line), "ESPECTANDO A %s", m_match.name(spectateTarget()));
         printCenteredShadow(44, kErrorRed, line);
     } else {
-        // Tormenta del limite del mapa: aviso al acercarse y dentro.
+        // Tormenta: aviso al acercarse al borde del mapa y dentro (del borde o de la que se cierra).
         const Vec3& p = m_match.body(0).state().position;
         const float depth = world::stormDepth(p.x, p.z);
         if (m_match.inStorm(0)) {
             char line[48];
-            snprintf(line, sizeof(line), "TORMENTA: -%.0f DE VIDA POR SEGUNDO", m_matchConfig.stormDamage);
+            snprintf(line, sizeof(line), "TORMENTA: -%.0f DE VIDA POR SEGUNDO",
+                     depth > 0.0f ? m_matchConfig.stormDamage : m_match.storm().damage());
             printCenteredShadow(70, rgba(230, 180, 255), line);
             printCenteredShadow(81, kWhite, "Vuelve a la zona segura");
         } else if (depth > -12.0f) {
@@ -634,10 +675,13 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         y += 10;
     }
 
-    // Bajo el minimapa: tiempo hasta que la zona termine de cerrarse, vivos y bajas.
+    // Bajo el minimapa: tiempo hasta el siguiente cierre de la tormenta (morado mientras
+    // se cierra), vivos y bajas.
+    const game::StormZone& storm = m_match.storm();
     char time[16];
-    formatTime(m_matchConfig.zoneShrinkSeconds - m_match.elapsed(), time, sizeof(time));
-    gfx::text::printShadow(376, 89, kWhite, "%s", time);
+    const float left = storm.closes() ? storm.timeLeft() : m_matchConfig.zoneShrinkSeconds - m_match.elapsed();
+    formatTime(left > 0.0f ? left : 0.0f, time, sizeof(time));
+    gfx::text::printShadow(376, 89, storm.shrinking() ? rgba(210, 150, 255) : kWhite, "%s", time);
     gfx::text::printShadow(428, 89, kWhite, "%d", m_match.aliveCount());
     gfx::text::printShadow(464, 89, kWhite, "%d", m_match.playerKills());
     // Materiales: madera, piedra y metal.

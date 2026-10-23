@@ -109,6 +109,18 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_winner = -1;
     m_playerPlace = 0;
     m_time = 0.0f;
+    // La tormenta tiene su propio generador: no cambia el resto de la partida.
+    StormConfig storm;
+    storm.closes = m_config.stormCloses;
+    storm.firstClose = m_config.stormFirstClose;
+    storm.phaseSeconds = m_config.stormPhaseSeconds;
+    storm.shrinkSeconds = m_config.stormShrinkSeconds;
+    storm.center = m_config.zoneCenter;
+    storm.startRadius = m_config.zoneStartRadius;
+    storm.endRadius = m_config.zoneEndRadius;
+    storm.endSeconds = m_config.zoneShrinkSeconds;
+    m_stormRng.reseed(config.seed * 2654435761u + 17u);
+    m_storm.reset(storm, m_stormRng, &nav);
     m_killFeedCount = 0;
     for (Tracer& t : m_tracers) t.age = kTracerLife;
     m_nextTracer = 0;
@@ -159,10 +171,7 @@ void Match::spawnBots(const Vec3& playerSpawn) {
 
 // --- Consultas --------------------------------------------------------------------------
 
-float Match::zoneRadius() const {
-    const float t = math3d::clampf(m_time / m_config.zoneShrinkSeconds, 0.0f, 1.0f);
-    return m_config.zoneStartRadius + (m_config.zoneEndRadius - m_config.zoneStartRadius) * t;
-}
+float Match::stormDepthAt(float x, float z) const { return fmaxf(world::stormDepth(x, z), m_storm.depth(x, z)); }
 
 bool Match::alive(int id) const {
     if (id == 0) return m_player.state().health > 0.0f;
@@ -220,6 +229,7 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     // Las pulsaciones se entregan en el siguiente paso aunque este frame no tenga ninguno.
     if (input.jumpPressed) m_pendingJump = true;
     if (commands.placeWall) m_pendingPlace = true;
+    m_buildPiece = commands.buildPiece;
     if (commands.removeWall) m_pendingRemove = true;
     if (commands.reload) m_pendingReload = true;
     if (commands.togglePickaxe) m_pendingPickaxe = !m_pendingPickaxe;
@@ -242,6 +252,7 @@ void Match::step(float dt) {
     autoPickupAmmo(0);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
     separateCharacters();
+    if (m_storm.update(m_time, m_stormRng)) pushEvent(GameEventType::StormClosing, -1, m_storm.phase(), m_storm.nextCenter());
     updateStorm(dt);
     if (m_structures.revision() != m_seenStructureRevision) {
         m_seenStructureRevision = m_structures.revision();
@@ -325,7 +336,7 @@ void Match::updatePlayer(float dt) {
         // Modo construccion: R coloca una pared, CUADRADO quita la apuntada. No se dispara.
         m_assistTarget = -1;
         m_pendingUse = false;
-        if (place) buildWall(m_input.cameraYaw);
+        if (place) buildWall(m_input.cameraYaw, m_buildPiece);
         if (remove) removeWallAt(m_aim);
         return;
     }
@@ -706,13 +717,13 @@ void Match::addDamageNumber(const Vec3& position, float amount, bool structure) 
 
 world::Aabb Match::bodyBounds(int id) const { return body(id).bounds(); }
 
-WallPlacement Match::planWall(float yaw) const {
+WallPlacement Match::planWall(float yaw, PieceType type) const {
     world::Aabb bots[kMaxBots];
     int n = 0;
     for (int id = 1; id < entityCount(); ++id) {
         if (alive(id)) bots[n++] = bodyBounds(id);
     }
-    WallPlacement p = m_structures.plan(body(0).state().position, yaw, bodyBounds(0), bots, n);
+    WallPlacement p = m_structures.plan(body(0).state().position, yaw, bodyBounds(0), bots, n, 0, type);
     if (p.valid && m_materials.get(world::Resource::Wood) < m_config.build.wallCost) {
         p.valid = false;
         p.error = PlacementError::NoMaterials;
@@ -720,8 +731,8 @@ WallPlacement Match::planWall(float yaw) const {
     return p;
 }
 
-int Match::buildWall(float yaw) {
-    const int wall = m_structures.place(planWall(yaw));
+int Match::buildWall(float yaw, PieceType type) {
+    const int wall = m_structures.place(planWall(yaw, type));
     if (wall >= 0) {
         m_materials.spend(world::Resource::Wood, m_config.build.wallCost);
         ++m_stats.wallsBuilt;
@@ -859,7 +870,10 @@ void Match::updateStorm(float dt) {
             continue;
         }
         const Vec3& p = body(id).state().position;
-        if (world::stormDepth(p.x, p.z) <= 0.0f) {
+        // La del borde quita stormDamage; la que se cierra, segun la fase.
+        const float edge = world::stormDepth(p.x, p.z);
+        const float damage = edge > 0.0f ? m_config.stormDamage : m_storm.damage();
+        if (edge <= 0.0f && m_storm.depth(p.x, p.z) <= 0.0f) {
             m_inStorm[id] = false;
             continue;
         }
@@ -867,14 +881,14 @@ void Match::updateStorm(float dt) {
             m_inStorm[id] = true;
             m_stormTimer[id] = 0.0f;
             pushEvent(GameEventType::StormEnter, id, -1, p);
-            applyDamage(id, m_config.stormDamage, kStormKiller, true);
+            applyDamage(id, damage, kStormKiller, true);
             continue;
         }
         m_stormTimer[id] += dt;
         // Margen de 1 ms: 60 pasos de 1/60 s suman 0.99999 s en float.
         if (m_stormTimer[id] >= m_config.stormTickSeconds - 0.001f) {
             m_stormTimer[id] -= m_config.stormTickSeconds;
-            applyDamage(id, m_config.stormDamage, kStormKiller, true);
+            applyDamage(id, damage, kStormKiller, true);
         }
     }
 }

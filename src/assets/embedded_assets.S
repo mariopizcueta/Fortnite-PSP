@@ -14,6 +14,7 @@ asset_\name\()_end:
 
     ASSET loadscreen_png, "assets/images/loadscreen.png"
     ASSET login_png, "assets/images/login.png"
+    ASSET mirilla_png, "assets/images/mirilla.png"
     ASSET ui_atlas_png, "assets/images/ui_atlas.png"
     ASSET textures_png, "assets/images/textures.png"
     ASSET sfx_disparo, "assets/sounds/disparo.wav"

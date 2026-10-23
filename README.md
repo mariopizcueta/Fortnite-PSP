@@ -2,8 +2,8 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 7 (botín, autobús, ala delta, airdrops y bots que buscan, cazan y construyen),
-v0.8.0.**
+**Estado: fase 7 (botín, autobús, ala delta, airdrops, bots que cazan y construyen, tormenta
+que se cierra, suelos, rampas y mirilla de francotirador), v0.9.0.**
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +63,24 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, tormenta, construcción completa y mirilla (v0.9.0):**
+- **Tormenta que se cierra:** cada 40 s empieza un cierre de 20 s hacia un círculo menor
+  (primer cierre a los 60 s; 8 cierres, de 125 m a 0).
+  - **Daño:** de 1 a 15 de vida por segundo según la fase; el borde del mapa sigue quitando 30.
+  - **Aviso:** sonido de la tormenta y "La tormenta se está cerrando".
+  - **HUD:** en el minimapa, el círculo actual en morado y el siguiente en blanco; bajo él, el
+    tiempo hasta el siguiente cierre.
+  - **Bots:** entran en la zona cuando les toca.
+  - **Código:** `game/storm_zone.*`.
+- **Suelos y rampas:** R los coloca (10 de madera, como las paredes).
+  - **Colocación:** van en la celda de delante; desde lo alto de una rampa, un piso más arriba.
+  - **Rampa:** 8 escalones de colisión de 0,375 m (se sube andando) dibujados como una losa
+    inclinada.
+- **Miras:** cuadrada con la escopeta, redonda con los curativos y en cruz con el resto.
+- **Mirilla del francotirador:** con L se mira por `Recursos/mirilla.png`.
+  - **Vista:** primera persona con zoom ×4 (campo de visión de 15°).
+  - **Puntería:** el stick va más lento y no se fija el objetivo.
 
 **Fase 7, botín y autobús (v0.8.0)** (detalle en [docs/BOTIN.md](docs/BOTIN.md)):
 - **Armas:** fusil de asalto/SCAR, escopeta de corredera, subfusil con silenciador y
@@ -333,7 +351,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 76 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 84 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
@@ -349,7 +367,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 110 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 122 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
   escudo, curas, pico, materiales, coste de las paredes, tormenta del límite del mapa, armas,

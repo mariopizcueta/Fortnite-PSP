@@ -28,16 +28,34 @@ bool BuildVisuals::build(const game::BuildConfig& config) {
         b.flushGroup(m_meshes[v][0]);
         b.box(materials[v], materials[v], {0, 0, 0}, {t, h, g}, true);
         b.flushGroup(m_meshes[v][1]);
+        b.box(materials[v], materials[v], {0, 0, 0}, {g, config.floorThickness, g}, true);
+        b.flushGroup(m_floor[v]);
+        // Rampa: losa inclinada (la superficie pasa por el centro de cada escalon de
+        // colision) de rampThickness de grosor, con sus costados y sus extremos.
+        const float d = config.rampThickness;
+        const Vec3 lowTop{0, 0, 0}, highTop{g, h, 0}, lowBottom{0, -d, 0}, highBottom{g, h - d, 0};
+        const Vec3 side{0, 0, g};
+        b.quad(materials[v], lowTop + side, highTop + side, highTop, lowTop);              // superficie
+        b.quad(materials[v], lowBottom, highBottom, highBottom + side, lowBottom + side);  // debajo
+        b.quad(materials[v], lowBottom, lowTop, highTop, highBottom);                      // costado z = 0
+        b.quad(materials[v], highBottom + side, highTop + side, lowTop + side, lowBottom + side);
+        b.quad(materials[v], highBottom, highTop, highTop + side, highBottom + side);      // extremo alto
+        b.quad(materials[v], lowBottom + side, lowTop + side, lowTop, lowBottom);          // extremo bajo
+        b.flushGroup(m_ramp[v]);
     }
     return !b.failed();
 }
 
 void BuildVisuals::destroy() {
-    for (auto& variant : m_meshes) {
-        for (auto& list : variant) {
-            for (world::StaticBatch& batch : list) gfx::destroyMesh(batch.mesh);
-            list.clear();
-        }
+    auto release = [](std::vector<world::StaticBatch>& list) {
+        for (world::StaticBatch& batch : list) gfx::destroyMesh(batch.mesh);
+        list.clear();
+    };
+    for (int v = 0; v < kVariantCount; ++v) {
+        release(m_meshes[v][0]);
+        release(m_meshes[v][1]);
+        release(m_floor[v]);
+        release(m_ramp[v]);
     }
 }
 
@@ -52,6 +70,29 @@ void BuildVisuals::drawBox(const world::Aabb& box, bool alongX, Variant variant,
     }
 }
 
+void BuildVisuals::drawPiece(game::PieceType type, const world::Aabb& box, bool alongX, int dir, float level,
+                             Variant variant, const world::TextureLibrary* textures, float lift) const {
+    if (type == game::PieceType::Wall) {
+        drawBox(box, alongX, variant, textures);
+        return;
+    }
+    const std::vector<world::StaticBatch>* mesh = &m_floor[variant];
+    Mat4 model = Mat4::translation(box.min + Vec3{0.0f, lift, 0.0f});
+    if (type == game::PieceType::Ramp) {
+        // La malla sube hacia +X; se gira alrededor del centro de la celda segun `dir`.
+        const float half = m_config.gridSize * 0.5f;
+        const float angles[4] = {0.0f, math3d::kPi, -math3d::kPi * 0.5f, math3d::kPi * 0.5f};
+        model = Mat4::translation({box.min.x + half, level + lift, box.min.z + half}) * Mat4::rotationY(angles[dir & 3]) *
+                Mat4::translation({-half, 0.0f, -half});
+        mesh = &m_ramp[variant];
+    }
+    gfx::setModelMatrix(model);
+    for (const world::StaticBatch& batch : *mesh) {
+        gfx::bindTexture(textures ? textures->get(batch.texture) : nullptr);
+        gfx::drawMesh(batch.mesh);
+    }
+}
+
 void BuildVisuals::drawWalls(const game::StructureSystem& structures,
                              const world::TextureLibrary& textures) const {
     for (int i = 0; i < structures.capacity(); ++i) {
@@ -59,19 +100,28 @@ void BuildVisuals::drawWalls(const game::StructureSystem& structures,
         if (!w.active) continue;
         Variant v = w.health < w.maxHealth * 0.5f ? kDamaged : kNormal;
         if (w.sinceHit < 0.08f) v = kFlash;
-        drawBox(w.box, w.alongX, v, &textures);
+        drawPiece(w.type, w.box, w.alongX, w.dir, w.level, v, &textures);
     }
     gfx::setModelMatrix(Mat4::identity());
 }
 
 void BuildVisuals::drawGhost(const game::WallPlacement& placement) const {
     gfx::setBlend(true);
-    drawBox(placement.box, placement.alongX, placement.valid ? kGhostValid : kGhostInvalid, nullptr);
+    drawPiece(placement.type, placement.box, placement.alongX, placement.dir, placement.level,
+              placement.valid ? kGhostValid : kGhostInvalid, nullptr);
     gfx::setBlend(false);
     gfx::setModelMatrix(Mat4::identity());
 }
 
 void BuildVisuals::drawHighlight(const game::BuiltWall& wall) const {
+    if (wall.type != game::PieceType::Wall) {
+        // Suelo y rampa: la misma pieza en rojo, un poco por encima (sin z-fighting).
+        gfx::setBlend(true);
+        drawPiece(wall.type, wall.box, wall.alongX, wall.dir, wall.level, kGhostInvalid, nullptr, 0.04f);
+        gfx::setBlend(false);
+        gfx::setModelMatrix(Mat4::identity());
+        return;
+    }
     // Un poco mayor que la pared para que no haya z-fighting con ella.
     world::Aabb box = wall.box;
     box.min = box.min - Vec3{0.03f, 0.03f, 0.03f};

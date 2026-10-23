@@ -127,6 +127,12 @@ void App::init() {
                          m_props.triangles());
     m_lobbyReady = m_lobbyScene.build();
     buildMinimap();
+    {
+        const assets::Blob scope = assets::scopePng();
+        if (!gfx::loadPngFromMemory(m_scope, scope.data, scope.size, GU_PSM_5551)) {
+            platform::log::write("aviso: no se pudo cargar la mirilla");
+        }
+    }
     logStage("modelos, lobby, minimapa", t0);
 
     m_projection.fovYDegrees = config::kFovYDegrees;
@@ -182,6 +188,7 @@ void App::startMatch() {
     m_lockTarget = -1;
     m_chestHumTimer = 0.0f;
     m_airdropMessage = 0.0f;
+    m_stormMessage = 0.0f;
     m_paused = false;
     m_results = Results::None;
     m_resultsTime = m_resultsDelay = 0.0f;
@@ -224,6 +231,7 @@ void App::shutdown() {
     m_world.destroy();
     m_worldReady = false;
     gfx::destroyTexture(m_minimap);
+    gfx::destroyTexture(m_scope);
     m_atlas.destroy();
     gfx::destroyTexture(m_loadscreen);
     gfx::destroyTexture(m_login);
@@ -339,12 +347,13 @@ void App::updateGame(const input::Input& in, float dt) {
     // L: modo apuntado. Con un enemigo a la vista lo fija (y el stick mueve); sin el, el
     // stick gira la camara y sube o baja la mira en lugar de andar.
     const bool aimHeld = act && in.held(PSP_CTRL_LTRIGGER);
+    m_aimHeld = aimHeld;
     const bool stickAims = aimHeld && !(m_lockTarget > 0);
 
     // 1) Entrada del jugador.
     game::PlayerInput playerInput;
     game::PlayerAim aim;
-    aim.eye = m_followCamera.eye();
+    aim.eye = cameraEye();  // con la mirilla, desde la cabeza
     aim.direction = m_followCamera.lookDirection();
     commands.buildMode = m_buildMode;
     if (control) {
@@ -356,8 +365,8 @@ void App::updateGame(const input::Input& in, float dt) {
         playerInput.jumpHeld = in.held(PSP_CTRL_CROSS);
         playerInput.aiming = aimHeld;
         if (m_buildMode) {
-            // Por ahora solo la pared se puede colocar (suelos y rampas: paso de construccion).
-            commands.placeWall = m_buildPiece == 0 && in.pressed(PSP_CTRL_RTRIGGER);  // una por pulsacion
+            commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);  // una pieza por pulsacion
+            commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
             commands.removeWall = in.pressed(PSP_CTRL_SQUARE);
         } else if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
             aim.fire = in.held(PSP_CTRL_RTRIGGER);  // disparar, o golpes seguidos con el pico
@@ -392,7 +401,7 @@ void App::updateGame(const input::Input& in, float dt) {
         game::PlayerAim view;
         view.eye = m_followCamera.eye();
         view.direction = m_followCamera.lookDirection();
-        m_wallPlan = m_match.planWall(m_followCamera.yaw());
+        m_wallPlan = m_match.planWall(m_followCamera.yaw(), static_cast<game::PieceType>(m_buildPiece));
         m_targetWall = m_match.targetedWall(view);
     } else {
         m_targetWall = -1;
@@ -408,13 +417,18 @@ void App::updateStormFog() {
     // tormenta morada: nunca se llega a ver donde acaba el mundo.
     // Cuenta lo mas metido en la tormenta entre la camara y el personaje seguido: la
     // camara va 5 m por detras y, al entrar, la pantalla debe cerrarse ya.
+    // La tormenta que se cierra tine de morado y acorta la vista, pero menos que la del
+    // borde (alli no hay nada que ver mas alla).
     const Vec3 eye = cameraEye();
     float depth = world::stormDepth(eye.x, eye.z);
+    float closing = m_match.storm().depth(eye.x, eye.z);
     if (!m_freeCameraActive) {
         const Vec3 p = renderState(spectateTarget()).position;
         const float followed = world::stormDepth(p.x, p.z);
         if (followed > depth) depth = followed;
+        closing = fmaxf(closing, m_match.storm().depth(p.x, p.z));
     }
+    const float closingT = math3d::clampf((closing + 2.0f) / 4.0f, 0.0f, 1.0f);
     const float nearT = math3d::clampf((depth + kStormFogRange) / kStormFogRange, 0.0f, 1.0f);
     const float inT = math3d::clampf(depth / 4.0f, 0.0f, 1.0f);
     // Desde el autobus y cayendo, la niebla se aleja con la altura (si no, a 90 m solo se
@@ -427,16 +441,24 @@ void App::updateStormFog() {
         };
         return rgba(ch(0), ch(8), ch(16));
     };
-    m_fogColor = lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormInsideColor, inT);
-    m_fogStart = lerp(lerp(config::kFogStart, 6.0f, nearT), 0.0f, inT) + altitude * 0.6f;
-    m_fogEnd = lerp(lerp(config::kFogEnd, 42.0f, nearT), 13.0f, inT) + altitude * 1.4f;
+    m_fogColor = lerpColor(lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormFogColor,
+                                     0.7f * closingT),
+                           kStormInsideColor, inT);
+    m_fogStart = lerp(lerp(lerp(config::kFogStart, 6.0f, nearT), 4.0f, closingT), 0.0f, inT) + altitude * 0.6f;
+    const float edgeEnd = lerp(config::kFogEnd, 42.0f, nearT), closingEnd = lerp(config::kFogEnd, 38.0f, closingT);
+    m_fogEnd = lerp(fminf(edgeEnd, closingEnd), 13.0f, inT) + altitude * 1.4f;
 }
 
 void App::updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld) {
     // L en combate: fijar el bot visible mas centrado (o recolocar si no hay ninguno).
     Vec3 lockPoint;
     const Vec3* lock = nullptr;
-    if (aimHeld && !m_buildMode) {
+    // Mirilla: el zoom entra en ~0.15 s; sin fijar objetivo (con el francotirador se apunta
+    // a mano) y con el stick mas lento, en proporcion al zoom.
+    const bool scoped = sniperScoped();
+    m_scopeZoom = math3d::clampf(m_scopeZoom + (scoped ? dt : -dt) * 7.0f, 0.0f, 1.0f);
+    if (!scoped) m_scopeZoom = 0.0f;
+    if (aimHeld && !m_buildMode && !scoped) {
         const bool keep = m_lockTarget > 0 && m_match.alive(m_lockTarget) &&
                           m_match.lineOfSight(m_followCamera.eye(), m_match.chestOf(m_lockTarget));
         if (!keep) {
@@ -463,8 +485,9 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     camera::CameraInput cam;
     if (control && aimHeld && !lock) {
         // Modo apuntado sin objetivo: el stick mueve la mira.
-        cam.turn = in.analogX();
-        cam.look = -in.analogY();
+        const float slow = scoped ? 0.3f : 1.0f;
+        cam.turn = in.analogX() * slow;
+        cam.look = -in.analogY() * slow;
     } else if (!control || !aimHeld) {
         // Al andar, la camara se coloca detras poco a poco (no al ir hacia atras, para
         // poder retroceder sin girar). Mirando a otro tras caer, tambien le sigue.
@@ -525,6 +548,7 @@ void App::updateChestHum(float dt) {
     // Zumbido de un cofre sin abrir cercano (Sonidos Limpios/Fortnite Chest(sin abrir), 5 s
     // que se repiten mientras se esta cerca), como el aviso de Fortnite.
     m_airdropMessage -= dt;
+    m_stormMessage -= dt;
     m_chestHumTimer -= dt;
     const Vec3 pos = renderState(0).position;
     const game::Container* nearest = nullptr;
@@ -649,6 +673,10 @@ void App::processEvents() {
             case game::GameEventType::StormEnter:
                 if (e.entity == 0) playSfx(audio::Sfx::StormWarning, 1.0f);
                 break;
+            case game::GameEventType::StormClosing:
+                playSfx(audio::Sfx::StormWarning, 1.0f);
+                m_stormMessage = 4.0f;
+                break;
             case game::GameEventType::PickaxeSwing:
                 m_playerAnim.onSwing();
                 if (e.other == 1) playSfx(audio::Sfx::Pickaxe, 0.9f);
@@ -728,7 +756,24 @@ u32 App::clearColor() const {
 }
 
 math3d::Vec3 App::cameraEye() const {
-    return m_freeCameraActive ? m_freeCamera.eye() : m_followCamera.eye();
+    if (m_freeCameraActive) return m_freeCamera.eye();
+    if (sniperScoped()) return scopeEye();
+    return m_followCamera.eye();
+}
+
+bool App::sniperScoped() const {
+    // L con el francotirador en la mano, a pie: vista por la mirilla.
+    if (!m_aimHeld || m_buildMode || m_freeCameraActive || !m_match.alive(0) ||
+        m_match.airState(0) != game::AirState::Ground || m_results != Results::None) {
+        return false;
+    }
+    const game::Inventory& inv = m_match.inventory();
+    return !inv.pickaxe() && inv.slot(inv.selected()).type == game::ItemType::Sniper;
+}
+
+Vec3 App::scopeEye() const {
+    // Primera persona: a la altura de los ojos, un poco por delante de la cara.
+    return renderState(0).position + Vec3{0.0f, 1.62f, 0.0f} + m_followCamera.lookDirection() * 0.35f;
 }
 
 bool App::projectToScreen(const math3d::Mat4& viewProjection, const Vec3& p, float* x, float* y) const {
@@ -783,9 +828,16 @@ void App::renderExitBar(float x, float y, float w, float h) const {
 
 void App::renderGame(const FrameInfo& frame) {
     if (m_worldReady) {
-        const math3d::Mat4 projection = m_projection.matrix();
+        // Con la mirilla: primera persona y el campo de vision cerrado (zoom x4 aprox.).
+        camera::Projection lens = m_projection;
+        const bool scoped = sniperScoped();
+        if (scoped) lens.fovYDegrees = m_projection.fovYDegrees + (kScopeFovDegrees - m_projection.fovYDegrees) * m_scopeZoom;
+        const math3d::Mat4 projection = lens.matrix();
+        const Vec3 scopeFrom = scopeEye();
         const math3d::Mat4 view =
-            m_freeCameraActive ? m_freeCamera.viewMatrix() : m_followCamera.viewMatrix();
+            m_freeCameraActive ? m_freeCamera.viewMatrix()
+            : scoped ? math3d::Mat4::lookAt(scopeFrom, scopeFrom + m_followCamera.lookDirection(), {0.0f, 1.0f, 0.0f})
+                     : m_followCamera.viewMatrix();
         // Niebla: la normal o, cerca de la tormenta del borde, mas densa y morada.
         gfx::FogSettings fog;
         fog.enabled = m_fog;
@@ -808,6 +860,10 @@ void App::renderGame(const FrameInfo& frame) {
             m_props.drawBeams(m_match, frustum, cameraEye(), m_match.elapsed());
         }
         m_world.drawStormWall(frustum, cameraEye(), drawDistance);
+        // La que se cierra, mientras no abarque ya todo el mapa.
+        if (m_match.zoneRadius() < 124.0f) {
+            m_world.drawStormCircle(frustum, cameraEye(), drawDistance, m_match.zoneCenter(), m_match.zoneRadius());
+        }
         if (m_buildVisualsReady && m_buildMode && !m_freeCameraActive) {
             if (m_targetWall >= 0) m_buildVisuals.drawHighlight(m_match.structures().wall(m_targetWall));
             m_buildVisuals.drawGhost(m_wallPlan);
@@ -848,7 +904,7 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         }
     };
     const game::CharacterState player = renderState(0);
-    if (m_match.airState(0) != game::AirState::Bus && visible(player.position)) {
+    if (m_match.airState(0) != game::AirState::Bus && !sniperScoped() && visible(player.position)) {
         // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
         const game::Inventory& inv = m_match.inventory();
         const game::HeldItem held = inv.pickaxe()        ? game::HeldItem::Pickaxe

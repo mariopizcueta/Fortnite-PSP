@@ -12,15 +12,58 @@ using math3d::Vec3;
 const char* placementErrorName(PlacementError error) {
     switch (error) {
         case PlacementError::None: return "";
-        case PlacementError::LimitReached: return "Limite de paredes alcanzado";
-        case PlacementError::OverlapsPlayer: return "Estas dentro de la pared";
+        case PlacementError::LimitReached: return "Limite de construcciones alcanzado";
+        case PlacementError::OverlapsPlayer: return "Estas en medio";
         case PlacementError::OverlapsBot: return "Hay alguien en medio";
         case PlacementError::OverlapsStructure: return "Choca con otra estructura";
         case PlacementError::Blocked: return "Hay un obstaculo en medio";
         case PlacementError::OutOfBounds: return "Fuera del mapa";
-        case PlacementError::NoMaterials: return "Falta madera (10 por pared)";
+        case PlacementError::NoMaterials: return "Falta madera (10 por pieza)";
     }
     return "?";
+}
+
+const char* pieceName(PieceType type) {
+    switch (type) {
+        case PieceType::Wall: return "Pared";
+        case PieceType::Floor: return "Suelo";
+        case PieceType::Ramp: return "Rampa";
+    }
+    return "?";
+}
+
+namespace {
+
+world::Aabb shrink(const world::Aabb& b) {
+    // Tocar una pieza vecina por el canto no cuenta como choque.
+    return {{b.min.x + 0.02f, b.min.y + 0.02f, b.min.z + 0.02f}, {b.max.x - 0.02f, b.max.y - 0.02f, b.max.z - 0.02f}};
+}
+
+}  // namespace
+
+int pieceBoxes(const WallPlacement& p, const BuildConfig& config, world::Aabb* out) {
+    if (p.type != PieceType::Ramp) {
+        out[0] = p.box;
+        return 1;
+    }
+    // Escalon i: el tramo [i, i + 1] de la subida, con el techo a la altura de la rampa en
+    // su centro y rampThickness de grosor (sin bajar del suelo, p.box.min.y).
+    const float run = config.gridSize / kRampSteps, rise = config.wallHeight / kRampSteps;
+    for (int i = 0; i < kRampSteps; ++i) {
+        const float top = p.level + (i + 0.5f) * rise;
+        const float a = i * run, b = (i + 1) * run;
+        world::Aabb s = p.box;
+        s.min.y = fmaxf(p.box.min.y, top - config.rampThickness);
+        s.max.y = top;
+        switch (p.dir) {
+            case 0: s.min.x = p.box.min.x + a; s.max.x = p.box.min.x + b; break;
+            case 1: s.min.x = p.box.max.x - b; s.max.x = p.box.max.x - a; break;
+            case 2: s.min.z = p.box.min.z + a; s.max.z = p.box.min.z + b; break;
+            default: s.min.z = p.box.max.z - b; s.max.z = p.box.max.z - a; break;
+        }
+        out[i] = s;
+    }
+    return kRampSteps;
 }
 
 void StructureSystem::reset(world::CollisionWorld& world, NavGrid& nav, const BuildConfig& config) {
@@ -50,8 +93,10 @@ bool StructureSystem::limitReached(int owner) const {
 }
 
 WallPlacement StructureSystem::plan(const Vec3& feet, float yaw, const world::Aabb& player,
-                                    const world::Aabb* bots, int botCount, int owner) const {
+                                    const world::Aabb* bots, int botCount, int owner, PieceType type) const {
     WallPlacement p;
+    p.type = type;
+    if (type != PieceType::Wall) return planCell(feet, forwardFromYaw(yaw), player, bots, botCount, owner, type);
     const float g = m_config.gridSize;
     const float half = m_config.wallThickness * 0.5f;
     const Vec3 forward = forwardFromYaw(yaw);
@@ -111,6 +156,69 @@ WallPlacement StructureSystem::plan(const Vec3& feet, float yaw, const world::Aa
     return p;
 }
 
+WallPlacement StructureSystem::planCell(const Vec3& feet, const Vec3& forward, const world::Aabb& player,
+                                        const world::Aabb* bots, int botCount, int owner, PieceType type) const {
+    // Suelo y rampa: la celda de la rejilla que empieza en la linea donde iria la pared
+    // (la primera al menos minDistance por delante), a la altura de los pies redondeada a
+    // pisos de wallHeight (desde lo alto de una rampa se sigue un piso mas arriba).
+    WallPlacement p;
+    p.type = type;
+    const float g = m_config.gridSize;
+    float x0, z0;
+    if (fabsf(forward.x) > fabsf(forward.z)) {
+        const float lineX = forward.x > 0.0f ? ceilf((feet.x + m_config.minDistance) / g) * g
+                                             : floorf((feet.x - m_config.minDistance) / g) * g;
+        x0 = forward.x > 0.0f ? lineX : lineX - g;
+        z0 = floorf(feet.z / g) * g;
+        p.dir = forward.x > 0.0f ? 0 : 1;
+    } else {
+        const float lineZ = forward.z > 0.0f ? ceilf((feet.z + m_config.minDistance) / g) * g
+                                             : floorf((feet.z - m_config.minDistance) / g) * g;
+        z0 = forward.z > 0.0f ? lineZ : lineZ - g;
+        x0 = floorf(feet.x / g) * g;
+        p.dir = forward.z > 0.0f ? 2 : 3;
+    }
+    p.alongX = p.dir >= 2;
+    const float ground = m_world->supportHeight(x0 + g * 0.5f, z0 + g * 0.5f, 0.1f, feet.y + tuning::kStepHeight);
+    const float floors = fmaxf(0.0f, roundf((feet.y - ground) / m_config.wallHeight));
+    p.level = ground + floors * m_config.wallHeight;
+    if (type == PieceType::Floor) {
+        p.box = {{x0, p.level, z0}, {x0 + g, p.level + m_config.floorThickness, z0 + g}};
+    } else {
+        p.box = {{x0, ground, z0}, {x0 + g, p.level + m_config.wallHeight, z0 + g}};
+    }
+    world::Aabb boxes[kMaxPieceBoxes];
+    const int n = pieceBoxes(p, m_config, boxes);
+    p.box = boxes[0];
+    for (int i = 1; i < n; ++i) {
+        p.box.min = {fminf(p.box.min.x, boxes[i].min.x), fminf(p.box.min.y, boxes[i].min.y), fminf(p.box.min.z, boxes[i].min.z)};
+        p.box.max = {fmaxf(p.box.max.x, boxes[i].max.x), fmaxf(p.box.max.y, boxes[i].max.y), fmaxf(p.box.max.z, boxes[i].max.z)};
+    }
+
+    const float limit = world::kMapHalfSize - 1.0f;
+    if (limitReached(owner)) {
+        p.error = PlacementError::LimitReached;
+    } else if (p.box.min.x < -limit || p.box.max.x > limit || p.box.min.z < -limit || p.box.max.z > limit) {
+        p.error = PlacementError::OutOfBounds;
+    } else if (duplicates(p)) {
+        p.error = PlacementError::OverlapsStructure;
+    } else if (blockedFrom(feet + Vec3{0.0f, tuning::kChestHeight, 0.0f}, p.box)) {
+        p.error = PlacementError::Blocked;
+    } else {
+        // Como en Fortnite, suelos y rampas pueden atravesar el escenario; solo no pueden
+        // aparecer encima de nadie.
+        for (int i = 0; i < n && p.error == PlacementError::None; ++i) {
+            const world::Aabb s = shrink(boxes[i]);
+            if (s.overlaps(player)) p.error = PlacementError::OverlapsPlayer;
+            for (int b = 0; b < botCount && p.error == PlacementError::None; ++b) {
+                if (s.overlaps(bots[b])) p.error = PlacementError::OverlapsBot;
+            }
+        }
+    }
+    p.valid = p.error == PlacementError::None;
+    return p;
+}
+
 bool StructureSystem::blockedFrom(const Vec3& chest, const world::Aabb& box) const {
     // Punto de la pared mas cercano al pecho; si un solido corta el segmento, la pared
     // quedaria al otro lado de una pared u obstaculo.
@@ -127,10 +235,11 @@ bool StructureSystem::duplicates(const WallPlacement& p) const {
     // Las paredes van sobre las lineas de la rejilla y ocupan una celda: dos paredes
     // perpendiculares solo pueden tocarse por los extremos (esquinas, permitido). Dos
     // paralelas solo chocan si son la misma pared.
-    const world::Aabb shrunk{{p.box.min.x + 0.02f, p.box.min.y + 0.02f, p.box.min.z + 0.02f},
-                             {p.box.max.x - 0.02f, p.box.max.y - 0.02f, p.box.max.z - 0.02f}};
+    // Suelos y rampas: uno de cada tipo por celda y piso.
+    const world::Aabb shrunk = shrink(p.box);
     for (const BuiltWall& w : m_walls) {
-        if (w.active && w.alongX == p.alongX && w.box.overlaps(shrunk)) return true;
+        if (!w.active || w.type != p.type || !w.box.overlaps(shrunk)) continue;
+        if (p.type != PieceType::Wall || w.alongX == p.alongX) return true;
     }
     return false;
 }
@@ -140,12 +249,24 @@ int StructureSystem::place(const WallPlacement& placement, int owner) {
     for (int i = 0; i < kMaxWallCapacity; ++i) {
         BuiltWall& w = m_walls[i];
         if (w.active) continue;
-        const int collider = m_world->addDynamic(placement.box, world::kSolid);
-        if (collider < 0) return -1;
+        world::Aabb boxes[kMaxPieceBoxes];
+        const int n = pieceBoxes(placement, m_config, boxes);
+        w.colliderCount = 0;
+        for (int b = 0; b < n; ++b) {
+            const int collider = m_world->addDynamic(boxes[b], world::kSolid);
+            if (collider < 0) {  // no quedan cajas dinamicas: se deshace
+                for (int k = 0; k < w.colliderCount; ++k) m_world->removeDynamic(w.colliders[k]);
+                w.colliderCount = 0;
+                return -1;
+            }
+            w.colliders[w.colliderCount++] = collider;
+        }
         w.active = true;
+        w.type = placement.type;
         w.box = placement.box;
         w.alongX = placement.alongX;
-        w.collider = collider;
+        w.dir = placement.dir;
+        w.level = placement.level;
         w.health = w.maxHealth = m_config.wallHealth;
         w.sinceHit = 99.0f;
         w.owner = owner;
@@ -159,9 +280,9 @@ int StructureSystem::place(const WallPlacement& placement, int owner) {
 bool StructureSystem::remove(int index) {
     if (index < 0 || index >= kMaxWallCapacity || !m_walls[index].active) return false;
     BuiltWall& w = m_walls[index];
-    m_world->removeDynamic(w.collider);
+    for (int k = 0; k < w.colliderCount; ++k) m_world->removeDynamic(w.colliders[k]);
     w.active = false;
-    w.collider = -1;
+    w.colliderCount = 0;
     --m_count;
     changed(w.box);
     return true;
@@ -186,7 +307,10 @@ void StructureSystem::update(float dt) {
 int StructureSystem::wallFromCollider(int dynamicHandle) const {
     if (dynamicHandle < 0) return -1;
     for (int i = 0; i < kMaxWallCapacity; ++i) {
-        if (m_walls[i].active && m_walls[i].collider == dynamicHandle) return i;
+        if (!m_walls[i].active) continue;
+        for (int k = 0; k < m_walls[i].colliderCount; ++k) {
+            if (m_walls[i].colliders[k] == dynamicHandle) return i;
+        }
     }
     return -1;
 }

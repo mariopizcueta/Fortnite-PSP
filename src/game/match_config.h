@@ -78,8 +78,14 @@ struct MatchConfig {
     float pickaxeDamage = 20.0f;         // a personajes
     float pickaxeStructureDamage = 50.0f;  // a paredes construidas
 
-    // "Zona" simplificada: los bots exploran dentro de un circulo que se cierra con el
-    // tiempo, asi la partida converge hacia el deposito y termina.
+    // Tormenta que se cierra (game/storm_zone.h): cada stormPhaseSeconds empieza un
+    // cierre de stormShrinkSeconds hacia un circulo menor; fuera hace dano (sube por fase).
+    bool stormCloses = true;
+    float stormFirstClose = 60.0f;  // s (el autobus y la caida van antes)
+    float stormPhaseSeconds = 40.0f;
+    float stormShrinkSeconds = 20.0f;
+    // Sin cierres (reglas clasicas), "zona" simplificada: los bots exploran dentro de un
+    // circulo que se reduce con el tiempo, asi la partida converge y termina.
     math3d::Vec3 zoneCenter{0.0f, 0.0f, -6.0f};
     float zoneStartRadius = 80.0f;  // dentro de la zona segura (la tormenta del borde, a 88 m)
     float zoneEndRadius = 22.0f;
@@ -110,6 +116,7 @@ struct MatchConfig {
     // bots, con su fusil y dano completo; ayuda de punteria de 3 grados y sin dispersion.
     static MatchConfig classic() {
         MatchConfig c;
+        c.stormCloses = false;
         c.startInBus = false;
         c.loot = false;
         c.botsStartArmed = true;

@@ -14,6 +14,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/app/build_visuals.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
     "$ROOT/src/game/structures.cpp" \
+    "$ROOT/src/game/storm_zone.cpp" \
     "$ROOT/src/camera/orbit_camera.cpp" \
     "$ROOT/src/camera/third_person_camera.cpp" \
     "$ROOT/src/game/character.cpp" \

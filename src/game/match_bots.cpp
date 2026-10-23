@@ -106,9 +106,15 @@ void Match::chooseDestination(Bot& b) {
         b.investigate = false;
         return;
     }
-    const float radius = zoneRadius();
-    Vec3 dest = m_config.zoneCenter;
+    // A donde ir: dentro de la zona siguiente (la tormenta se cierra hacia ella).
+    const Vec3 zone = m_storm.nextCenter();
+    const float radius = fmaxf(fminf(m_storm.nextRadius(), 80.0f) * (m_storm.closes() ? 0.8f : 1.0f), 2.0f);
+    Vec3 dest = zone;
     bool chosen = false;
+    if (botNeedsSafety(b.body.state().position, -1)) {
+        safePoint(&b.destination);
+        return;
+    }
     // Caza: a menudo va a por el rival mas cercano (sin verlo: como quien sigue el ruido de
     // la partida), en vez de pasear sin rumbo.
     if (b.armed && m_rng.chance(0.45f)) {
@@ -133,12 +139,28 @@ void Match::chooseDestination(Bot& b) {
     if (!m_pois.empty() && m_rng.chance(0.55f)) {
         for (int attempt = 0; attempt < 6 && !chosen; ++attempt) {
             const Vec3& poi = m_pois[m_rng.index(static_cast<int>(m_pois.size()))];
-            if (distXZ(poi, m_config.zoneCenter) > radius + 5.0f) continue;
+            if (distXZ(poi, zone) > radius + 5.0f) continue;
             chosen = m_nav->randomPointNear(poi, 5.0f, m_rng, &dest);
         }
     }
-    if (!chosen) m_nav->randomPointNear(m_config.zoneCenter, radius, m_rng, &dest);
+    if (!chosen) m_nav->randomPointNear(zone, radius, m_rng, &dest);
     b.destination = dest;
+}
+
+bool Match::botNeedsSafety(const Vec3& pos, int self) const {
+    // Fuera de la zona siguiente cuando la tormenta ya se cierra o falta poco (o ya dentro
+    // de ella): hay que entrar. Con margen, para no quedarse justo en el borde.
+    if (!m_storm.closes()) return false;
+    if (self >= 0 && m_inStorm[self]) return true;
+    const bool soon = m_storm.shrinking() || (m_storm.timeLeft() >= 0.0f && m_storm.timeLeft() < 25.0f);
+    return soon && distXZ(pos, m_storm.nextCenter()) > m_storm.nextRadius() - 2.0f;
+}
+
+bool Match::safePoint(Vec3* out) {
+    const float r = fmaxf(m_storm.nextRadius() * 0.6f, 1.5f);
+    if (m_nav->randomPointNear(m_storm.nextCenter(), r, m_rng, out)) return true;
+    *out = m_storm.nextCenter();
+    return false;
 }
 
 bool Match::requestPath(Bot& b, const Vec3& to) {
@@ -162,6 +184,7 @@ void Match::decide(int index) {
     Bot& b = m_bots[index];
     const Vec3 pos = b.body.state().position;
     const float interval = m_config.aiDecisionInterval;
+    const int self = index + 1;
 
     if (b.target >= 0 && (!alive(b.target) || m_air[b.target] != AirState::Ground)) {
         b.target = -1;
@@ -223,8 +246,17 @@ void Match::decide(int index) {
         }
     }
 
+    // Tormenta: si hay que entrar en la zona, se deja el botin o la busqueda y se va.
+    if ((b.state == BotState::Loot || b.state == BotState::Search ||
+         (b.state == BotState::Attack && m_inStorm[self])) &&
+        botNeedsSafety(pos, self)) {
+        if (b.lootPickup >= 0) m_pickups[b.lootPickup].claimedBy = -1;
+        if (b.lootContainer >= 0) m_containers[b.lootContainer].claimedBy = -1;
+        b.lootPickup = b.lootContainer = -1;
+        b.state = BotState::Explore;
+    }
     // Botin: sin arma es lo primero; con arma, de vez en cuando una mejor o un airdrop.
-    if (b.state != BotState::Attack && b.state != BotState::Loot) {
+    if (b.state != BotState::Attack && b.state != BotState::Loot && !botNeedsSafety(pos, self)) {
         const bool wantsLoot = !b.armed || m_rng.chance(0.12f);
         if (wantsLoot && findLoot(index, b.armed ? 22.0f : 70.0f)) {
             b.state = BotState::Loot;
@@ -288,7 +320,7 @@ void Match::decide(int index) {
                 b.stateTime = 0.0f;
                 b.searchDuration = m_rng.range(2.0f, 4.0f);
                 b.searchYaw = b.body.state().yaw;
-            } else if (distXZ(b.destination, m_config.zoneCenter) > zoneRadius() + 6.0f) {
+            } else if (distXZ(b.destination, m_storm.nextCenter()) > m_storm.nextRadius() + 6.0f) {
                 b.state = BotState::Explore;  // la zona se ha cerrado: otro destino
             }
             break;
@@ -526,7 +558,7 @@ bool Match::findLoot(int index, float maxDistance) {
         if (b.armed && c.kind != ContainerKind::Airdrop) continue;
         const float d = distXZ(c.position, pos);
         const float limit = c.kind == ContainerKind::Airdrop ? maxDistance * 3.0f : maxDistance;
-        if (d > limit || world::stormDepth(c.position.x, c.position.z) > -4.0f) continue;
+        if (d > limit || stormDepthAt(c.position.x, c.position.z) > -4.0f) continue;
         const float score = c.kind == ContainerKind::Airdrop ? d * 0.4f : d;
         if (score < best) {
             best = score;

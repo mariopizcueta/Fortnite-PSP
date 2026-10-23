@@ -62,6 +62,8 @@ public:
     const world::World& testWorld() const { return m_world; }
     int testNavWalkable() const { return m_nav.walkableCount(); }
     float testCameraYaw() const { return m_followCamera.yaw(); }
+    bool testScoped() const { return sniperScoped(); }
+    math3d::Vec3 testCameraEye() const { return cameraEye(); }
     int testLockTarget() const { return m_lockTarget; }
     bool testFreeCamera() const { return m_freeCameraActive; }
     int testBuildPiece() const { return m_buildPiece; }
@@ -101,6 +103,10 @@ private:
     void renderTracers() const;
     void renderExitBar(float x, float y, float w, float h) const;
     math3d::Vec3 cameraEye() const;
+    // Mirilla del francotirador (L con el francotirador): vista desde la cabeza con zoom.
+    bool sniperScoped() const;
+    math3d::Vec3 scopeEye() const;
+    void renderScope() const;
     game::CharacterState renderState(int id) const;
     int spectateTarget() const;
     bool projectToScreen(const math3d::Mat4& viewProjection, const math3d::Vec3& p, float* x,
@@ -148,6 +154,10 @@ private:
     // Recursos de presentacion.
     gfx::Texture m_loadscreen;
     gfx::Texture m_login;
+    gfx::Texture m_scope;    // Recursos/mirilla.png a 240x136 (se dibuja a 2x)
+    bool m_aimHeld = false;  // L mantenido este frame (modo apuntado)
+    float m_scopeZoom = 0.0f;  // 0..1: transicion del zoom de la mirilla
+    static constexpr float kScopeFovDegrees = 15.0f;
     gfx::Texture m_minimap;  // 128x128 (1.5 m por texel), generado de world::mapColorAt
     ui::Atlas m_atlas;
     LobbyScene m_lobbyScene;
@@ -191,6 +201,7 @@ private:
     float m_chestHumTimer = 0.0f;
     bool m_chestHumOn = false;
     float m_airdropMessage = 0.0f;  // s que queda el aviso "airdrop en camino"
+    float m_stormMessage = 0.0f;  // s que queda el aviso "la tormenta se cierra"
     BuildVisuals m_buildVisuals;
     bool m_buildVisualsReady = false;
     math3d::Mat4 m_viewProjection = math3d::Mat4::identity();  // para proyectar numeros de dano

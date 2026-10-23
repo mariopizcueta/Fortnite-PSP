@@ -336,6 +336,9 @@ SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, 
             for (int i = 0; i < bots; ++i) r.armedAt60 += m.bot(i).armed || !m.alive(i + 1) ? 1 : 0;
         }
         if (m.phase() == game::MatchPhase::Finished) {
+            if (step < 60 * 60) {  // acabo antes del minuto: se cuenta como estaba al final
+                for (int i = 0; i < bots; ++i) r.armedAt60 += m.bot(i).armed || !m.alive(i + 1) ? 1 : 0;
+            }
             r.finished = true;
             break;
         }
@@ -656,6 +659,129 @@ bool crossesBarrier(const Vec3& p, const Vec3& q) {
     const float t = (44.0f - p.z) / (q.z - p.z);
     const float x = p.x + (q.x - p.x) * t;
     return x > 55.6f && x < 68.4f;
+}
+
+int countEvents(const Match& m, u32 from, game::GameEventType type);
+
+void testFloorsAndRamps(world::World& world, game::NavGrid& nav) {
+    printf("\n8b) Suelos y rampas\n");
+    const float pi = math3d::kPi;
+    MatchConfig cfg = MatchConfig::classic();
+    cfg.botCount = 1;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const int walkable = nav.walkableCount();
+    const Vec3 player{70.0f, 0.0f, 25.0f};
+    m.teleport(0, player, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+
+    // Rampa al norte: celda z 20..24, sube hacia -Z de 0 a 3 m en escalones de 0.375 m.
+    const game::WallPlacement ramp = m.planWall(0.0f, game::PieceType::Ramp);
+    printf("  rampa: x %.1f..%.1f z %.1f..%.1f y %.2f..%.2f -> %s\n", ramp.box.min.x, ramp.box.max.x, ramp.box.min.z,
+           ramp.box.max.z, ramp.box.min.y, ramp.box.max.y, ramp.valid ? "valida" : game::placementErrorName(ramp.error));
+    check(ramp.valid && ramp.dir == 3 && m.buildWall(0.0f, game::PieceType::Ramp) >= 0 &&
+              world.collision().dynamicCount() == game::kRampSteps && m.structures().count() == 1,
+          "se coloca una rampa (8 escalones de colision) y cuenta como una pieza");
+    check(!m.planWall(0.0f, game::PieceType::Ramp).valid, "no se repite una rampa en la misma celda");
+
+    // Subirla andando: la altura de los pies sigue a la rampa y nadie se mete en un solido.
+    float topY = 0.0f, midY = 0.0f;
+    bool pen = false, anyPen = false;
+    for (int k = 1; k <= 12; ++k) {
+        const game::CharacterState s = walk(world.collision(), player, 0.0f, 0.0f, -1.0f, k * 0.1f, &pen);
+        anyPen |= pen;
+        if (s.position.z <= 22.2f && s.position.z >= 21.8f) midY = s.position.y;
+        if (s.position.y > topY) topY = s.position.y;
+    }
+    printf("  subiendo: a mitad de la rampa %.2f m, lo mas alto %.2f m\n", static_cast<double>(midY),
+           static_cast<double>(topY));
+    check(midY > 1.0f && midY < 2.0f && topY > 2.6f && !anyPen, "se sube la rampa andando (sin saltar)");
+    world::RayHit hit;
+    const bool blocks = world.collision().raycast({65.0f, 1.5f, 21.0f}, {75.0f, 1.5f, 21.0f}, world::kBlocksShots, &hit) &&
+                        m.structures().wallFromCollider(hit.dynamicHandle) == 0;
+    check(blocks, "la rampa para los disparos y se sabe que pieza es");
+
+    // Suelo al oeste (celda x 64..68), a ras del suelo: se pisa (0.2 m) sin saltar.
+    const game::WallPlacement floor = m.planWall(pi * 0.5f, game::PieceType::Floor);
+    check(floor.valid && m.buildWall(pi * 0.5f, game::PieceType::Floor) >= 0 && m.structures().count() == 2,
+          "se coloca un suelo");
+    const game::CharacterState onFloor = walkOn(world, player, pi * 0.5f, -1.0f, 0.6f);
+    printf("  suelo: x %.1f..%.1f, pies sobre el a %.2f m (x %.1f)\n", floor.box.min.x, floor.box.max.x,
+           static_cast<double>(onFloor.position.y), static_cast<double>(onFloor.position.x));
+    check(onFloor.position.x < 67.5f && fabsf(onFloor.position.y - 0.2f) < 0.01f, "se camina sobre el suelo");
+
+    // En lo alto de la rampa el siguiente suelo va un piso mas arriba (3 m).
+    m.teleport(0, {70.0f, 3.0f, 21.0f}, 0.0f);  // sobre lo alto de la rampa
+    const float feet = m.body(0).state().position.y;
+    const game::WallPlacement upper = m.planWall(0.0f, game::PieceType::Floor);
+    printf("  desde la rampa (pies a %.2f m): suelo siguiente a %.2f m\n", static_cast<double>(feet),
+           static_cast<double>(upper.box.min.y));
+    check(fabsf(upper.box.min.y - 3.0f) < 0.01f, "desde lo alto de la rampa el suelo se pone un piso mas arriba");
+
+    // La partida siguiente retira las piezas y deja la navegacion como estaba.
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    check(world.collision().dynamicCount() == 0 && nav.walkableCount() == walkable,
+          "al quitar suelos y rampas la colision y la navegacion vuelven a estar como antes");
+}
+
+void testStormZone(world::World& world, game::NavGrid& nav) {
+    printf("\n13b) Tormenta que se cierra\n");
+    game::StormConfig cfg;
+    core::Random rng(7);
+    game::StormZone z;
+    z.reset(cfg, rng, &nav);
+    check(z.radius() > 120.0f && !z.shrinking() && fabsf(z.timeLeft() - 60.0f) < 0.01f,
+          "empieza abarcando todo el mapa, con el primer cierre a los 60 s");
+    int closes = 0;
+    bool nested = true, walkable = true, monotonic = true;
+    float lastRadius = z.radius();
+    Vec3 target = z.nextCenter();
+    float targetRadius = z.nextRadius();
+    for (int step = 1; step <= 60 * 420; ++step) {
+        const float t = step / 60.0f;
+        if (z.update(t, rng)) {
+            ++closes;
+            if (closes <= 2) printf("  cierre %d a los %.0f s: radio %.0f -> %.0f\n", closes, static_cast<double>(t),
+                                    static_cast<double>(z.radius()), static_cast<double>(z.nextRadius()));
+        }
+        monotonic &= z.radius() <= lastRadius + 0.001f;
+        lastRadius = z.radius();
+        if (!z.shrinking() && z.nextRadius() < targetRadius - 0.01f) {
+            // Acaba de elegirse el siguiente circulo: dentro del actual y sobre suelo transitable.
+            nested &= math3d::length(z.nextCenter() - z.center()) + z.nextRadius() <= z.radius() + 0.01f;
+            int ix, iz;
+            walkable &= nav.nearestNode(z.nextCenter(), 0, &ix, &iz) && nav.walkable(ix, iz);
+            target = z.nextCenter();
+            targetRadius = z.nextRadius();
+        }
+    }
+    printf("  %d cierres; radio final %.1f m, dano final %.0f/s\n", closes, static_cast<double>(z.radius()),
+           static_cast<double>(z.damage()));
+    check(closes == game::StormZone::kPhases && z.radius() < 0.01f && z.timeLeft() < 0.0f,
+          "se cierra cada 40 s (8 cierres) hasta desaparecer la zona");
+    check(nested && walkable && monotonic, "cada circulo esta dentro del anterior, en suelo transitable, y nunca crece");
+
+    // Dano: con cierres rapidos, quien se queda fuera recibe el dano de la fase.
+    MatchConfig mc = MatchConfig::classic();
+    mc.botCount = 1;
+    mc.stormCloses = true;
+    mc.stormFirstClose = 1.0f;
+    mc.stormPhaseSeconds = 2.0f;
+    mc.stormShrinkSeconds = 1.0f;
+    Match m;
+    m.start(mc, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    u32 cursor = m.eventCount();
+    for (int i = 0; i < 60 * 20 && m.phase() != game::MatchPhase::Finished; ++i) {
+        m.step(game::FixedTimestep::kStep);
+    }
+    const int closing = countEvents(m, cursor, game::GameEventType::StormClosing);
+    bool stormKill = false;
+    for (int i = 0; i < m.killEventCount(); ++i) stormKill |= m.killEvent(i).killer == game::kStormKiller;
+    printf("  partida con cierres cada 2 s: %d avisos de cierre, %s\n", closing,
+           stormKill ? "la tormenta elimina" : "nadie cae por la tormenta");
+    check(closing >= 1 && stormKill && m.stormDepthAt(0.0f, 0.0f) > 0.0f,
+          "cada cierre se avisa y al final la tormenta lo cubre todo y elimina");
 }
 
 void testBotsRespectWalls(world::World& world, game::NavGrid& nav) {
@@ -1396,11 +1522,13 @@ int main() {
     testWeapon();
     testCameraShots(world, nav);
     testBuilding(world, nav);
+    testFloorsAndRamps(world, nav);
     testBotsRespectWalls(world, nav);
     testFort(world, nav);
     testEvents(world, nav);
     testInventory(world, nav);
     testStorm(world, nav);
+    testStormZone(world, nav);
     testLoot(world, nav);
     testRealMatches(world, nav);
 

@@ -50,6 +50,7 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/game/inventory.cpp" \
     "$ROOT/src/game/structures.cpp" \
+    "$ROOT/src/game/storm_zone.cpp" \
     "$ROOT/src/game/weapon.cpp" \
     "$ROOT/src/gfx/debug_text.cpp" \
     "$ROOT/src/gfx/mesh.cpp" \

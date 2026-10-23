@@ -17,7 +17,7 @@
 #include "platform/callbacks.h"
 #include "platform/log.h"
 
-PSP_MODULE_INFO("FortnitePSP", PSP_MODULE_USER, 0, 8);
+PSP_MODULE_INFO("FortnitePSP", PSP_MODULE_USER, 0, 9);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-1024);  // toda la RAM de usuario salvo 1 MB para el sistema
 

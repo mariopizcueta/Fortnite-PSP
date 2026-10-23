@@ -9,6 +9,7 @@
 #include "game/match_config.h"
 #include "game/nav_grid.h"
 #include "game/player.h"
+#include "game/storm_zone.h"
 #include "game/structures.h"
 #include "game/weapon.h"
 #include "world/collision.h"
@@ -36,7 +37,8 @@ struct PlayerAim {
 // siguiente paso de fisica, asi no se pierden aunque ese frame no tenga ningun paso.
 struct PlayerCommands {
     bool buildMode = false;  // modo construccion activo (CIRCULO)
-    bool placeWall = false;  // R pulsado en modo construccion
+    bool placeWall = false;  // R pulsado en modo construccion: coloca la pieza elegida
+    PieceType buildPiece = PieceType::Wall;  // pieza elegida con la cruceta
     bool removeWall = false; // CUADRADO pulsado en modo construccion
     bool reload = false;     // CUADRADO pulsado en modo combate: abrir / recoger o recargar
     int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
@@ -65,7 +67,8 @@ enum class GameEventType : u8 {
     ItemUsed,      // entity = 0, other = ItemType (consumible terminado)
     UseStarted,    // entity = 0, other = ItemType (empieza a usarse un consumible)
     UseCanceled,   // entity = 0, other = ItemType (se interrumpe sin gastarlo)
-    StormEnter,    // entity = quien entra en la tormenta del limite del mapa
+    StormEnter,    // entity = quien entra en la tormenta (la del borde o la que se cierra)
+    StormClosing,  // empieza un cierre de la tormenta (other = numero de cierre)
     BusJump,       // entity = quien salta del autobus
     GliderOpen,    // entity = quien abre el ala delta
     Landed,        // entity = quien llega al suelo
@@ -203,7 +206,12 @@ public:
     int playerPlace() const { return m_playerPlace; }
     int playerKills() const { return m_playerKills; }
     float elapsed() const { return m_time; }
-    float zoneRadius() const;
+    // Zona segura actual (tormenta que se cierra) y la siguiente.
+    float zoneRadius() const { return m_storm.radius(); }
+    const math3d::Vec3& zoneCenter() const { return m_storm.center(); }
+    const StormZone& storm() const { return m_storm; }
+    // Metros dentro de la tormenta (la del borde o la que se cierra); negativo: fuera.
+    float stormDepthAt(float x, float z) const;
     const MatchConfig& config() const { return m_config; }
 
     bool alive(int id) const;
@@ -257,8 +265,8 @@ public:
     // Arma del bot i (para el HUD de depuracion).
     const char* botWeaponName(int i) const;
     const StructureSystem& structures() const { return m_structures; }
-    // Donde iria una pared ahora mismo (para dibujar la pared fantasma).
-    WallPlacement planWall(float yaw) const;
+    // Donde iria una pieza ahora mismo (para dibujar la pieza fantasma).
+    WallPlacement planWall(float yaw, PieceType type = PieceType::Wall) const;
     // Pared construida bajo la mira y a alcance para quitarla, o -1.
     int targetedWall(const PlayerAim& aim) const;
     const DamageNumber* damageNumbers() const { return m_damageNumbers; }
@@ -308,7 +316,7 @@ public:
     void giveMaterials(world::Resource r, int n) { m_materials.add(r, n); }
 
     // Construccion (publico para las pruebas): coloca / quita como haria el jugador.
-    int buildWall(float yaw);
+    int buildWall(float yaw, PieceType type = PieceType::Wall);
     bool removeWallAt(const PlayerAim& aim);
     // Envia un bot a un destino (pruebas de navegacion).
     void commandBotTravel(int botIndex, const math3d::Vec3& destination);
@@ -358,6 +366,9 @@ private:
     void decide(int index);
     int perceive(int index) const;
     void chooseDestination(Bot& bot);
+    // Fuera de la zona siguiente con la tormenta cerca: lo primero es entrar.
+    bool botNeedsSafety(const math3d::Vec3& pos, int self) const;
+    bool safePoint(math3d::Vec3* out);
     bool requestPath(Bot& bot, const math3d::Vec3& to);
     MoveIntent steer(int index, float dt);
     void botShoot(int index);
@@ -371,6 +382,8 @@ private:
     NavGrid* m_nav = nullptr;
     std::vector<math3d::Vec3> m_pois;
     core::Random m_rng;
+    StormZone m_storm;
+    core::Random m_stormRng;
 
     CharacterBody m_player;
     PlayerInput m_input;
@@ -378,6 +391,7 @@ private:
     PlayerCommands m_commands;
     bool m_pendingJump = false;
     bool m_pendingPlace = false;
+    PieceType m_buildPiece = PieceType::Wall;
     bool m_pendingRemove = false;
     bool m_pendingReload = false;
     bool m_pendingPickaxe = false;

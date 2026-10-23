@@ -38,6 +38,7 @@ int CollisionWorld::addDynamic(const Aabb& box, u8 flags) {
         if (m_dynamic[i].active) continue;
         m_dynamic[i].collider = {box, flags};
         m_dynamic[i].active = true;
+        if (i >= m_dynamicEnd) m_dynamicEnd = i + 1;
         return i;
     }
     return -1;
@@ -45,10 +46,12 @@ int CollisionWorld::addDynamic(const Aabb& box, u8 flags) {
 
 void CollisionWorld::removeDynamic(int handle) {
     if (handle >= 0 && handle < kMaxDynamic) m_dynamic[handle].active = false;
+    while (m_dynamicEnd > 0 && !m_dynamic[m_dynamicEnd - 1].active) --m_dynamicEnd;
 }
 
 void CollisionWorld::clearDynamic() {
     for (DynamicSlot& d : m_dynamic) d.active = false;
+    m_dynamicEnd = 0;
 }
 
 int CollisionWorld::dynamicCount() const {
@@ -135,7 +138,7 @@ bool CollisionWorld::raycast(const Vec3& from, const Vec3& to, u8 mask, RayHit* 
     int bestIdx = -1;
     int bestDynamic = -1;
     // Primero las cajas dinamicas (pocas): su impacto tambien acota el recorrido de celdas.
-    for (int i = 0; i < kMaxDynamic; ++i) {
+    for (int i = 0; i < m_dynamicEnd; ++i) {
         const DynamicSlot& slot = m_dynamic[i];
         if (!slot.active || !(slot.collider.flags & mask)) continue;
         float t;

@@ -10,6 +10,7 @@
 
 FORTNITEPSP_ASSET(loadscreen_png)
 FORTNITEPSP_ASSET(login_png)
+FORTNITEPSP_ASSET(mirilla_png)
 FORTNITEPSP_ASSET(ui_atlas_png)
 FORTNITEPSP_ASSET(textures_png)
 FORTNITEPSP_ASSET(sfx_disparo)
@@ -54,6 +55,8 @@ struct Blob {
 FORTNITEPSP_BLOB(loadscreenPng, loadscreen_png)
 // Inicio de sesion (Recursos/loginscreen.png, 480x272).
 FORTNITEPSP_BLOB(loginPng, login_png)
+// Mirilla del francotirador (Recursos/mirilla.png, 240x136; se dibuja a 2x).
+FORTNITEPSP_BLOB(scopePng, mirilla_png)
 // Atlas de interfaz: iconos, rotulos y banners (rectangulos en assets/ui_atlas.h).
 FORTNITEPSP_BLOB(uiAtlasPng, ui_atlas_png)
 // Atlas 128x128 con las 16 texturas de Recursos/Texturas (orden de world::TextureId).

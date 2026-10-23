@@ -65,7 +65,8 @@ public:
     const Collider& collider(int i) const { return m_colliders[i]; }
 
     // Cajas dinamicas. addDynamic devuelve un identificador (o -1 si no hay hueco).
-    static constexpr int kMaxDynamic = 64;
+    // Una rampa son varias cajas (escalones): hace falta sitio para unas 20 de ellas.
+    static constexpr int kMaxDynamic = 224;
     int addDynamic(const Aabb& box, u8 flags);
     void removeDynamic(int handle);
     void clearDynamic();
@@ -109,12 +110,14 @@ private:
         bool active = false;
     };
     DynamicSlot m_dynamic[kMaxDynamic];
+    int m_dynamicEnd = 0;  // las consultas solo recorren [0, m_dynamicEnd)
 };
 
 template <typename Fn>
 void CollisionWorld::query(const Aabb& box, u8 mask, Fn&& fn, bool includeDynamic) const {
     if (includeDynamic) {
-        for (const DynamicSlot& d : m_dynamic) {
+        for (int i = 0; i < m_dynamicEnd; ++i) {
+            const DynamicSlot& d = m_dynamic[i];
             if (d.active && (d.collider.flags & mask) && d.collider.box.overlaps(box)) fn(d.collider);
         }
     }

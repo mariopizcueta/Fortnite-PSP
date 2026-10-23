@@ -735,6 +735,25 @@ void buildStormWall(SceneBuilder& b, std::vector<StaticBatch>& out) {
     b.flushGroup(out);
 }
 
+void buildStormCircle(SceneBuilder& b, std::vector<StaticBatch>& out) {
+    // Mismo color y franjas que el muro del borde, en un cilindro de radio 1 visto desde
+    // dentro y desde fuera (sin descarte de caras). Lotes de 8 lados: se descartan por separado.
+    constexpr int kSides = 128;
+    const float bands[] = {0.0f, 1.5f, 3.0f, 5.0f, 8.0f, 11.5f, 15.0f, 21.0f, kStormWallHeight};
+    const u32 alpha[] = {150, 140, 128, 115, 100, 85, 70, 55};
+    for (int i = 0; i < kSides; ++i) {
+        const float a0 = 2.0f * math3d::kPi * i / kSides, a1 = 2.0f * math3d::kPi * (i + 1) / kSides;
+        const Vec3 p0{cosf(a0), 0.0f, sinf(a0)}, p1{cosf(a1), 0.0f, sinf(a1)};
+        for (int band = 0; band < 8; ++band) {
+            const Material m = flat(rgba(146, 72, 208, alpha[band]));
+            const Vec3 lo{0.0f, bands[band], 0.0f}, hi{0.0f, bands[band + 1], 0.0f};
+            b.quad(m, p0 + lo, p1 + lo, p1 + hi, p0 + hi);
+        }
+        if (i % 8 == 7) b.flushGroup(out);
+    }
+    b.flushGroup(out);
+}
+
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out,
                      std::vector<Vec3>& pois, std::vector<Harvestable>& harvestables) {
     Builders b{visual, collision, &harvestables};

@@ -52,6 +52,7 @@ OBJS = src/main.o \
        src/game/nav_grid.o \
        src/game/player.o \
        src/game/structures.o \
+       src/game/storm_zone.o \
        src/game/weapon.o \
        src/gfx/graphics.o \
        src/gfx/mesh.o \

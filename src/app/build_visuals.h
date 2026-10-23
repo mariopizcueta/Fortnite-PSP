@@ -1,4 +1,5 @@
-// Dibujo de la construccion: paredes de madera, pared fantasma y pared apuntada.
+// Dibujo de la construccion: paredes, suelos y rampas de madera, pieza fantasma y pieza
+// apuntada.
 //
 // Las mallas se crean una vez (dos orientaciones, varios tintes) con las medidas de
 // BuildConfig y se colocan con GU_MODEL a partir de la MISMA caja de colision de cada
@@ -31,9 +32,13 @@ private:
 
     void drawBox(const world::Aabb& box, bool alongX, Variant variant,
                  const world::TextureLibrary* textures) const;
+    void drawPiece(game::PieceType type, const world::Aabb& box, bool alongX, int dir, float level,
+                   Variant variant, const world::TextureLibrary* textures, float lift = 0.0f) const;
 
     // [variante][0 = a lo largo de X, 1 = a lo largo de Z]
     std::vector<world::StaticBatch> m_meshes[kVariantCount][2];
+    std::vector<world::StaticBatch> m_floor[kVariantCount];
+    std::vector<world::StaticBatch> m_ramp[kVariantCount];  // sube hacia +X desde el origen
     game::BuildConfig m_config;
 };
 
