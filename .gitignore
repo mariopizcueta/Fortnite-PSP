@@ -1,0 +1,12 @@
+# Productos de compilacion de PSPSDK
+*.o
+*.d
+*.elf
+*.prx
+PARAM.SFO
+EBOOT.PBP
+build/
+
+.DS_Store
+releases/
+*.dSYM

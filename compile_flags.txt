@@ -1,0 +1,10 @@
+-xc++
+-std=gnu++17
+-Isrc
+-I/Users/mario/pspdev/psp/include
+-I/Users/mario/pspdev/psp/sdk/include
+-D_PSP_FW_VERSION=600
+-D__psp__
+-D__PSP__
+-Wall
+--target=mipsel-unknown-elf
