@@ -65,7 +65,11 @@ enum class GameEventType : u8 {
     ItemUsed,      // entity = 0, other = ItemType (consumible terminado)
     UseStarted,    // entity = 0, other = ItemType (empieza a usarse un consumible)
     UseCanceled,   // entity = 0, other = ItemType (se interrumpe sin gastarlo)
+    StormEnter,    // entity = quien entra en la tormenta del limite del mapa
 };
+
+// "Atacante" del dano de la tormenta (registro de eliminaciones, quien elimino al jugador).
+constexpr int kStormKiller = -2;
 
 struct GameEvent {
     GameEventType type = GameEventType::Shot;
@@ -161,6 +165,8 @@ public:
     const MatchConfig& config() const { return m_config; }
 
     bool alive(int id) const;
+    // Dentro de la tormenta del limite del mapa (world/storm.h).
+    bool inStorm(int id) const { return m_inStorm[id]; }
     const CharacterBody& body(int id) const;
     const char* name(int id) const;
     int botCount() const { return static_cast<int>(m_bots.size()); }
@@ -209,7 +215,8 @@ public:
                         float range, float damage);
     // Disparo del jugador: rayo desde la camara por la mira, comprobado desde el arma.
     ShotResult playerShot(const PlayerAim& aim, float damage, float range);
-    void applyDamage(int victim, float amount, int attacker);
+    // `ignoreShield`: el dano va directo a la vida (la tormenta, como en Fortnite).
+    void applyDamage(int victim, float amount, int attacker, bool ignoreShield = false);
     bool lineOfSight(const math3d::Vec3& from, const math3d::Vec3& to) const;
     math3d::Vec3 eyeOf(int id) const;
     math3d::Vec3 chestOf(int id) const;
@@ -255,6 +262,7 @@ private:
     MoveIntent steer(int index, float dt);
     void botShoot(int index);
     void separateCharacters();
+    void updateStorm(float dt);
     void eliminate(int victim, int killer);
     void addTracer(const math3d::Vec3& from, const math3d::Vec3& to, bool byPlayer, bool hit);
 
@@ -314,6 +322,8 @@ private:
     float m_sincePlayerDamaged = 99.0f;
 
     MatchStats m_stats;
+    bool m_inStorm[kMaxBots + 1] = {};
+    float m_stormTimer[kMaxBots + 1] = {};
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
 };

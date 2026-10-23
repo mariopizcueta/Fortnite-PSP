@@ -29,6 +29,7 @@ FORTNITEPSP_ASSET(sfx_muerte_jugador)
 FORTNITEPSP_ASSET(sfx_miniescudo)
 FORTNITEPSP_ASSET(sfx_pocion_escudo)
 FORTNITEPSP_ASSET(sfx_paso)
+FORTNITEPSP_ASSET(sfx_aviso_tormenta)
 FORTNITEPSP_ASSET(music_menu)
 
 namespace assets {
@@ -68,6 +69,7 @@ FORTNITEPSP_BLOB(sfxMuerteJugador, sfx_muerte_jugador)
 FORTNITEPSP_BLOB(sfxMiniescudo, sfx_miniescudo)
 FORTNITEPSP_BLOB(sfxPocionEscudo, sfx_pocion_escudo)
 FORTNITEPSP_BLOB(sfxPaso, sfx_paso)
+FORTNITEPSP_BLOB(sfxAvisoTormenta, sfx_aviso_tormenta)
 FORTNITEPSP_BLOB(musicMenu, music_menu)
 
 #undef FORTNITEPSP_BLOB

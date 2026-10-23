@@ -15,6 +15,7 @@
 #include "audio/mixer.h"
 #include "camera/orbit_camera.h"
 #include "camera/third_person_camera.h"
+#include "core/config.h"
 #include "core/timer.h"
 #include "game/character_model.h"
 #include "game/fixed_timestep.h"
@@ -64,6 +65,7 @@ public:
     bool testFreeCamera() const { return m_freeCameraActive; }
     int testBuildPiece() const { return m_buildPiece; }
     u32 testFootsteps() const { return m_playerSteps; }
+    float testFogEnd() const { return m_fogEnd; }
 #endif
 
 private:
@@ -90,6 +92,7 @@ private:
     // Efecto con volumen por distancia (hasta 60 m) y panoramica respecto a la camara.
     void playSpatial(audio::Sfx sfx, const math3d::Vec3& position, float maxVolume) const;
     void updatePerformance(float dt);
+    void updateStormFog();
     void renderGame(const FrameInfo& frame);
     // Devuelve los triangulos de personajes dibujados (para la pagina de depuracion).
     int renderCharacters(const math3d::Frustum& frustum, const math3d::Vec3& eye) const;
@@ -224,6 +227,9 @@ private:
     Screen m_screen = Screen::Login;
     Hud m_hud = Hud::Game;
     bool m_fog = true;
+    // Niebla del frame (la normal, o densa y morada cerca de la tormenta del borde).
+    u32 m_fogColor = config::kColorSky;
+    float m_fogStart = config::kFogStart, m_fogEnd = config::kFogEnd;
     bool m_vsync = true;
     bool m_exitRequested = false;
     float m_exitProgress = 0.0f;  // 0..1 mientras se mantiene la combinacion de salida

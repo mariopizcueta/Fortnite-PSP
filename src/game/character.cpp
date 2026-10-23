@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "world/storm.h"
 #include "world/world_units.h"
 
 namespace game {
@@ -192,7 +193,9 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
     moveAxis(0, s.velocity.x * dt, world);
     moveAxis(2, s.velocity.z * dt, world);
 
-    const float limit = world::kMapHalfSize - kMapMargin;
+    // Ya no hay pared invisible en el borde del mapa: alli empieza la tormenta (ver
+    // world/storm.h). Este tope, al final del suelo, no se alcanza vivo.
+    const float limit = world::kWorldExtent - kMapMargin;
     if (s.position.x > limit || s.position.x < -limit) {
         s.position.x = math3d::clampf(s.position.x, -limit, limit);
         s.velocity.x = 0.0f;

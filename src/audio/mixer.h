@@ -16,7 +16,7 @@ namespace audio {
 enum class Sfx : u8 {
     Shot, HitMarker, Hurt, Elimination, WallBuild, WallBreak, Reload,
     MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal,
-    PlayerDeath, DrinkSmallShield, DrinkShieldPotion, Footstep, Count
+    PlayerDeath, DrinkSmallShield, DrinkShieldPotion, Footstep, StormWarning, Count
 };
 
 class Mixer {

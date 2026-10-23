@@ -15,6 +15,7 @@
 
 #include "app/app_common.h"
 #include "audio/audio_system.h"
+#include "world/storm.h"
 #include "world/world_units.h"
 
 namespace app {
@@ -183,6 +184,11 @@ const ui::Hint* App::buildHints(int* count) const {
 }
 
 void App::renderGameHud() const {
+    // Dentro de la tormenta: la pantalla se tine de morado y late con cada golpe.
+    if (m_match.alive(0) && m_match.inStorm(0)) {
+        const float pulse = 0.5f + 0.5f * sinf(m_blinkTime * 6.0f);
+        gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(120, 40, 180, static_cast<u32>(55.0f + 30.0f * pulse)));
+    }
     // Destello rojo al recibir un impacto.
     const float hurt = m_match.sincePlayerDamaged();
     if (hurt < 0.35f) {
@@ -464,6 +470,20 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         char line[40];
         snprintf(line, sizeof(line), "ESPECTANDO A %s", m_match.name(spectateTarget()));
         printCenteredShadow(44, kErrorRed, line);
+    } else {
+        // Tormenta del limite del mapa: aviso al acercarse y dentro.
+        const Vec3& p = m_match.body(0).state().position;
+        const float depth = world::stormDepth(p.x, p.z);
+        if (m_match.inStorm(0)) {
+            char line[48];
+            snprintf(line, sizeof(line), "TORMENTA: -%.0f DE VIDA POR SEGUNDO", m_matchConfig.stormDamage);
+            printCenteredShadow(70, rgba(230, 180, 255), line);
+            printCenteredShadow(81, kWhite, "Vuelve a la zona segura");
+        } else if (depth > -12.0f) {
+            char line[48];
+            snprintf(line, sizeof(line), "Limite del mapa: tormenta a %.0f m", -depth);
+            printCenteredShadow(70, rgba(210, 160, 250), line);
+        }
     }
 
     // Registro de eliminaciones.
@@ -474,6 +494,8 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const u32 color = (e.killer == 0 || e.victim == 0) ? config::kColorGold : kWhite;
         if (e.killer >= 0) {
             gfx::text::printShadow(6, y, color, "%s elimino a %s", m_match.name(e.killer), m_match.name(e.victim));
+        } else if (e.killer == game::kStormKiller) {
+            gfx::text::printShadow(6, y, color, "%s cayo en la tormenta", m_match.name(e.victim));
         } else {
             gfx::text::printShadow(6, y, color, "%s ha caido", m_match.name(e.victim));
         }

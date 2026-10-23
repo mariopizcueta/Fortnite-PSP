@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "core/timer.h"
+#include "world/storm.h"
 
 namespace game {
 
@@ -146,6 +147,10 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_nextTracer = 0;
     m_sincePlayerHit = m_sincePlayerDamaged = 99.0f;
     m_stats = MatchStats{};
+    for (int i = 0; i <= kMaxBots; ++i) {
+        m_inStorm[i] = false;
+        m_stormTimer[i] = 0.0f;
+    }
     if (m_alive <= 1) {
         m_phase = MatchPhase::Finished;
         m_winner = 0;
@@ -206,8 +211,10 @@ bool Match::lineOfSight(const Vec3& from, const Vec3& to) const {
 
 void Match::teleport(int id, const Vec3& position, float yaw) {
     const float health = mutableBody(id).state().health;  // mover no cura
+    const float shield = mutableBody(id).state().shield;
     mutableBody(id).reset(position, yaw, *m_world);
     mutableBody(id).state().health = health;
+    mutableBody(id).state().shield = shield;
     if (id > 0) m_bots[id - 1].progressAnchor = position;
 }
 
@@ -260,6 +267,7 @@ void Match::step(float dt) {
     updatePlayer(dt);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
     separateCharacters();
+    updateStorm(dt);
     if (m_structures.revision() != m_seenStructureRevision) {
         m_seenStructureRevision = m_structures.revision();
         onStructuresChanged();
@@ -1061,12 +1069,12 @@ void Match::commandBotTravel(int botIndex, const Vec3& destination) {
     b.decisionTimer = 0.0f;
 }
 
-void Match::applyDamage(int victim, float amount, int attacker) {
+void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShield) {
     if (!alive(victim) || amount <= 0.0f) return;
     if (victim == 0 && m_config.invulnerablePlayer) return;
     CharacterState& s = mutableBody(victim).state();
     // El escudo absorbe primero; lo que sobra pasa a la vida.
-    const float absorbed = s.shield < amount ? s.shield : amount;
+    const float absorbed = ignoreShield ? 0.0f : (s.shield < amount ? s.shield : amount);
     s.shield -= absorbed;
     s.health -= amount - absorbed;
     if (victim == 0) {
@@ -1131,6 +1139,35 @@ void Match::addTracer(const Vec3& from, const Vec3& to, bool byPlayer, bool hit)
     t.age = 0.0f;
     t.byPlayer = byPlayer;
     t.hit = hit;
+}
+
+void Match::updateStorm(float dt) {
+    // Tormenta del limite del mapa: al entrar, un golpe; despues, uno cada stormTickSeconds.
+    if (m_phase == MatchPhase::Finished) return;
+    for (int id = 0; id < entityCount(); ++id) {
+        if (!alive(id)) {
+            m_inStorm[id] = false;
+            continue;
+        }
+        const Vec3& p = body(id).state().position;
+        if (world::stormDepth(p.x, p.z) <= 0.0f) {
+            m_inStorm[id] = false;
+            continue;
+        }
+        if (!m_inStorm[id]) {
+            m_inStorm[id] = true;
+            m_stormTimer[id] = 0.0f;
+            pushEvent(GameEventType::StormEnter, id, -1, p);
+            applyDamage(id, m_config.stormDamage, kStormKiller, true);
+            continue;
+        }
+        m_stormTimer[id] += dt;
+        // Margen de 1 ms: 60 pasos de 1/60 s suman 0.99999 s en float.
+        if (m_stormTimer[id] >= m_config.stormTickSeconds - 0.001f) {
+            m_stormTimer[id] -= m_config.stormTickSeconds;
+            applyDamage(id, m_config.stormDamage, kStormKiller, true);
+        }
+    }
 }
 
 void Match::separateCharacters() {

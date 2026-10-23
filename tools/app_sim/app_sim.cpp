@@ -37,6 +37,7 @@
 #include "platform/log.h"
 #include "game/fixed_timestep.h"
 #include "soft_gfx.h"
+#include "world/storm.h"
 
 // --- Plataforma simulada --------------------------------------------------------------------
 
@@ -255,7 +256,7 @@ void testAudio(const char* outDir) {
                                   assets::sfxRecarga(), assets::sfxMenuMover(), assets::sfxMenuAceptar(),
                                   assets::sfxVictoria(), assets::sfxDerrota(), assets::sfxPico(),
                                   assets::sfxCuracion(), assets::sfxMuerteJugador(), assets::sfxMiniescudo(),
-                                  assets::sfxPocionEscudo(), assets::sfxPaso()};
+                                  assets::sfxPocionEscudo(), assets::sfxPaso(), assets::sfxAvisoTormenta()};
     bool clipsOk = true;
     int clipBytes = 0;
     for (const assets::Blob& b : clips) {
@@ -263,8 +264,8 @@ void testAudio(const char* outDir) {
         clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
         clipBytes += static_cast<int>(b.size);
     }
-    printf("  17 efectos, %d KB en total\n", clipBytes / 1024);
-    check(clipsOk, "los 17 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+    printf("  18 efectos, %d KB en total\n", clipBytes / 1024);
+    check(clipsOk, "los 18 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
 
     // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
     static audio::ImaStream music;
@@ -374,6 +375,7 @@ void testNewControls(Sim& sim) {
         const world::Harvestable& h = world.harvestables()[i];
         if (h.total != 48) continue;
         const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+        if (world::stormDepth(c.x, c.z) > -5.0f) continue;  // fuera de la tormenta del borde
         const Vec3 feet{c.x - forward.x * 1.0f, 0.0f, c.z - forward.z * 1.0f};
         const world::Aabb spot{{feet.x - 0.4f, 0.1f, feet.z - 0.4f}, {feet.x + 0.4f, 1.8f, feet.z + 0.4f}};
         if (!world.collision().overlapsAny(spot, world::kBlocksMovement)) tree = i;
@@ -655,6 +657,40 @@ int main(int argc, char** argv) {
     check(heapLast <= heapFirst + 64 * 1024 && heapMax <= heapFirst + 256 * 1024,
           "la memoria no crece entre partidas (tolerancia 64 KB)");
     check(audio::mixer().droppedCommands() == 0, "no se ha perdido ningun sonido por la cola llena");
+
+    printf("\n6b) Tormenta en el limite del mapa\n");
+    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "nueva partida");
+    sim.wait(0.5f);
+    const float centerFog = sim.app().testFogEnd();
+    // El jugador, a 12 m del borde, mirando hacia fuera (hacia donde mira la camara).
+    float yaw = sim.app().testCameraYaw();
+    const Vec3 out{-sinf(yaw), 0.0f, -cosf(yaw)};
+    float r = 0.0f;
+    while (world::stormDepth(out.x * r, out.z * r) < -12.0f) r += 0.5f;
+    match.teleport(0, out * r, yaw);
+    sim.wait(1.0f);
+    sim.shot("27_borde_tormenta");
+    const float edgeFog = sim.app().testFogEnd();
+    check(match.alive(0) && match.body(0).state().health == 100.0f, "a 12 m del borde no hay dano");
+    // Dentro: 8 m en la tormenta.
+    while (world::stormDepth(out.x * r, out.z * r) < 8.0f) r += 0.5f;
+    sim.takeAudioPeak();
+    match.teleport(0, out * r, yaw);
+    sim.wait(0.6f);
+    sim.shot("28_dentro_tormenta");
+    const float stormFog = sim.app().testFogEnd();
+    printf("  niebla hasta: %.0f m en el centro, %.0f m a 12 m del borde, %.0f m dentro de la tormenta\n",
+           static_cast<double>(centerFog), static_cast<double>(edgeFog), static_cast<double>(stormFog));
+    check(centerFog > 90.0f && edgeFog < centerFog && stormFog < 20.0f,
+          "la niebla se espesa al acercarse y dentro solo se ven unos metros");
+    check(match.inStorm(0) && match.body(0).state().health <= 70.0f && sim.takeAudioPeak() > 3000,
+          "dentro de la tormenta: dano y aviso sonoro");
+    check(sim.waitUntil([&] { return sim.results() == kDefeat; }, 8.0f), "en la tormenta se cae y sale la derrota");
+    sim.wait(1.0f);
+    sim.shot("29_derrota_tormenta");
+    sim.press(PSP_CTRL_CROSS);
+    check(sim.screen() == kLobby, "vuelta al lobby");
 
     printf("\n7) Salir desde el lobby\n");
     sim.press(PSP_CTRL_DOWN);

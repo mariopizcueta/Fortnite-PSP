@@ -36,7 +36,9 @@ Sistema **dextrógiro con +Y arriba** (el mismo que OpenGL y `libpspgum`):
 
 - **Origen** `(0, 0, 0)`: centro del mapa, a nivel del suelo.
 - **Suelo**: plano `Y = 0`.
-- **Límites**: `X, Z ∈ [-96, 96]` (192 × 192 m); los personajes no pasan de ±95,5.
+- **Mapa**: `X, Z ∈ [-96, 96]` (192 × 192 m).
+- **Límite jugable:** no hay pared invisible; a partir de 88 m empieza la tormenta (ver
+  *Límite del mapa: la tormenta*).
 - En espacio de vista la cámara mira hacia **-Z** (convención OpenGL).
 - **Yaw** (jugador, bots, cámaras): se mira hacia `(-sin yaw, 0, -cos yaw)`; 0 = norte.
 
@@ -64,6 +66,37 @@ Sistema **dextrógiro con +Y arriba** (el mismo que OpenGL y `libpspgum`):
   = cielo `#8CC2D8`, así el horizonte no tiene costura.
 - Los lotes enteramente más allá de 95 m no se envían a la GE (con la niebla
   desactivada, el límite es el plano lejano, a 140 m).
+
+## Límite del mapa: la tormenta (fase 7)
+
+Antes, los personajes chocaban con una pared invisible en ±95,5 m y el suelo terminaba
+en ±96. Ahora el borde es una **tormenta permanente** (`world/storm.h`):
+
+- **Zona segura:** un cuadrado de 176 m de lado (±88 m) con las esquinas redondeadas
+  (radio 24 m). `world::stormDepth(x, z)` da los metros dentro de la tormenta (o, en
+  negativo, la distancia hasta ella).
+- **Daño:** 30 al entrar y 30 cada segundo, directo a la vida (no gasta el escudo, como en
+  Fortnite). Afecta también a los bots. La eliminación se atribuye a la tormenta.
+- **Niebla:** a menos de 30 m del borde se espesa (de 95 a ~42 m) y tira a morado. Dentro
+  se cierra a ~13 m de un morado oscuro.
+  - **Color de limpieza:** es el mismo que el de la niebla.
+  - **Qué se mide:** cuenta lo más metido entre la cámara y el personaje.
+  - **Distancia de dibujado:** la propia niebla, así que dentro se dibuja mucho menos.
+- **Muro de tormenta:** cortina morada translúcida en el contorno de la zona segura.
+  - **Opacidad:** más opaca abajo y más transparente arriba.
+  - **Altura:** 30 m.
+  - **Geometría:** subdividida en trozos de 3 m por la banda de guarda.
+  - **Dibujado:** en tramos de ~24 m que se descartan por separado.
+- **Suelo exterior:** losas de hierba de 4 m hasta ±144 m, para que nunca se vea dónde
+  acaba el mundo.
+  - **Tope físico:** está ahí, a ±143,5 m, pero no se alcanza vivo: con 100 de vida se
+    cae en 4 golpes, unos 25 m corriendo.
+- **Avisos:** a menos de 12 m del borde, "Límite del mapa: tormenta a N m"; dentro,
+  "TORMENTA: -30 de vida por segundo", tinte morado que late y el sonido
+  `avisotormenta` al entrar.
+- **Minimapa:** la franja de tormenta aparece teñida de morado.
+- **Bots:** su zona de exploración empieza ahora en 80 m de radio (antes 85), dentro de
+  la zona segura.
 
 ## Plano del mapa: depósito "Polvorín"
 

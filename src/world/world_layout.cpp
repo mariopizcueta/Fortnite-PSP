@@ -22,6 +22,7 @@
 #include <initializer_list>
 
 #include "gfx/graphics.h"
+#include "world/storm.h"
 #include "world/world.h"
 #include "world/world_units.h"
 
@@ -574,7 +575,8 @@ void scatteredTrees(Builders& b, std::vector<StaticBatch>& out) {
 
 }  // namespace
 
-u32 mapColorAt(float x, float z) {
+namespace {
+u32 mapColorBase(float x, float z) {
     // Tejados de las naves con su color (como se verian desde el aire).
     if (insideWarehouse(x, z)) {
         if (x < -10.0f) return rgba(58, 82, 168);
@@ -592,6 +594,17 @@ u32 mapColorAt(float x, float z) {
         case GroundType::Grass: break;
     }
     return rgba(78, 130, 54);
+}
+}  // namespace
+
+u32 mapColorAt(float x, float z) {
+    const u32 c = mapColorBase(x, z);
+    if (stormDepth(x, z) <= 0.0f) return c;
+    // Tormenta (limite del mapa): morado sobre el terreno.
+    auto mix = [&](int shift, u32 storm) {
+        return (((c >> shift) & 0xFF) * 2 + storm) / 3;
+    };
+    return rgba(mix(0, 140), mix(8, 60), mix(16, 190));
 }
 
 void buildGround(SceneBuilder& b, CollisionWorld& /*collision*/, std::vector<StaticBatch>& out) {
@@ -658,6 +671,68 @@ void buildGround(SceneBuilder& b, CollisionWorld& /*collision*/, std::vector<Sta
             b.flushGroup(out);
         }
     }
+
+    // Suelo mas alla del mapa (hasta kWorldExtent): queda dentro de la tormenta y de su
+    // niebla, asi nunca se ve donde acaba el mundo. Losas de 4 m en bloques de 16 m.
+    const int outerChunks = static_cast<int>(2.0f * kWorldExtent / kChunkSize);
+    for (int cz = 0; cz < outerChunks; ++cz) {
+        for (int cx = 0; cx < outerChunks; ++cx) {
+            const float x0 = -kWorldExtent + cx * kChunkSize, z0 = -kWorldExtent + cz * kChunkSize;
+            const bool insideMap = x0 >= -kMapHalfSize && x0 + kChunkSize <= kMapHalfSize && z0 >= -kMapHalfSize &&
+                                   z0 + kChunkSize <= kMapHalfSize;
+            if (insideMap) continue;
+            constexpr float tile = 4.0f;
+            for (int tz = 0; tz < static_cast<int>(kChunkSize / tile); ++tz) {
+                for (int tx = 0; tx < static_cast<int>(kChunkSize / tile); ++tx) {
+                    const float x = x0 + tx * tile, z = z0 + tz * tile;
+                    if (x >= -kMapHalfSize && x + tile <= kMapHalfSize && z >= -kMapHalfSize && z + tile <= kMapHalfSize) {
+                        continue;
+                    }
+                    const int ix = cx * 4 + tx, iz = cz * 4 + tz;
+                    b.groundTile(grass, x, z, tile, 0.82f + 0.16f * hash01(ix, iz, 9));
+                }
+            }
+            b.flushGroup(out);
+        }
+    }
+}
+
+void buildStormWall(SceneBuilder& b, std::vector<StaticBatch>& out) {
+    // Cortina morada en el borde de la zona segura (cuadrado de esquinas redondeadas):
+    // mas opaca abajo y mas transparente arriba. Puntos cada ~4 m del contorno.
+    std::vector<Vec3> contour;
+    const float inner = kStormEdge - kStormCorner;
+    const int straight = static_cast<int>(2.0f * inner / 4.0f);
+    const int arc = 6;
+    const float cornerX[4] = {inner, -inner, -inner, inner}, cornerZ[4] = {-inner, -inner, inner, inner};
+    for (int side = 0; side < 4; ++side) {
+        // Arco de la esquina y tramo recto hasta la siguiente (sentido antihorario visto
+        // desde arriba: este -> norte -> oeste -> sur).
+        const float a0 = side * 0.5f * math3d::kPi;
+        for (int k = 0; k < arc; ++k) {
+            const float a = a0 + 0.5f * math3d::kPi * k / arc;
+            contour.push_back({cornerX[side] + cosf(a) * kStormCorner, 0.0f, cornerZ[side] - sinf(a) * kStormCorner});
+        }
+        const int next = (side + 1) % 4;
+        const float a1 = a0 + 0.5f * math3d::kPi;
+        const Vec3 from{cornerX[side] + cosf(a1) * kStormCorner, 0.0f, cornerZ[side] - sinf(a1) * kStormCorner};
+        const Vec3 to{cornerX[next] + cosf(a1) * kStormCorner, 0.0f, cornerZ[next] - sinf(a1) * kStormCorner};
+        for (int k = 0; k < straight; ++k) contour.push_back(from + (to - from) * (static_cast<float>(k) / straight));
+    }
+    const float bands[] = {0.0f, 3.0f, 8.0f, 15.0f, kStormWallHeight};
+    const u32 alpha[] = {150, 128, 100, 70};
+    const int n = static_cast<int>(contour.size());
+    for (int i = 0; i < n; ++i) {
+        const Vec3& p0 = contour[i];
+        const Vec3& p1 = contour[(i + 1) % n];
+        for (int band = 0; band < 4; ++band) {
+            const Material m = flat(rgba(146, 72, 208, alpha[band]));
+            const Vec3 lo{0.0f, bands[band], 0.0f}, hi{0.0f, bands[band + 1], 0.0f};
+            b.quad(m, p0 + lo, p1 + lo, p1 + hi, p0 + hi);
+        }
+        if (i % 6 == 5) b.flushGroup(out);  // trozos de ~24 m: se descartan por separado
+    }
+    b.flushGroup(out);
 }
 
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out,

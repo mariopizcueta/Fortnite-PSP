@@ -144,11 +144,11 @@ Todas las referencias a controles se dibujan con los iconos de `Recursos/Textura
     | `pociondeescudogrande.wav`             | Mientras se bebe una poción de escudo (se corta si se cancela) |
     | `Fortnite Running Sound Effect.wav`    | Pasos: se extrae un único paso (0,22 s) y suena en cada pisada |
 
+  - **`avisotormenta`:** suena al entrar en la tormenta del límite del mapa (v0.7.3).
   - **Sin usar todavía:** `Chestopening`, `Fortnite Chest(sin abrir)`, `Opertura ala
-    delta`, `Saltar del autobus`, `Fortnite bailemp3`, `Fortnite fusil de tirador de
-    cerrojo` y `avisotormenta`. Se quedan en Recursos y no se empaquetan hasta que exista
-    su mecánica (cofres, ala delta, autobús, bailes, francotirador, fases de la
-    tormenta).
+    delta`, `Saltar del autobus`, `Fortnite bailemp3` y `Fortnite fusil de tirador de
+    cerrojo`. Se quedan en Recursos y no se empaquetan hasta que exista su mecánica
+    (cofres, ala delta, autobús, bailes, francotirador).
   - **Sonidos sintetizados** (`tools/generate_sounds.py`): impacto, herido, eliminación,
     pared, pared rota, recarga, menú (mover y aceptar), derrota, pico y curación (vendas
     y botiquín).

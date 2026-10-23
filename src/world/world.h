@@ -28,6 +28,9 @@ public:
     // Dibuja los lotes visibles (frustum + distancia maxima). Requiere gfx::begin3D().
     RenderStats draw(const math3d::Frustum& frustum, const math3d::Vec3& eye,
                      float maxDistance) const;
+    // Muro de la tormenta (translucido): despues de todo lo opaco.
+    RenderStats drawStormWall(const math3d::Frustum& frustum, const math3d::Vec3& eye,
+                              float maxDistance) const;
 
     const CollisionWorld& collision() const { return m_collision; }
     // Para anadir y quitar las paredes construidas (cajas dinamicas) durante la partida.
@@ -52,6 +55,7 @@ public:
 private:
     TextureLibrary m_textures;
     std::vector<StaticBatch> m_static;  // geometria visual, en coordenadas de mundo
+    std::vector<StaticBatch> m_stormWall;
     CollisionWorld m_collision;         // geometria de colision
     std::vector<math3d::Vec3> m_pointsOfInterest;
     std::vector<Harvestable> m_harvestables;
@@ -66,6 +70,8 @@ u32 mapColorAt(float x, float z);
 // Contenido del escenario (world_layout.cpp). Cada funcion registra por separado la
 // parte visual (SceneBuilder) y la de colision (CollisionWorld).
 void buildGround(SceneBuilder& visual, CollisionWorld& collision, std::vector<StaticBatch>& out);
+// Muro de la tormenta en el limite del mapa (translucido; se dibuja aparte, con mezcla).
+void buildStormWall(SceneBuilder& visual, std::vector<StaticBatch>& out);
 void buildStructures(SceneBuilder& visual, CollisionWorld& collision,
                      std::vector<StaticBatch>& out, std::vector<math3d::Vec3>& pointsOfInterest,
                      std::vector<Harvestable>& harvestables);

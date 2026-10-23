@@ -21,6 +21,7 @@
 #include "game/match.h"
 #include "game/nav_grid.h"
 #include "gfx/graphics.h"
+#include "world/storm.h"
 #include "world/world.h"
 #include "world/world_units.h"
 
@@ -29,6 +30,7 @@ namespace gfx {
 void setModelMatrix(const math3d::Mat4&) {}
 void bindTexture(const Texture*) {}
 void drawMesh(const Mesh&) {}
+void setBlend(bool) {}
 }  // namespace gfx
 
 using game::Match;
@@ -914,8 +916,9 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     for (int i = 0; i < static_cast<int>(world.harvestables().size()); ++i) {
         const world::Harvestable& h = world.harvestables()[i];
         if (h.total != 48) continue;
-        // Un arbol con hueco al sur para el jugador.
+        // Un arbol con hueco al sur para el jugador, fuera de la tormenta del borde.
         const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+        if (world::stormDepth(c.x, c.z) > -5.0f) continue;
         const world::Aabb spot{{c.x - 0.5f, 0.1f, h.box.max.z + 0.3f}, {c.x + 0.5f, 1.8f, h.box.max.z + 1.4f}};
         if (!world.collision().overlapsAny(spot, world::kBlocksMovement)) {
             treeIndex = i;
@@ -969,6 +972,86 @@ void testInventory(world::World& world, game::NavGrid& nav) {
     check(!inv.pickaxe() && inv.activeType() != ItemType::None, "la cruceta guarda el pico y vuelve a una ranura");
 }
 
+// --- 13) Tormenta del limite del mapa ------------------------------------------------------
+
+void testStorm(world::World& world, game::NavGrid& nav) {
+    printf("\n13) Limite del mapa: tormenta en lugar de pared invisible\n");
+    check(world::stormDepth(88.0f, 0.0f) == 0.0f && world::stormDepth(100.0f, 0.0f) == 12.0f &&
+              world::stormDepth(70.0f, 70.0f) < 0.0f && world::stormDepth(88.0f, 88.0f) > 0.0f,
+          "zona segura: cuadrado de 176 m con esquinas redondeadas (tormenta a partir de 88 m)");
+    MatchConfig cfg;
+    cfg.botCount = 1;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {0.0f, 0.0f, -60.0f}, 0.0f);
+
+    // Antes el jugador se detenia en x = 95.5: ahora sigue andando hacia la tormenta.
+    m.teleport(0, {93.0f, 0.0f, 0.0f}, -math3d::kPi * 0.5f);
+    for (int i = 0; i < 60; ++i) {
+        game::PlayerInput in;
+        in.moveY = -1.0f;
+        in.cameraYaw = -math3d::kPi * 0.5f;  // mirando al este
+        m.setPlayerInput(in, game::PlayerAim{});
+        m.step(game::FixedTimestep::kStep);
+    }
+    const float x = m.body(0).state().position.x;
+    printf("  1 s corriendo hacia el este desde x = 93: x = %.1f, vida %.0f\n", static_cast<double>(x),
+           static_cast<double>(m.body(0).state().health));
+    check(x > 97.0f, "ya no hay pared invisible en el borde del mapa (x = 95.5)");
+
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {0.0f, 0.0f, -60.0f}, 0.0f);
+    m.giveItem(game::ItemType::ShieldPotion, 1);
+    m.teleport(0, {80.0f, 0.0f, 0.0f}, 0.0f);
+    runSteps(m, 180);
+    check(m.body(0).state().health == 100.0f && !m.inStorm(0), "a 8 m del borde no hay dano");
+    // Con escudo: la tormenta no lo toca, va directa a la vida (como en Fortnite).
+    game::PlayerCommands next;
+    next.cycleSlot = 1;
+    for (int k = 0; k < 3; ++k) runSteps(m, 1, game::PlayerAim{}, next);
+    game::PlayerCommands use;
+    use.useItem = true;
+    runSteps(m, 5 * 60 + 5, game::PlayerAim{}, use);
+    const float shield = m.body(0).state().shield;
+    u32 cursor = m.eventCount();
+    m.teleport(0, {100.0f, 0.0f, 0.0f}, 0.0f);
+    runSteps(m, 1);
+    const float afterEnter = m.body(0).state().health;
+    runSteps(m, 60);
+    const float afterTick = m.body(0).state().health;
+    printf("  dentro de la tormenta (12 m): vida 100 -> %.0f al entrar -> %.0f al segundo; escudo %.0f -> %.0f\n",
+           static_cast<double>(afterEnter), static_cast<double>(afterTick), static_cast<double>(shield),
+           static_cast<double>(m.body(0).state().shield));
+    check(countEvents(m, cursor, game::GameEventType::StormEnter) == 1 && afterEnter == 70.0f && afterTick == 40.0f,
+          "la tormenta quita 30 al entrar y 30 cada segundo");
+    check(shield > 0.0f && m.body(0).state().shield == shield, "el dano de la tormenta no gasta el escudo");
+    runSteps(m, 2 * 60);
+    bool stormKill = false;
+    for (int i = 0; i < m.killEventCount(); ++i) {
+        stormKill |= m.killEvent(i).victim == 0 && m.killEvent(i).killer == game::kStormKiller;
+    }
+    check(!m.alive(0) && stormKill, "a los 4 golpes el jugador cae y la eliminacion es de la tormenta");
+
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(1, {-100.0f, 0.0f, 20.0f}, 0.0f);
+    runSteps(m, 1);
+    check(m.body(1).state().health == 70.0f && m.inStorm(1), "los bots dentro de la tormenta tambien reciben dano");
+
+    // El tope fisico esta al final del suelo exterior (144 m), lejos de la zona segura.
+    m.teleport(1, {0.0f, 0.0f, -60.0f}, 0.0f);
+    cfg.invulnerablePlayer = true;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    m.teleport(0, {140.0f, 0.0f, 0.0f}, -math3d::kPi * 0.5f);
+    for (int i = 0; i < 120; ++i) {
+        game::PlayerInput in;
+        in.moveY = -1.0f;
+        in.cameraYaw = -math3d::kPi * 0.5f;
+        m.setPlayerInput(in, game::PlayerAim{});
+        m.step(game::FixedTimestep::kStep);
+    }
+    check(m.body(0).state().position.x <= world::kWorldExtent, "al final del suelo exterior (144 m) hay un tope");
+}
+
 }  // namespace
 
 int main() {
@@ -992,6 +1075,7 @@ int main() {
     testFort(world, nav);
     testEvents(world, nav);
     testInventory(world, nav);
+    testStorm(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

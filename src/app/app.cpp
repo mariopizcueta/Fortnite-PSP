@@ -9,6 +9,7 @@
 #include "assets/embedded_assets.h"
 #include "audio/audio_system.h"
 #include "platform/log.h"
+#include "world/storm.h"
 #include "world/world_units.h"
 
 namespace app {
@@ -20,7 +21,11 @@ using math3d::Vec3;
 constexpr float kLockAngleDegrees = 35.0f;  // L: objetivo dentro de este cono
 constexpr float kLockDistance = 45.0f;
 constexpr float kSoundRange = 60.0f;
-constexpr float kFootstepRange = 14.0f;        // m: pasos de los bots que se oyen
+constexpr float kFootstepRange = 14.0f;
+// Tormenta del limite del mapa (world/storm.h): niebla y color.
+constexpr float kStormFogRange = 30.0f;  // m antes del borde en que la niebla empieza a espesarse
+constexpr u32 kStormFogColor = gfx::rgba(150, 92, 200);
+constexpr u32 kStormInsideColor = gfx::rgba(98, 54, 142);        // m: pasos de los bots que se oyen
 constexpr float kCharacterLodDistance = 10.0f;  // m: bots mas lejos con el modelo simple        // m: mas lejos no se oyen disparos de bots
 
 // Aparicion del jugador: al sur del muro, mirando al deposito.
@@ -375,7 +380,35 @@ void App::updateGame(const input::Input& in, float dt) {
         m_targetWall = -1;
     }
 
+    updateStormFog();
     updatePerformance(dt);
+}
+
+void App::updateStormFog() {
+    // Lejos de la tormenta, la niebla normal. A menos de kStormFogRange metros se espesa y
+    // tira a morado; dentro, en cuanto se entran unos metros, solo se ven ~13 m de
+    // tormenta morada: nunca se llega a ver donde acaba el mundo.
+    // Cuenta lo mas metido en la tormenta entre la camara y el personaje seguido: la
+    // camara va 5 m por detras y, al entrar, la pantalla debe cerrarse ya.
+    const Vec3 eye = cameraEye();
+    float depth = world::stormDepth(eye.x, eye.z);
+    if (!m_freeCameraActive) {
+        const Vec3 p = renderState(spectateTarget()).position;
+        const float followed = world::stormDepth(p.x, p.z);
+        if (followed > depth) depth = followed;
+    }
+    const float nearT = math3d::clampf((depth + kStormFogRange) / kStormFogRange, 0.0f, 1.0f);
+    const float inT = math3d::clampf(depth / 4.0f, 0.0f, 1.0f);
+    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+    auto lerpColor = [&](u32 a, u32 b, float t) {
+        auto ch = [&](int shift) {
+            return static_cast<u32>(lerp(static_cast<float>((a >> shift) & 0xFF), static_cast<float>((b >> shift) & 0xFF), t));
+        };
+        return rgba(ch(0), ch(8), ch(16));
+    };
+    m_fogColor = lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormInsideColor, inT);
+    m_fogStart = lerp(lerp(config::kFogStart, 6.0f, nearT), 0.0f, inT);
+    m_fogEnd = lerp(lerp(config::kFogEnd, 42.0f, nearT), 13.0f, inT);
 }
 
 void App::updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld) {
@@ -505,6 +538,9 @@ void App::processEvents() {
             case game::GameEventType::Reload:
                 playSfx(audio::Sfx::Reload, 0.8f);
                 break;
+            case game::GameEventType::StormEnter:
+                if (e.entity == 0) playSfx(audio::Sfx::StormWarning, 1.0f);
+                break;
             case game::GameEventType::PickaxeSwing:
                 m_playerAnim.onSwing();
                 if (e.other == 1) playSfx(audio::Sfx::Pickaxe, 0.9f);
@@ -580,7 +616,7 @@ void App::updatePerformance(float dt) {
 
 u32 App::clearColor() const {
     // En la partida, mismo color que la niebla: los objetos lejanos se funden con el fondo.
-    return m_screen == Screen::Game ? config::kColorSky : kNavy;
+    return m_screen == Screen::Game ? (m_fog ? m_fogColor : config::kColorSky) : kNavy;
 }
 
 math3d::Vec3 App::cameraEye() const {
@@ -642,20 +678,22 @@ void App::renderGame(const FrameInfo& frame) {
         const math3d::Mat4 projection = m_projection.matrix();
         const math3d::Mat4 view =
             m_freeCameraActive ? m_freeCamera.viewMatrix() : m_followCamera.viewMatrix();
+        // Niebla: la normal o, cerca de la tormenta del borde, mas densa y morada.
         gfx::FogSettings fog;
         fog.enabled = m_fog;
-        fog.start = config::kFogStart;
-        fog.end = config::kFogEnd;
-        fog.color = config::kColorSky;  // == clearColor()
+        fog.start = m_fogStart;
+        fog.end = m_fogEnd;
+        fog.color = m_fogColor;  // == clearColor()
 
         gfx::begin3D(projection, view, fog);
         const math3d::Frustum frustum = math3d::Frustum::fromMatrix(projection * view);
-        const float drawDistance = m_fog ? config::kFogEnd : config::kFarPlane;
+        const float drawDistance = m_fog ? m_fogEnd : config::kFarPlane;
         m_stats = m_world.draw(frustum, cameraEye(), drawDistance);
         if (m_buildVisualsReady) m_buildVisuals.drawWalls(m_match.structures(), m_world.textures());
         m_characterTriangles = m_modelsReady ? renderCharacters(frustum, cameraEye()) : 0;
         renderTracers();
         // Lo semitransparente al final, para no tapar lo que hay detras.
+        m_world.drawStormWall(frustum, cameraEye(), drawDistance);
         if (m_buildVisualsReady && m_buildMode && !m_freeCameraActive) {
             if (m_targetWall >= 0) m_buildVisuals.drawHighlight(m_match.structures().wall(m_targetWall));
             m_buildVisuals.drawGhost(m_wallPlan);
@@ -682,7 +720,7 @@ void App::renderGame(const FrameInfo& frame) {
 
 int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const {
     int triangles = 0;
-    const float maxDistance = m_fog ? config::kFogEnd : config::kFarPlane;
+    const float maxDistance = m_fog ? m_fogEnd : config::kFarPlane;
     auto visible = [&](const Vec3& p) {
         return math3d::length(p - eye) < maxDistance + 2.0f &&
                frustum.sphereVisible(p + Vec3{0.0f, 0.9f, 0.0f}, 1.3f);

@@ -444,6 +444,8 @@ void App::overlayResults() const {
     } else {
         if (m_playerKiller > 0) {
             snprintf(line, sizeof(line), "Te ha eliminado %s", m_match.name(m_playerKiller));
+        } else if (m_playerKiller == game::kStormKiller) {
+            snprintf(line, sizeof(line), "Te ha eliminado la tormenta");
         } else {
             snprintf(line, sizeof(line), "Has caido");
         }

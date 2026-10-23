@@ -3,7 +3,7 @@
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
 **Estado: fase 7, paso 1 (inventario, escudo, curas, pico y materiales) + personaje nuevo +
-recursos del usuario, v0.7.2.** Se juega
+recursos del usuario + tormenta en el límite del mapa, v0.7.3.** Se juega
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -63,6 +63,18 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**Fase 7, tormenta en el límite del mapa (v0.7.3)** (detalle en
+[docs/MUNDO.md](docs/MUNDO.md#límite-del-mapa-la-tormenta-fase-7)):
+- **Sin pared invisible:** el borde es una tormenta morada.
+- **Niebla:** se espesa al acercarse y dentro deja ver unos 13 m, así que nunca se ve
+  dónde acaba el mundo.
+- **Daño:** 30 por segundo directo a la vida.
+- **Avisos:** muro de tormenta, avisos en el HUD, tinte morado, el sonido `avisotormenta`
+  y la tormenta marcada en el minimapa.
+
+![Borde de la tormenta](docs/capturas/app_27_borde_tormenta.png)
+![Dentro de la tormenta](docs/capturas/app_28_dentro_tormenta.png)
 
 **Fase 7, recursos nuevos (v0.7.2):**
 - **Ayudas de controles:** todas usan los iconos de los botones de `Recursos/Texturas PSP`.
@@ -217,9 +229,9 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 - **Construcción:** solo funciona la pared; suelo y rampa se eligen con la cruceta, pero
   aún no se colocan. Piedra y metal se acumulan, pero aún no se usan.
 - **Los bots** no usan pico, escudo ni consumibles.
-- **Zona simplificada:** un círculo que se cierra en 4 min y guía a los bots hacia el
-  depósito. Fuera de ella no se pierde vida. El reloj del HUD muestra lo que falta para
-  que termine de cerrarse.
+- **Zona que se cierra simplificada:** un círculo que se cierra en 4 min y guía a los bots
+  hacia el depósito. Fuera de ella no se pierde vida; solo hace daño la tormenta fija del
+  límite del mapa. El reloj del HUD muestra lo que falta para que termine de cerrarse.
 - **Bots:** 10 por defecto, configurables hasta 30. Todos llevan el mismo fusil.
 - **Texto:** se usa la fuente 8×8 de depuración, sin tildes ni eñes (por eso se lee
   "Contrasena" o "elimino"). Los rótulos grandes (JUGAR, ELIMINADO…) sí las llevan,
@@ -289,7 +301,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 - **`Sonidos/`:**
   - efectos originales (`tools/generate_sounds.py`);
   - `Sonidos Limpios/`: sonidos del usuario (ver docs/PRESENTACION.md; los que aún no
-    tienen mecánica no se empaquetan);
+    tienen mecánica no se empaquetan). `avisotormenta` suena al entrar en la tormenta;
   - `main title song.wav`, la música del menú.
 
 **`Referencias/`**, solo como guía:
@@ -302,11 +314,11 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 62 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 68 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
-  - **Audio:** formato de los 17 efectos. La música decodificada frente a la original,
+  - **Audio:** formato de los 18 efectos. La música decodificada frente a la original,
     con SNR de 33 dB y sin chasquidos. El panorama, las 8 voces y la cola llena.
   - **Flujo:** inicio de sesión → lobby → controles → lobby → carga → partida (disparos,
     construcción, recarga, páginas del HUD, pausa) → derrota → seguir mirando → fin →
@@ -318,10 +330,10 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 83 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 91 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
-  escudo, curas, pico, materiales y coste de las paredes.
+  escudo, curas, pico, materiales, coste de las paredes y la tormenta del límite del mapa.
 - **`make physics-test`: 0 fallos.**
 - **`make preview`:** 7 vistas del mapa, 5 de juego con personajes y 1 de construcción,
   con las texturas de `Recursos/Texturas`.
@@ -329,6 +341,9 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 
 ## Historial de correcciones
 
+- **v0.7.3:**
+  - **Límite del mapa:** la pared invisible del borde pasa a ser una tormenta.
+  - **Pruebas:** `Match::teleport()` (solo pruebas) no conservaba el escudo; ahora sí.
 - **v0.7.2:** sin correcciones de errores; recursos del usuario (sonidos, botones,
   ranuras) y login simplificado.
 - **v0.7.1:** sin correcciones de errores; personaje nuevo e iconos de `Recursos`.

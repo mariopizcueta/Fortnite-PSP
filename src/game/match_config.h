@@ -58,9 +58,14 @@ struct MatchConfig {
     // "Zona" simplificada: los bots exploran dentro de un circulo que se cierra con el
     // tiempo, asi la partida converge hacia el deposito y termina.
     math3d::Vec3 zoneCenter{0.0f, 0.0f, -6.0f};
-    float zoneStartRadius = 85.0f;
+    float zoneStartRadius = 80.0f;  // dentro de la zona segura (la tormenta del borde, a 88 m)
     float zoneEndRadius = 22.0f;
     float zoneShrinkSeconds = 240.0f;
+
+    // Tormenta del limite del mapa (world/storm.h): dano directo a la vida (no al escudo,
+    // como en Fortnite) cada stormTickSeconds mientras se esta dentro.
+    float stormDamage = 30.0f;
+    float stormTickSeconds = 1.0f;
 
     bool invulnerablePlayer = false;  // solo para pruebas
 

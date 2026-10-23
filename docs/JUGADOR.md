@@ -90,7 +90,9 @@ deseo    = adelante * (-stickY) + derecha * stickX        (longitud <= 1)
   pies antes del paso, así que no hay tunelado ni a velocidad terminal. Los techos
   detienen el salto.
 
-**Límite del mapa:** el jugador no sale de `X, Z ∈ [-95.5, 95.5]`.
+**Límite del mapa:** ya no hay pared invisible: más allá de ±88 m está la tormenta, que
+quita 30 de vida por segundo (ver MUNDO.md). El tope físico, al final del suelo exterior,
+está en `X, Z ∈ [-143.5, 143.5]` y no se alcanza vivo.
 
 ## Paso fijo, delta time e interpolación
 

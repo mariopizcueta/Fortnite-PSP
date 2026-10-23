@@ -307,14 +307,15 @@ def read_wav(path):
 
 
 # Sonidos de Recursos/Sonidos/Sonidos Limpios que ya tienen uso en el juego -> nombre en
-# assets/sounds. Los demas (cofre, ala delta, autobus, baile, francotirador, aviso de la
-# tormenta) se conservan en Recursos pero no se empaquetan hasta que exista su mecanica.
+# assets/sounds. Los demas (cofre, ala delta, autobus, baile, francotirador) se conservan
+# en Recursos pero no se empaquetan hasta que exista su mecanica.
 CLEAN_SOUNDS = {
     "disparo": "scardisparo.wav",                       # sustituye al disparo sintetizado
     "victoria": "Fortnite Victory Royale.mp3",          # sustituye a la sintonia sintetizada
     "muerte_jugador": "muertejugadorfortnite.wav",
     "miniescudo": "miniescudo.wav",
     "pocion_escudo": "pociondeescudogrande.wav",
+    "aviso_tormenta": "avisotormenta.wav",              # al entrar en la tormenta del borde
 }
 STEP_SOURCE = "Fortnite Running Sound Effect.wav"
 
