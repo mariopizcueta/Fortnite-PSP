@@ -369,7 +369,12 @@ void App::updateResults(const input::Input& in, float dt) {
         m_resultsTime = 0.0f;
         m_buildMode = false;
         m_freeCameraActive = false;
-        playSfx(won ? audio::Sfx::Victory : audio::Sfx::Defeat);
+        // Un solo sonido de resultado por partida (no se repite al volver de espectador) y
+        // sin efectos de la partida debajo (zumbido de cofre, disparos lejanos...).
+        if (m_audioReady) audio::mixer().stopAll();
+        m_chestHumOn = false;
+        if (!m_resultSoundPlayed) playSfx(won ? audio::Sfx::Victory : audio::Sfx::Defeat);
+        m_resultSoundPlayed = true;
         return;
     }
 

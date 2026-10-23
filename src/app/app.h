@@ -207,6 +207,7 @@ private:
     float m_resultsDelay = 0.0f;    // espera tras ganar o caer antes de mostrarlos
     bool m_spectating = false;       // el jugador eligio seguir mirando tras caer
     bool m_resultsDismissed = false;
+    bool m_resultSoundPlayed = false;  // victoria/derrota ya sono en esta partida
 
     // Menus.
     int m_loginStage = 0;          // 0: formulario, 1: conectando

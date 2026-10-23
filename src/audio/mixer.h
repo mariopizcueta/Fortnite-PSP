@@ -33,6 +33,7 @@ public:
     void play(Sfx id, float volume = 1.0f, float pan = 0.0f);
     // Corta todas las voces que esten sonando ese efecto (p. ej. beber al cancelar).
     void stop(Sfx id);
+    void stopAll();  // corta todos los efectos (no la musica)
     void playMusic(bool playing) { m_musicPlaying = playing ? 1 : 0; }
     void setMusicVolume(float volume);
     void setMasterVolume(float volume);

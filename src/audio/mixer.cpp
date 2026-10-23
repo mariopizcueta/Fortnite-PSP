@@ -40,6 +40,15 @@ void Mixer::stop(Sfx id) {
     push(c);
 }
 
+void Mixer::stopAll() {
+    Command c;
+    c.op = 2;
+    c.sfx = 0;
+    c.volume = 0;
+    c.pan = 0;
+    push(c);
+}
+
 void Mixer::push(const Command& command) {
     const int head = m_head;
     const int next = (head + 1) % kQueue;
@@ -53,6 +62,10 @@ void Mixer::push(const Command& command) {
 }
 
 void Mixer::startVoice(const Command& c) {
+    if (c.op == 2) {
+        for (Voice& v : m_voices) v.samples = nullptr;
+        return;
+    }
     const SoundClip& clip = m_clips[c.sfx];
     if (!clip.samples || clip.count <= 0) return;
     if (c.op == 1) {

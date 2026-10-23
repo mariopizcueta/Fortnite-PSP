@@ -24,7 +24,7 @@ constexpr float kLockAngleDegrees = 22.0f;
 constexpr float kLockDistance = 40.0f;
 constexpr float kChestHumRange = 9.0f;  // m: se oye el zumbido de un cofre sin abrir
 constexpr float kSoundRange = 60.0f;
-constexpr float kFootstepRange = 14.0f;
+constexpr float kFootstepRange = 12.0f;
 // Tormenta del limite del mapa (world/storm.h): niebla y color.
 constexpr float kStormFogRange = 30.0f;  // m antes del borde en que la niebla empieza a espesarse
 constexpr u32 kStormFogColor = gfx::rgba(150, 92, 200);
@@ -187,6 +187,7 @@ void App::startMatch() {
     m_resultsTime = m_resultsDelay = 0.0f;
     m_spectating = false;
     m_resultsDismissed = false;
+    m_resultSoundPlayed = false;
     m_matchFrameMsSum = m_matchFrameMsMax = 0.0f;
     m_matchFrames = 0;
     m_matchLogged = false;
@@ -528,7 +529,8 @@ void App::updateChestHum(float dt) {
     const Vec3 pos = renderState(0).position;
     const game::Container* nearest = nullptr;
     float best = kChestHumRange;
-    if (m_match.alive(0) && m_match.airState(0) == game::AirState::Ground) {
+    if (m_results == Results::None && m_match.alive(0) && m_match.phase() != game::MatchPhase::Finished &&
+        m_match.airState(0) == game::AirState::Ground) {
         for (const game::Container& c : m_match.containers()) {
             if (c.kind != game::ContainerKind::Chest || c.opened) continue;
             const float d = math3d::length(c.position - pos);
@@ -563,7 +565,7 @@ void App::playFootsteps() {
         m_botSteps[i] = m_botAnims[i].footsteps;
         const Vec3 p = renderState(i + 1).position;
         if (math3d::length(p - renderState(0).position) < kFootstepRange) {
-            playSpatial(audio::Sfx::Footstep, p, 0.35f);
+            playSpatial(audio::Sfx::Footstep, p, 0.22f);  // mas bajos que los propios (0,45)
         }
     }
 }
@@ -611,15 +613,14 @@ void App::processEvents() {
                 if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
                 break;
             case game::GameEventType::WallBuilt:
+                // De los demas solo se oyen disparos y pasos.
                 if (e.entity == 0) playSfx(audio::Sfx::WallBuild, 0.8f);
-                else playSpatial(audio::Sfx::WallBuild, e.position, 0.7f);  // un bot se cubre
                 break;
             case game::GameEventType::BusJump:
                 if (e.entity == 0) playSfx(audio::Sfx::BusJump, 0.9f);
                 break;
             case game::GameEventType::GliderOpen:
                 if (e.entity == 0) playSfx(audio::Sfx::GliderOpen, 0.9f);
-                else playSpatial(audio::Sfx::GliderOpen, e.position, 0.5f);
                 break;
             case game::GameEventType::Landed:
                 if (e.entity == 0) playSfx(audio::Sfx::Footstep, 0.8f);
@@ -627,7 +628,6 @@ void App::processEvents() {
             case game::GameEventType::ContainerOpened:
                 if (e.entity == 0 && m_audioReady) audio::mixer().stop(audio::Sfx::ChestHum);
                 if (e.entity == 0) playSfx(audio::Sfx::ChestOpen, 0.9f);
-                else playSpatial(audio::Sfx::ChestOpen, e.position, 0.6f);
                 break;
             case game::GameEventType::PickedUp:
                 if (e.entity == 0) playSfx(audio::Sfx::Pickup, 0.8f);
@@ -641,7 +641,7 @@ void App::processEvents() {
                 playSfx(audio::Sfx::WallBuild, 0.5f);
                 break;
             case game::GameEventType::WallBroken:
-                playSpatial(audio::Sfx::WallBreak, e.position, 0.9f);
+                if (e.other == 0) playSpatial(audio::Sfx::WallBreak, e.position, 0.9f);  // la rompe el jugador
                 break;
             case game::GameEventType::Reload:
                 playSfx(audio::Sfx::Reload, 0.8f);
