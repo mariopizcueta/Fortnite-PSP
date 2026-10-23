@@ -32,11 +32,19 @@ extern const CharacterPalette kRanger;    // bots: rojo y azul con casco
 }  // namespace palettes
 
 // Estado de animacion de una entidad (solo visual, avanza con el tiempo de frame).
+// Ademas del paso y el salto: respiracion en reposo, retroceso al disparar, sacudida al
+// recibir un impacto y caida al ser eliminado (todo con 5 matrices, sin coste extra).
 struct CharacterAnim {
     float walkPhase = 0.0f;
     float leftLeg = 0.0f, rightLeg = 0.0f, leftArm = 0.0f, rightArm = 0.0f;
+    float idleTime = 0.0f;     // respiracion
+    float recoil = 0.0f;       // 1 al disparar, decae
+    float flinch = 0.0f;       // 1 al recibir un impacto, decae
+    float deathSeconds = 0.0f; // tiempo desde la eliminacion (0 = vivo)
 
-    void update(const CharacterState& state, bool aiming, float dt);
+    void update(const CharacterState& state, bool aiming, bool alive, float dt);
+    void onShot() { recoil = 1.0f; }
+    void onHit() { flinch = 1.0f; }
 };
 
 class CharacterModel {
@@ -44,7 +52,8 @@ public:
     bool build(const CharacterPalette& palette);
     void destroy();
 
-    // Dibuja sombra + personaje. `eliminated`: tumbado boca arriba. Requiere gfx::begin3D().
+    // Dibuja sombra + personaje. `eliminated`: cae y queda tumbado boca arriba (si la
+    // animacion no ha contado la caida, aparece ya tumbado). Requiere gfx::begin3D().
     void draw(const CharacterState& state, const CharacterAnim& anim,
               const world::TextureLibrary& textures, bool eliminated) const;
 

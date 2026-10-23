@@ -146,9 +146,13 @@ o desde el altillo.
   (`kMaxSegment`), por la banda de guarda de ±2048 px de la GE.
 - **Iluminación:** horneada en el color de vértice. El sol viene de arriba-sureste; las
   caras interiores de las paredes de las naves van oscurecidas.
-- **Texturas:** procedurales de 32 × 32 en formato 5551, con `GU_NEAREST`. Son 15: hierba,
-  tierra, hormigón, chapa, cubierta, contenedor, madera, damero, persiana, oficina,
-  camuflaje, agua, roca, arena y muro de bloques.
+- **Texturas (fase 6):** 16 texturas originales de 32 × 32 en `Recursos/Texturas/`
+  (generadas por `tools/generate_textures.py` con paleta reducida de 6 a 12 colores):
+  hierba, tierra, hormigón, chapa, cubierta, contenedor, madera, damero, persiana,
+  oficina, camuflaje, agua, roca, arena, muro de bloques y tablones de pared.
+  `make assets` las junta en un atlas de 128 × 128 (`assets/images/textures.png`) que el
+  juego trocea al arrancar en texturas 5551 con `GU_NEAREST` (32 KB en total). Si el
+  atlas faltara, se usan las procedurales de fases anteriores.
 - **Totales:** 23 240 triángulos en 228 lotes (~1 MB) y 276 cajas de colisión.
 
 ## Cámaras
@@ -159,4 +163,4 @@ o desde el altillo.
 - **Mira:** casi horizontal (unos -4°).
 - **Paredes:** si hay una entre el pivote y el ojo, el ojo se acerca al jugador.
 
-**Cámara libre de depuración** (CÍRCULO): orbital, como en la fase 2.
+**Cámara libre de depuración** (TRIÁNGULO): orbital, como en la fase 2.

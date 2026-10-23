@@ -23,8 +23,10 @@ bool createTexture(Texture& out, int width, int height, int psm);
 // Vuelca la cache de datos de la CPU para que la GE vea el contenido. Llamar tras escribir.
 void uploadTexture(const Texture& texture);
 
-// Decodifica un PNG en memoria a RGBA8888. Devuelve false si falla o supera 512x512.
-bool loadPngFromMemory(Texture& out, const void* data, size_t size);
+// Decodifica un PNG en memoria a RGBA8888 o, con psm = GU_PSM_5551, a 16 bits (la mitad
+// de memoria; para imagenes opacas a pantalla completa). Devuelve false si falla o
+// supera 512x512.
+bool loadPngFromMemory(Texture& out, const void* data, size_t size, int psm = GU_PSM_8888);
 void destroyTexture(Texture& texture);
 
 size_t textureBytes(const Texture& texture);

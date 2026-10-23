@@ -5,9 +5,11 @@ set -e
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/build/preview"
 mkdir -p "$OUT"
+# host_assets.S incrusta los recursos con rutas relativas a la raiz del proyecto.
+cd "$ROOT"
 
 c++ -std=c++17 -O2 -Wall -Wextra \
-    -I"$ROOT/tools/scene_preview/stubs" -I"$ROOT/src" \
+    -I"$ROOT/tools/scene_preview/stubs" -I"$ROOT/tools/host" -I"$ROOT/src" \
     "$ROOT/tools/scene_preview/preview.cpp" \
     "$ROOT/src/app/build_visuals.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
@@ -16,6 +18,8 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/camera/third_person_camera.cpp" \
     "$ROOT/src/game/character.cpp" \
     "$ROOT/src/game/character_model.cpp" \
+    "$ROOT/tools/host/host_assets.S" \
+    "$ROOT/tools/host/soft_gfx.cpp" \
     "$ROOT/src/gfx/mesh.cpp" \
     "$ROOT/src/gfx/texture.cpp" \
     "$ROOT/src/math/math3d.cpp" \
@@ -26,7 +30,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/world/textures.cpp" \
     "$ROOT/src/world/world.cpp" \
     "$ROOT/src/world/world_layout.cpp" \
-    -o "$OUT/scene_preview"
+    -Wno-unused-function -o "$OUT/scene_preview"
 
 "$OUT/scene_preview" "$OUT"
 echo "Capturas en $OUT"

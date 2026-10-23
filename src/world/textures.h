@@ -1,4 +1,8 @@
-// Texturas procedurales de baja resolucion para el escenario (estetica PS1).
+// Texturas de baja resolucion para el escenario (estetica PS1).
+//
+// Desde la fase 6 se cargan de Recursos/Texturas (atlas incrustado de 128x128 con 16
+// texturas de 32x32, generadas por tools/generate_textures.py y retocables a mano). Si el
+// atlas no se pudiera decodificar, se generan por procedimiento como antes.
 //
 // Todas son de 32x32 texeles en formato GU_PSM_5551 (15 bits de color, como PS1) y se
 // generan una sola vez al arrancar. Las de metal, contenedor y persiana son neutras
@@ -35,13 +39,18 @@ class TextureLibrary {
 public:
     bool build();
     void destroy();
+    // true si las texturas vienen del atlas de Recursos/Texturas (no las procedurales).
+    bool fromResources() const { return m_fromResources; }
 
     // nullptr para kTexNone o ids invalidos.
     const gfx::Texture* get(int id) const;
     size_t totalBytes() const;
 
 private:
+    bool buildFromAtlas();
+
     gfx::Texture m_textures[kTexCount];
+    bool m_fromResources = false;
 };
 
 }  // namespace world

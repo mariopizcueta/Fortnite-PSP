@@ -6,6 +6,7 @@
 #   make preview    -> capturas de la escena 3D renderizadas en el Mac (build/preview/)
 #   make physics-test -> pruebas de movimiento del jugador en el Mac
 #   make match-sim  -> partidas simuladas con bots en el Mac (colisiones, disparos, IA)
+#   make app-sim    -> la aplicacion completa simulada en el Mac (menus, partidas, audio)
 #   make clean      -> borra los productos de compilacion
 
 # --- Localizacion del toolchain -----------------------------------------------
@@ -29,7 +30,14 @@ TARGET = FortnitePSP
 
 OBJS = src/main.o \
        src/app/app.o \
+       src/app/app_hud.o \
+       src/app/app_menus.o \
        src/app/build_visuals.o \
+       src/app/lobby_scene.o \
+       src/app/ui.o \
+       src/audio/audio_system.o \
+       src/audio/mixer.o \
+       src/audio/sound_data.o \
        src/camera/orbit_camera.o \
        src/camera/third_person_camera.o \
        src/core/timer.o \
@@ -61,7 +69,7 @@ INCDIR = src
 CFLAGS = -O2 -G0 -Wall -Wextra -MMD -MP
 CXXFLAGS = -std=gnu++17 -fno-exceptions -fno-rtti
 
-LIBS = -lpspgu -lpsppower -lstdc++ -lm
+LIBS = -lpspgu -lpspaudiolib -lpspaudio -lpsppower -lstdc++ -lm
 
 BUILD_PRX = 1
 PSP_FW_VERSION = 600
@@ -100,7 +108,7 @@ $(TARGET).prx: $(TARGET).elf
 
 # --- Reglas propias ---------------------------------------------------------------
 # .incbin no genera dependencias: se declaran a mano para recompilar al cambiar el PNG.
-src/assets/embedded_assets.o: assets/images/loadscreen.png assets/images/logo.png
+src/assets/embedded_assets.o: $(wildcard assets/images/*.png) $(wildcard assets/sounds/*)
 
 # El EBOOT tambien depende de los iconos del XMB.
 EBOOT.PBP: $(PSP_EBOOT_ICON) $(PSP_EBOOT_PIC1)
@@ -134,6 +142,10 @@ match-sim:
 distclean: clean
 	rm -rf build
 
-.PHONY: release assets preview physics-test match-sim distclean
+# Simulacion de host de la aplicacion completa con capturas en build/app_sim/.
+app-sim:
+	sh tools/app_sim/build_and_run.sh
+
+.PHONY: release assets preview physics-test match-sim app-sim distclean
 
 -include $(DEPS)

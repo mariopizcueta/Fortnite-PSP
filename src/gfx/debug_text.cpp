@@ -29,7 +29,8 @@ void putString(int x, int y, u32 color, const char* str) {
 
 void init() {
     // setup=0: no toca el modo de pantalla que ya ha configurado GU.
-    pspDebugScreenInitEx(nullptr, PSP_DISPLAY_PIXEL_FORMAT_8888, 0);
+    // Mismo formato que el framebuffer: la libreria convierte los colores al escribir.
+    pspDebugScreenInitEx(nullptr, kRetro16BitFramebuffer ? PSP_DISPLAY_PIXEL_FORMAT_565 : PSP_DISPLAY_PIXEL_FORMAT_8888, 0);
     pspDebugScreenEnableBackColor(0);
 }
 

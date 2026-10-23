@@ -115,7 +115,15 @@ int countTriangles(const std::vector<world::StaticBatch>& batches) {
 
 }  // namespace
 
-void CharacterAnim::update(const CharacterState& state, bool aiming, float dt) {
+void CharacterAnim::update(const CharacterState& state, bool aiming, bool alive, float dt) {
+    idleTime += dt;
+    recoil = smoothToward(recoil, 0.0f, 14.0f, dt);
+    flinch = smoothToward(flinch, 0.0f, 8.0f, dt);
+    if (!alive) {
+        deathSeconds += dt;
+        return;
+    }
+    deathSeconds = 0.0f;
     const float speed = state.horizontalSpeed();
     float legL, legR, armL, armR;
     if (state.grounded()) {
@@ -139,6 +147,9 @@ void CharacterAnim::update(const CharacterState& state, bool aiming, float dt) {
         armR = 1.52f;
         armL = 1.30f;
     }
+    // Retroceso: el rifle sube un poco con cada disparo.
+    armR += 0.30f * recoil;
+    armL += 0.20f * recoil;
     const float rate = 14.0f;
     leftLeg = smoothToward(leftLeg, legL, rate, dt);
     rightLeg = smoothToward(rightLeg, legR, rate, dt);
@@ -212,15 +223,23 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
 
     Mat4 root = Mat4::translation(pos) * Mat4::rotationY(state.yaw);
     if (eliminated) {
-        // Tumbado boca arriba: rotationX(+90) lleva la cabeza (+Y) hacia +Z (detras).
-        root = root * Mat4::translation({0.0f, 0.15f, 0.0f}) * Mat4::rotationX(math3d::kPi * 0.5f);
+        // Cae de espaldas en 0.45 s (acelerando, como con gravedad) y queda tumbado:
+        // rotationX(+90) lleva la cabeza (+Y) hacia +Z (detras).
+        const float t = anim.deathSeconds > 0.0f ? math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f) : 1.0f;
+        const float fall = t * t;
+        root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) *
+               Mat4::rotationX(math3d::kPi * 0.5f * fall);
+    } else {
+        // Respiracion (muy leve) y sacudida hacia atras al recibir un impacto.
+        const float breath = 0.012f * sinf(anim.idleTime * 2.4f) * (state.horizontalSpeed() < 0.5f ? 1.0f : 0.0f);
+        root = root * Mat4::translation({0.0f, breath, 0.0f}) * Mat4::rotationX(-0.22f * anim.flinch);
     }
     drawPart(m_body, root, textures);
     // rotationX(+a) lleva el extremo de la pieza hacia -Z (hacia delante).
     auto joint = [&root](const Part& p, float angle) {
         return root * Mat4::translation(p.pivot) * Mat4::rotationX(angle);
     };
-    const bool still = eliminated;
+    const bool still = eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f);
     drawPart(m_leftLeg, joint(m_leftLeg, still ? 0.0f : anim.leftLeg), textures);
     drawPart(m_rightLeg, joint(m_rightLeg, still ? 0.0f : anim.rightLeg), textures);
     drawPart(m_leftArm, joint(m_leftArm, still ? 0.2f : anim.leftArm), textures);

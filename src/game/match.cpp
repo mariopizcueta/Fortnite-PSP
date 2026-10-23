@@ -101,6 +101,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_playerKills = 0;
     for (DamageNumber& d : m_damageNumbers) d.age = 99.0f;
     m_nextDamageNumber = 0;
+    m_eventCount = 0;
     m_assistTarget = -1;
     snprintf(m_names[0], sizeof(m_names[0]), "Jugador");
 
@@ -269,6 +270,7 @@ void Match::updatePlayer(float dt) {
         return;
     }
 
+    const bool wasReloading = m_playerWeapon.reloading();
     if (reload) m_playerWeapon.startReload();
     // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
     const float range = m_config.playerWeapon.range;
@@ -280,6 +282,7 @@ void Match::updatePlayer(float dt) {
     if (m_aim.fire && m_phase != MatchPhase::Finished && m_playerWeapon.tryFire()) {
         playerShot(m_aim, m_config.playerWeapon.damage, range);
     }
+    if (!wasReloading && m_playerWeapon.reloading()) pushEvent(GameEventType::Reload, 0, -1, chestOf(0));
 }
 
 void Match::updateBot(int index, float dt) {
@@ -704,7 +707,9 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
     }
     ++m_stats.shotsFired;
     result.end = origin + seg * best;
+    pushEvent(GameEventType::Shot, shooter, -1, origin);
     if (victim >= 0) {
+        pushEvent(GameEventType::HitEntity, victim, shooter, result.end);
         ++m_stats.shotsHitEntity;
         result.hitEntity = true;
         result.victim = victim;
@@ -735,8 +740,21 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
 
 void Match::damageWall(int wall, float amount, int attacker, const Vec3& point) {
     ++m_stats.shotsHitStructure;
+    pushEvent(GameEventType::HitStructure, -1, attacker, point);
     if (attacker == 0) addDamageNumber(point, amount, true);
-    if (m_structures.damage(wall, amount)) ++m_stats.wallsDestroyed;
+    if (m_structures.damage(wall, amount)) {
+        ++m_stats.wallsDestroyed;
+        pushEvent(GameEventType::WallBroken, -1, attacker, point);
+    }
+}
+
+void Match::pushEvent(GameEventType type, int entity, int other, const Vec3& position) {
+    GameEvent& e = m_events[m_eventCount % kMaxEvents];
+    e.type = type;
+    e.entity = entity;
+    e.other = other;
+    e.position = position;
+    ++m_eventCount;
 }
 
 void Match::addDamageNumber(const Vec3& position, float amount, bool structure) {
@@ -763,7 +781,11 @@ WallPlacement Match::planWall(float yaw) const {
 
 int Match::buildWall(float yaw) {
     const int wall = m_structures.place(planWall(yaw));
-    if (wall >= 0) ++m_stats.wallsBuilt;
+    if (wall >= 0) {
+        ++m_stats.wallsBuilt;
+        const world::Aabb& b = m_structures.wall(wall).box;
+        pushEvent(GameEventType::WallBuilt, 0, -1, (b.min + b.max) * 0.5f);
+    }
     return wall;
 }
 
@@ -776,8 +798,11 @@ int Match::targetedWall(const PlayerAim& aim) const {
 
 bool Match::removeWallAt(const PlayerAim& aim) {
     const int wall = targetedWall(aim);
-    if (wall < 0 || !m_structures.remove(wall)) return false;
+    if (wall < 0) return false;
+    const world::Aabb box = m_structures.wall(wall).box;
+    if (!m_structures.remove(wall)) return false;
     ++m_stats.wallsRemoved;
+    pushEvent(GameEventType::WallRemoved, 0, -1, (box.min + box.max) * 0.5f);
     return true;
 }
 
@@ -815,6 +840,7 @@ void Match::applyDamage(int victim, float amount, int attacker) {
     s.health -= amount;
     if (victim == 0) {
         m_sincePlayerDamaged = 0.0f;
+        pushEvent(GameEventType::PlayerHurt, 0, attacker, chestOf(0));
     } else if (attacker >= 0 && attacker != victim && alive(attacker)) {
         // Un bot que recibe un disparo se gira hacia quien le ha dado.
         Bot& b = m_bots[victim - 1];
@@ -837,6 +863,7 @@ void Match::applyDamage(int victim, float amount, int attacker) {
 }
 
 void Match::eliminate(int victim, int killer) {
+    pushEvent(GameEventType::Eliminated, victim, killer, body(victim).state().position);
     if (victim > 0) {
         Bot& b = m_bots[victim - 1];
         b.state = BotState::Eliminated;
