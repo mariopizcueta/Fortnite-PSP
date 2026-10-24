@@ -77,13 +77,13 @@ float reachFor(TrapSurface s) {
 const char* trapErrorName(TrapError error) {
     switch (error) {
         case TrapError::None: return "";
-        case TrapError::NoTraps: return "No te quedan trampas";
-        case TrapError::NoSurface: return "Apunta a un suelo, una pared o un techo";
-        case TrapError::Ramp: return "En una rampa no se puede";
-        case TrapError::TooSmall: return "No cabe en esa superficie";
-        case TrapError::Occupied: return "Ya hay una trampa ahi";
-        case TrapError::Obstructed: return "Hay algo en medio";
-        case TrapError::LimitReached: return "Limite de trampas alcanzado";
+        case TrapError::NoTraps: return i18n::tr(i18n::T::TrapNoTraps);
+        case TrapError::NoSurface: return i18n::tr(i18n::T::TrapNoSurface);
+        case TrapError::Ramp: return i18n::tr(i18n::T::TrapRamp);
+        case TrapError::TooSmall: return i18n::tr(i18n::T::TrapTooSmall);
+        case TrapError::Occupied: return i18n::tr(i18n::T::TrapOccupied);
+        case TrapError::Obstructed: return i18n::tr(i18n::T::TrapObstructed);
+        case TrapError::LimitReached: return i18n::tr(i18n::T::TrapLimit);
     }
     return "?";
 }

@@ -219,7 +219,7 @@ def victory_banner():
     return banner.resize((round(banner.width * 1.5), round(banner.height * 1.5)), Image.NEAREST)
 
 
-def defeat_banner(size):
+def defeat_banner(size, word="ELIMINADO"):
     """Banner original de derrota con la misma forma que el de victoria, en rojo."""
     w, h = size
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -227,14 +227,14 @@ def defeat_banner(size):
     slant = h // 3
     d.polygon([(slant, 0), (w - 1, 0), (w - 1 - slant, h - 1), (0, h - 1)], fill=(168, 36, 40, 255))
     d.polygon([(slant, 0), (w - 1, 0), (w - 1, 4), (slant - 1, 4)], fill=(222, 86, 80, 255))
-    text = label("ELIMINADO", int(h * 0.62), stroke=2)
+    text = label(word, int(h * 0.62), stroke=2)
     img.alpha_composite(text, ((w - text.width) // 2, (h - text.height) // 2))
     return img
 
 
-def minimap_label():
+def minimap_label(words=("Polvorín", "Polvoriento")):
     """Nombre del deposito para el minimapa, en dos lineas (el minimapa mide 76 px)."""
-    lines = [label("Polvorín", 10, stroke=1), label("Polvoriento", 10, stroke=1)]
+    lines = [label(words[0], 10, stroke=1), label(words[1], 10, stroke=1)]
     w = max(l.width for l in lines)
     img = Image.new("RGBA", (w, lines[0].height + lines[1].height - 3), (0, 0, 0, 0))
     img.alpha_composite(lines[0], ((w - lines[0].width) // 2, 0))
@@ -258,6 +258,17 @@ def ui_atlas():
         "IniciarSesion": label("INICIAR SESIÓN", 22),
         "Cargando": label("CARGANDO", 18),
         "Construccion": label("MODO CONSTRUCCIÓN", 13, stroke=1),
+        # Version inglesa de los rotulos (parche, fase 8; el juego elige segun el idioma).
+        "DefeatEn": defeat_banner(victory.size, "ELIMINATED"),
+        "PlayEn": label("PLAY", 30),
+        "ControlsEn": label("CONTROLS", 20),
+        "ExitEn": label("EXIT", 20),
+        "MapaEn": label("DUSTY DEPOT", 17),
+        "MapaMinimapaEn": minimap_label(("Dusty", "Depot")),
+        "CargandoEn": label("LOADING", 18),
+        "ConstruccionEn": label("BUILD MODE", 13, stroke=1),
+        "Ajustes": label("AJUSTES", 20),
+        "AjustesEn": label("SETTINGS", 20),
         # Pestanas del lobby (parche, fase 8), en espanol e ingles.
         "TabJugar": label("JUGAR", 15, stroke=1),
         "TabLogros": label("LOGROS", 15, stroke=1),

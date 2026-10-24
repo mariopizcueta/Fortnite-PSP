@@ -2,9 +2,11 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
-**Estado: fase 7 (botín, autobús, ala delta, airdrops, bots que cazan y construyen, tormenta
-que se cierra, suelos, rampas, mirilla de francotirador, mapa destruible, bots con
-inventario, perfil guardado, headshots, agacharse, bailar y mapa), v0.11.0.**
+**Estado: fase 8, parche de mecánicas y contenido (armas nuevas con modelos 3D, explosivos,
+trampas, llama, animaciones a dos manos, logros, taquilla, ajustes e inglés), v0.12.0.**
+Detalle del parche en [docs/PARCHE.md](docs/PARCHE.md). Antes (fase 7): botín, autobús, ala
+delta, airdrops, bots que cazan y construyen, tormenta que se cierra, suelos, rampas, mirilla,
+mapa destruible, perfil guardado, headshots, agacharse, bailar y mapa.
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -22,6 +24,23 @@ una partida completa:
 de host. No son capturas de una PSP.*
 
 ## Qué incluye
+
+**Fase 8 — parche (v0.12.0)** (todo en [docs/PARCHE.md](docs/PARCHE.md)):
+- **Inventario:** cambiar un objeto del suelo por la ranura que se elija (también con un
+  curativo en la mano); las armas soltadas conservan su cargador. Curarse deja quieto.
+- **Combate:** la mirilla apunta donde apuntaba la mira; agacharse mejora la precisión;
+  retroceso por disparo con la mira que se abre.
+- **Armas:** 9 nuevas de `Recursos/Weapons` (ráfagas, fusil con mira, subfusil, escopeta
+  táctica, pistola, revólver, francotirador semiautomático, lanzacohetes, lanzagranadas) y la
+  granada; fusil gris/verde/azul con su propio modelo; modelos 3D para todas.
+- **Botín:** los bots sueltan materiales; llama de suministros (5 % por partida).
+- **Trampas** de pinchos en suelos, paredes y techos ([docs/TRAMPAS.md](docs/TRAMPAS.md)).
+- **Animaciones:** el arma con las dos manos al correr (cinemática inversa) y transiciones.
+- **Lobby:** secciones con L/R: JUGAR, LOGROS ([docs/LOGROS.md](docs/LOGROS.md)) y TAQUILLA
+  ([docs/TAQUILLA.md](docs/TAQUILLA.md)); START abre los AJUSTES ([docs/AJUSTES.md](docs/AJUSTES.md)):
+  gráficos, sensibilidad, controles reasignables, idioma (español / inglés) y borrar datos.
+- **Sonido:** la caja de munición tiene su sonido (ya no el del cofre); sonidos nuevos para
+  explosiones, cohetes, pistola, trampa y llama. Botones de la PSP sin contorno azul.
 
 **Fases 1–5:**
 - **Base:** arranque y cierre seguros, GU con doble buffer y escenario 3D retro con
@@ -252,6 +271,9 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 | Lobby             | **Cruceta ← →**        | Sobre JUGAR: número de bots (5–30, por defecto 10)  |
 | Lobby             | **X**                  | Aceptar (SALIR pide confirmación: X sale, O cancela)|
 | Lobby             | **Stick**              | Girar el personaje                                  |
+| Lobby             | **L / R**              | Secciones: JUGAR / LOGROS / TAQUILLA                |
+| Lobby             | **START**              | Ajustes (modal: L/R secciones del menú, ↑↓ opción, ←→ valor, X activar, O o START cerrar) |
+| Taquilla          | **Cruceta + X**        | Elegir categoría y equipar (O vuelve)               |
 | Controles         | **O**                  | Volver al lobby                                     |
 | Pausa             | **↑ ↓ + X**            | CONTINUAR / VOLVER AL LOBBY (START u O: continuar)  |
 | Resultados        | **X**                  | Volver al lobby                                     |
@@ -274,12 +296,17 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 | Combate       | **CUADRADO**                           | Abrir / recoger lo que haya al alcance; si no, recargar |
 | Autobús / caída | **X**                                | Saltar del autobús / abrir el ala delta (stick: dirigir la caída) |
 | Siempre       | **CÍRCULO**                            | **Modo construcción on/off**                 |
-| Construcción  | **Cruceta ← →**                        | Elegir pieza (pared; suelo y rampa aún no)   |
-| Construcción  | **R (pulsar)**                         | Colocar una pared delante (10 de madera)     |
+| Construcción  | **Cruceta ← →**                        | Elegir pieza: pared, suelo, rampa o trampa   |
+| Construcción  | **R (pulsar)**                         | Colocar la pieza (10 de material) o la trampa donde apunta la mira |
 | Construcción  | **CUADRADO**                           | Cambiar de material (madera / piedra / metal) |
 | Siempre       | **START**                              | Pausa                                        |
 | Siempre       | **SELECT**                             | HUD: partida → depuración → controles → oculto |
 | Depuración    | **TRIÁNGULO**                          | Cámara libre ↔ tercera persona (dentro: □ niebla, START VSync) |
+
+Los botones de las acciones de la partida (saltar, construir, recargar/recoger, pico,
+disparar, apuntar, agacharse, bailar) se pueden reasignar en AJUSTES > CONTROLES; la tabla
+muestra los de por defecto. Con el inventario lleno, CUADRADO abre un selector: cruceta
+←/→ elige la ranura, CUADRADO cambia, CÍRCULO cancela.
 
 Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 [docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y

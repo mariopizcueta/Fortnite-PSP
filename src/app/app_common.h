@@ -3,7 +3,9 @@
 
 #include <stdio.h>
 
+#include "assets/ui_atlas.h"
 #include "core/config.h"
+#include "core/i18n.h"
 #include "gfx/debug_text.h"
 #include "gfx/graphics.h"
 #include "math/math3d.h"
@@ -57,6 +59,11 @@ inline float headingDegrees(float yaw) {
     while (d < 0.0f) d += 360.0f;
     while (d >= 360.0f) d -= 360.0f;
     return d;
+}
+
+// Rotulo del atlas en el idioma actual (los grandes, en Impact, estan dibujados en los dos).
+inline const assets::ui::Rect& label(const assets::ui::Rect& es, const assets::ui::Rect& en) {
+    return i18n::language() == i18n::Lang::En ? en : es;
 }
 
 inline void formatTime(float seconds, char* out, size_t size) {

@@ -6,6 +6,7 @@
 // Sin tienda, monedas ni compras: todo lo del catalogo esta disponible.
 #pragma once
 
+#include "core/i18n.h"
 #include "game/character_model.h"
 #include "game/inventory.h"
 
@@ -16,14 +17,16 @@ constexpr int kCosmeticSlotCount = static_cast<int>(CosmeticSlot::Count);
 
 struct Cosmetic {
     const char* key;   // clave en perfil.txt (unica)
-    const char* name;
+    i18n::T name;
     CosmeticSlot slot;
     game::Rarity rarity;
     // Trajes: la paleta del modelo del personaje (character_model.h). nullptr en el resto.
     const game::CharacterPalette* palette;
 };
 
-const char* cosmeticSlotName(CosmeticSlot slot);
+i18n::T cosmeticSlotName(CosmeticSlot slot);
+// Clave de la categoria en perfil.txt (no cambia con el idioma).
+const char* cosmeticSlotKey(CosmeticSlot slot);
 int cosmeticCount();
 const Cosmetic& cosmetic(int index);
 // Objetos de una categoria (indices del catalogo). Devuelve cuantos.

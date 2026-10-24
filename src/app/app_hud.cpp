@@ -14,6 +14,7 @@
 #include <initializer_list>
 
 #include "app/app_common.h"
+#include "core/i18n.h"
 #include "audio/audio_system.h"
 #include "world/storm.h"
 #include "world/world_units.h"
@@ -23,6 +24,8 @@ namespace {
 
 using namespace common;
 using math3d::Vec3;
+using i18n::T;
+using i18n::tr;
 namespace atlas = assets::ui;
 
 // Minimapa: ventana de 64 texeles (96 m) alrededor del jugador, dibujada en 76x76 px.
@@ -68,27 +71,28 @@ constexpr PadButton kPadButtons[] = {
 
 // Filas de la pagina de controles: titulos o una o dos ayudas (columna izquierda y derecha).
 struct ControlRow {
-    const char* title;  // si no es nullptr, la fila es un titulo
+    T title;  // si no es T::None, la fila es un titulo
     ui::Hint left[3];
     int leftCount;
     ui::Hint right[2];
     int rightCount;
 };
 using B = ui::Button;
+// Las acciones (saltar, construir...) se dibujan con el boton que tengan asignado.
 const ControlRow kControlRows[] = {
-    {"COMBATE", {}, 0, {}, 0},
-    {nullptr, {{B::Stick, "moverse"}}, 1, {{B::Cross, "saltar"}}, 1},
-    {nullptr, {{B::R, "disparar / usar"}}, 1, {{B::Square, "recargar"}}, 1},
-    {nullptr, {{B::L, "apuntar / fijar"}}, 1, {{B::Triangle, "pico"}}, 1},
-    {nullptr, {{B::Left, ""}, {B::Right, "objeto"}}, 2, {{B::L, ""}, {B::Stick, "mira"}}, 2},
-    {nullptr, {{B::Down, "agacharse"}}, 1, {{B::Up, "bailar"}}, 1},
-    {"CONSTRUCCION", {}, 0, {}, 0},
-    {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pieza"}}, 1},
-    {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "material"}}, 1},
-    {"PARTIDA", {}, 0, {}, 0},
-    {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "mapa"}}, 1},
-    {nullptr, {{B::L, ""}, {B::Select, "paginas del HUD"}}, 2, {}, 0},
-    {nullptr, {{B::L, ""}, {B::R, ""}, {B::Start, "1 s: salir del juego"}}, 3, {}, 0},
+    {T::ControlsCombat, {}, 0, {}, 0},
+    {T::None, {{B::Stick, T::CtlMove}}, 1, {{B::Jump, T::CtlJump}}, 1},
+    {T::None, {{B::Fire, T::CtlFire}}, 1, {{B::Interact, T::CtlReload}}, 1},
+    {T::None, {{B::Aim, T::CtlAim}}, 1, {{B::Pickaxe, T::CtlPickaxe}}, 1},
+    {T::None, {{B::Left, T::None}, {B::Right, T::CtlItem}}, 2, {{B::Aim, T::None}, {B::Stick, T::CtlLook}}, 2},
+    {T::None, {{B::Crouch, T::CtlCrouch}}, 1, {{B::Emote, T::CtlEmote}}, 1},
+    {T::ControlsBuilding, {}, 0, {}, 0},
+    {T::None, {{B::Build, T::CtlBuild}}, 1, {{B::Fire, T::CtlPlacePiece}}, 1},
+    {T::None, {{B::Left, T::None}, {B::Right, T::CtlPiece}}, 2, {{B::Interact, T::CtlMaterial}}, 1},
+    {T::ControlsMatch, {}, 0, {}, 0},
+    {T::None, {{B::Start, T::CtlPause}}, 1, {{B::Select, T::CtlMap}}, 1},
+    {T::None, {{B::L, T::None}, {B::Select, T::CtlHudPages}}, 2, {}, 0},
+    {T::None, {{B::L, T::None}, {B::R, T::None}, {B::Start, T::CtlQuit}}, 3, {}, 0},
 };
 constexpr int kControlsX = 14, kControlsColumn = 14 + 8 * 19, kControlsTop = 40;
 constexpr int kTitleHeight = 12, kHintRowHeight = 14;
@@ -98,22 +102,22 @@ template <typename Fn>
 int forEachControlRow(Fn&& fn) {
     int y = kControlsTop;
     for (const ControlRow& row : kControlRows) {
-        if (row.title && row.title != kControlRows[0].title) y += 3;
+        if (row.title != T::None && row.title != kControlRows[0].title) y += 3;
         fn(row, y);
-        y += row.title ? kTitleHeight : kHintRowHeight;
+        y += row.title != T::None ? kTitleHeight : kHintRowHeight;
     }
     return y + 3;
 }
 
-const ui::Hint kHudPageHint[] = {{B::Select, "siguiente pagina del HUD"}};
-const ui::Hint kBackHint[] = {{B::Circle, "volver al lobby"}};
-const ui::Hint kFreeCameraHint[] = {{B::Triangle, "camara libre"}};
+const ui::Hint kHudPageHint[] = {{B::Select, T::HintNextHudPage}};
+const ui::Hint kBackHint[] = {{B::Circle, T::HintBackToLobby}};
+const ui::Hint kFreeCameraHint[] = {{B::Triangle, T::HintFreeCamera}};
 constexpr int kFreeCameraHintY = 256;
-const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
-const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "material"}, {B::Circle, "salir"}};
-const ui::Hint kTrapHints[] = {{B::R, "colocar trampa"}, {B::Circle, "salir"}};
-const ui::Hint kBusHint[] = {{B::Cross, "Saltar del autobus"}};
-const ui::Hint kGliderHint[] = {{B::Cross, "Abrir el ala delta"}};
+const ui::Hint kReloadHint[] = {{B::Interact, T::HintReload}};
+const ui::Hint kBuildHints[] = {{B::Fire, T::HintPlace}, {B::Interact, T::HintMaterial}, {B::Build, T::HintExit}};
+const ui::Hint kTrapHints[] = {{B::Fire, T::HintPlaceTrap}, {B::Build, T::HintExit}};
+const ui::Hint kBusHint[] = {{B::Jump, T::BusJump}};
+const ui::Hint kGliderHint[] = {{B::Jump, T::GliderOpen}};
 constexpr int kPromptY = 180;
 
 constexpr float kStickBoxX = 361.0f;
@@ -136,11 +140,11 @@ void heldButtonsString(u32 buttons, char* out, size_t capacity) {
         strcat(out, name);
         len += need;
     }
-    if (len == 0) strcpy(out, "(ninguno)");
+    if (len == 0) snprintf(out, capacity, "%s", tr(T::PadNone));
 }
 
 constexpr float kHarvestPopupSeconds = 0.9f;
-constexpr const char* kBuildPieceNames[] = {"Pared", "Suelo", "Rampa", "Trampa de pinchos"};
+constexpr T kBuildPieceNames[] = {T::PieceWall, T::PieceFloor, T::PieceRamp, T::ItemSpikeTrap};
 
 // Fondo de ranura segun la rareza (gris, verde, azul, morado, dorado como en Fortnite).
 u32 rarityColor(game::Rarity r) {
@@ -271,7 +275,7 @@ void App::renderFullMap() const {
     }
     float sx, sy;
     if (m_atlas.ready() && toMap(0.0f, -11.0f, &sx, &sy)) {
-        const atlas::Rect& r = atlas::kMapaMinimapa;
+        const atlas::Rect& r = label(atlas::kMapaMinimapa, atlas::kMapaMinimapaEn);
         m_atlas.draw(r, floorf(sx - r.w * 0.5f), floorf(sy - r.h * 0.5f));
     }
     for (const game::Container& c : m_match.containers()) {
@@ -318,7 +322,7 @@ void App::renderGameHud() const {
     if (m_buildMode) {
         // Rotulo CONSTRUCCION sobre una franja azul: el modo se ve siempre.
         gfx::fillRect(150, 18, 180, 22, kBuildBlue);
-        if (m_atlas.ready()) m_atlas.drawCentered(atlas::kConstruccion, 240, 20);
+        if (m_atlas.ready()) m_atlas.drawCentered(label(atlas::kConstruccion, atlas::kConstruccionEn), 240, 20);
         if (m_buildPiece == kTrapPiece ? m_trapPlan.valid : m_wallPlan.valid) {
             int n = 0;
             const ui::Hint* hints = buildHints(&n);
@@ -344,7 +348,8 @@ void App::renderGameHud() const {
 
 // Selector de que soltar: la ranura elegida parpadea en amarillo sobre la fila de objetos
 // y encima va lo que se recoge y los botones.
-const ui::Hint kSwapHints[] = {{B::Left, ""}, {B::Right, "elegir"}, {B::Square, "cambiar"}, {B::Circle, "cancelar"}};
+const ui::Hint kSwapHints[] = {{B::Left, T::None}, {B::Right, T::HintSelect}, {B::Interact, T::HintSwap},
+                               {B::Build, T::HintCancel}};
 constexpr float kSwapPanelY = 154.0f;
 
 void App::renderSwapChooser() const {
@@ -360,7 +365,7 @@ void App::renderSwapChooser() const {
 
 const ui::Hint* App::interactionHint(int* count) const {
     // CUADRADO: lo que se abriria o recogeria ahora (texto en m_promptText).
-    static ui::Hint hint{ui::Button::Square, ""};
+    static ui::Hint hint{ui::Button::Interact, T::None};
     static char text[64];
     // (Curandose no se puede recoger ni abrir nada: no se ofrece.)
     if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground || m_match.useProgress() >= 0.0f) {
@@ -370,22 +375,23 @@ const ui::Hint* App::interactionHint(int* count) const {
     if (it.kind == game::Interactable::Kind::None) return nullptr;
     if (it.kind == game::Interactable::Kind::Container) {
         const game::ContainerKind kind = m_match.containers()[it.index].kind;
-        snprintf(text, sizeof(text), "%s", kind == game::ContainerKind::Chest     ? "Abrir cofre"
-                                           : kind == game::ContainerKind::AmmoBox ? "Abrir caja de municion"
-                                                                                 : "Abrir suministro");
+        snprintf(text, sizeof(text), "%s", tr(kind == game::ContainerKind::Chest     ? T::OpenChest
+                                              : kind == game::ContainerKind::AmmoBox ? T::OpenAmmoBox
+                                              : kind == game::ContainerKind::Llama   ? T::OpenLlama
+                                                                                     : T::OpenAirdrop));
     } else {
         const game::Pickup& p = m_match.pickups()[it.index];
         const bool swap = m_match.pickupRoom(it.index) <= 0;
-        const char* name = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemDef(p.item).name;
+        const char* name = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemName(p.item);
         if (swap) {
-            snprintf(text, sizeof(text), "Cambiar por %s (%s)", name, game::rarityName(p.rarity));
+            snprintf(text, sizeof(text), tr(T::SwapFor), name, game::rarityName(p.rarity));
         } else if (p.count > 1) {
-            snprintf(text, sizeof(text), "Recoger %s x%d", name, p.count);
+            snprintf(text, sizeof(text), tr(T::PickUpCount), name, p.count);
         } else {
-            snprintf(text, sizeof(text), "Recoger %s (%s)", name, game::rarityName(p.rarity));
+            snprintf(text, sizeof(text), tr(T::PickUpRarity), name, game::rarityName(p.rarity));
         }
     }
-    hint.text = text;
+    hint.raw = text;
     *count = 1;
     return &hint;
 }
@@ -513,7 +519,7 @@ void App::renderMinimap() const {
     if (m_atlas.ready()) {
         const float sx = kMapX + ((0.0f + world::kMapHalfSize) / kMetersPerTexel - u0) * (kMapSize / kMapWindow);
         const float sy = kMapY + ((-11.0f + world::kMapHalfSize) / kMetersPerTexel - v0) * (kMapSize / kMapWindow);
-        const atlas::Rect& r = atlas::kMapaMinimapa;
+        const atlas::Rect& r = label(atlas::kMapaMinimapa, atlas::kMapaMinimapaEn);
         m_atlas.drawClipped(r, floorf(sx - r.w * 0.5f), floorf(sy - r.h * 0.5f), kMapX, kMapY, kMapX + kMapSize,
                             kMapY + kMapSize);
     }
@@ -667,6 +673,7 @@ void App::renderSlots() const {
 
 void App::renderDamageNumbers() const {
     // Numeros de dano sobre lo que ha alcanzado el jugador: suben y se desvanecen.
+    if (!m_settings.damageNumbers) return;
     const game::DamageNumber* numbers = m_match.damageNumbers();
     for (int i = 0; i < game::Match::kMaxDamageNumbers; ++i) {
         const game::DamageNumber& d = numbers[i];
@@ -701,7 +708,9 @@ void App::overlayGame(const FrameInfo& frame) const {
 
 void App::overlayCompass() const {
     // Brujula: rumbos a menos de 70 grados de la camara (el oeste queda a la izquierda).
-    static const char* const kNames[] = {"N", "NO", "O", "SO", "S", "SE", "E", "NE"};
+    static const char* const kNamesEs[] = {"N", "NO", "O", "SO", "S", "SE", "E", "NE"};
+    static const char* const kNamesEn[] = {"N", "NW", "W", "SW", "S", "SE", "E", "NE"};
+    const char* const* kNames = i18n::language() == i18n::Lang::En ? kNamesEn : kNamesEs;
     const float camera = headingDegrees(m_freeCameraActive ? 0.0f : m_followCamera.yaw());
     for (int i = 0; i < 8; ++i) {
         float diff = i * 45.0f - camera;
@@ -719,17 +728,17 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const game::StormZone& storm = m_match.storm();
         char line[64];
         if (storm.closes() && storm.timeLeft() >= 0.0f) {
-            snprintf(line, sizeof(line), "%s %.0f s", storm.shrinking() ? "La tormenta se cierra:" : "Siguiente cierre en",
+            snprintf(line, sizeof(line), "%s %.0f s", tr(storm.shrinking() ? T::StormClosingIn : T::StormNextIn),
                      static_cast<double>(storm.timeLeft()));
             printCenteredShadow(4, rgba(210, 150, 255), line);
         }
-        snprintf(line, sizeof(line), "Vivos %d   Bajas %d", m_match.aliveCount(), m_match.playerKills());
+        snprintf(line, sizeof(line), tr(T::MapAliveKills), m_match.aliveCount(), m_match.playerKills());
         gfx::text::printShadow(6, 262, kWhite, "%s", line);
-        gfx::text::printShadow(380, 262, kLightGrey, "SELECT: cerrar");
+        gfx::text::printShadow(380, 262, kLightGrey, "%s", tr(T::MapClose));
         return;
     }
     gfx::text::printShadow(6, 4, kLightGrey, "%s", m_match.name(0));
-    gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
+    if (m_settings.showFps) gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
     overlayCompass();
 
     // Autobus y caida.
@@ -738,25 +747,25 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         if (air == game::AirState::Bus) {
             ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kBusHint, 1)) / 2, 154, kWhite, kBusHint, 1);
             char line[48];
-            snprintf(line, sizeof(line), "Salto automatico en %.0f s", fmaxf(0.0f, m_match.busTimeLeft()));
+            snprintf(line, sizeof(line), tr(T::AutoJump), fmaxf(0.0f, m_match.busTimeLeft()));
             printCenteredShadow(168, kLightGrey, line);
         } else {
             if (air == game::AirState::Freefall) {
                 ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kGliderHint, 1)) / 2, 154, kWhite, kGliderHint, 1);
             }
             char line[32];
-            snprintf(line, sizeof(line), "Altura %.0f m", m_match.heightAboveGround(0));
+            snprintf(line, sizeof(line), tr(T::Altitude), m_match.heightAboveGround(0));
             printCenteredShadow(air == game::AirState::Glide ? 153 : 168, kLightGrey, line);
         }
     } else if (m_swapOpen) {
         const game::Pickup& p = m_match.pickups()[m_swapPickup];
         const game::InventorySlot& out = m_match.inventory().slot(m_swapCursor);
-        const char* in = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemDef(p.item).name;
-        const char* drop = out.type == game::ItemType::None ? "(vacia)"
+        const char* in = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemName(p.item);
+        const char* drop = out.type == game::ItemType::None ? tr(T::SwapEmptySlot)
                            : game::isWeapon(out.type) ? out.weapon.config().name
-                                                       : game::itemDef(out.type).name;
+                                                       : game::itemName(out.type);
         char line[64];
-        snprintf(line, sizeof(line), "Recoger %s y soltar %s", in, drop);
+        snprintf(line, sizeof(line), tr(T::SwapChoose), in, drop);
         printCenteredShadow(static_cast<int>(kSwapPanelY) + 6, kWhite, line);
         ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kSwapHints, 4)) / 2, static_cast<int>(kSwapPanelY) + 22, kLightGrey,
                        kSwapHints, 4);
@@ -772,23 +781,23 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         }
     }
     if (m_stormMessage > 0.0f && fmodf(m_stormMessage, 0.8f) > 0.2f) {
-        printCenteredShadow(107, rgba(210, 150, 255), "La tormenta se esta cerrando!");
+        printCenteredShadow(107, rgba(210, 150, 255), tr(T::StormClosingNow));
     }
     if (m_airdropMessage > 0.0f && fmodf(m_airdropMessage, 0.8f) > 0.2f) {
-        printCenteredShadow(96, rgba(120, 190, 255), "Suministro aereo en camino!");
+        printCenteredShadow(96, rgba(120, 190, 255), tr(T::AirdropIncoming));
     }
 
     // Construccion: paredes y por que no se puede colocar.
     if (m_buildMode) {
         const game::StructureSystem& s = m_match.structures();
-        static const char* const kMaterialNames[] = {"madera", "piedra", "metal"};
+        static const T kMaterialNames[] = {T::MaterialWood, T::MaterialStone, T::MaterialMetal};
         char banner[64];
         const bool trap = m_buildPiece == kTrapPiece;
         if (trap) {
-            snprintf(banner, sizeof(banner), "%s  -  te quedan %d", kBuildPieceNames[m_buildPiece], m_match.trapStock());
+            snprintf(banner, sizeof(banner), tr(T::TrapBanner), tr(kBuildPieceNames[m_buildPiece]), m_match.trapStock());
         } else {
-            snprintf(banner, sizeof(banner), "%s de %s  -  %d/%d", kBuildPieceNames[m_buildPiece],
-                     kMaterialNames[static_cast<int>(m_wallPlan.material)], s.count(), s.config().maxWalls);
+            snprintf(banner, sizeof(banner), tr(T::BuildBanner), tr(kBuildPieceNames[m_buildPiece]),
+                     tr(kMaterialNames[static_cast<int>(m_wallPlan.material)]), s.count(), s.config().maxWalls);
         }
         printCenteredShadow(44, kWhite, banner);
         if (trap ? !m_trapPlan.valid : !m_wallPlan.valid) {
@@ -802,7 +811,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     }
     if (!m_match.alive(0)) {
         char line[40];
-        snprintf(line, sizeof(line), "ESPECTANDO A %s", m_match.name(spectateTarget()));
+        snprintf(line, sizeof(line), tr(T::SpectatingName), m_match.name(spectateTarget()));
         printCenteredShadow(44, kErrorRed, line);
     } else {
         // Tormenta: aviso al acercarse al borde del mapa y dentro (del borde o de la que se cierra).
@@ -810,13 +819,13 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const float depth = world::stormDepth(p.x, p.z);
         if (m_match.inStorm(0)) {
             char line[48];
-            snprintf(line, sizeof(line), "TORMENTA: -%.0f DE VIDA POR SEGUNDO",
+            snprintf(line, sizeof(line), tr(T::StormDamage),
                      depth > 0.0f ? m_matchConfig.stormDamage : m_match.storm().damage());
             printCenteredShadow(70, rgba(230, 180, 255), line);
-            printCenteredShadow(81, kWhite, "Vuelve a la zona segura");
+            printCenteredShadow(81, kWhite, tr(T::StormBack));
         } else if (depth > -12.0f) {
             char line[48];
-            snprintf(line, sizeof(line), "Limite del mapa: tormenta a %.0f m", -depth);
+            snprintf(line, sizeof(line), tr(T::StormEdge), -depth);
             printCenteredShadow(70, rgba(210, 160, 250), line);
         }
     }
@@ -828,11 +837,11 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         if (m_match.elapsed() - e.time > kKillFeedSeconds) continue;
         const u32 color = (e.killer == 0 || e.victim == 0) ? config::kColorGold : kWhite;
         if (e.killer >= 0) {
-            gfx::text::printShadow(6, y, color, "%s elimino a %s", m_match.name(e.killer), m_match.name(e.victim));
+            gfx::text::printShadow(6, y, color, tr(T::FeedEliminated), m_match.name(e.killer), m_match.name(e.victim));
         } else if (e.killer == game::kStormKiller) {
-            gfx::text::printShadow(6, y, color, "%s cayo en la tormenta", m_match.name(e.victim));
+            gfx::text::printShadow(6, y, color, tr(T::FeedStorm), m_match.name(e.victim));
         } else {
-            gfx::text::printShadow(6, y, color, "%s ha caido", m_match.name(e.victim));
+            gfx::text::printShadow(6, y, color, tr(T::FeedFell), m_match.name(e.victim));
         }
         y += 10;
     }
@@ -857,8 +866,8 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     // Estado del arma (solo con un arma en la mano).
     const game::Inventory& inv = m_match.inventory();
     if (const game::Weapon* w = inv.activeWeapon()) {
-        if (w->reloading()) gfx::text::printShadow(18, 198, config::kColorGold, "RECARGANDO");
-        else if (w->empty()) gfx::text::printShadow(18, 198, kErrorRed, "SIN BALAS");
+        if (w->reloading()) gfx::text::printShadow(18, 198, config::kColorGold, "%s", tr(T::Reloading));
+        else if (w->empty()) gfx::text::printShadow(18, 198, kErrorRed, "%s", tr(T::NoAmmo));
         else if (w->ammo() == 0) ui::printHints(18, 198, kErrorRed, kReloadHint, 1);
     }
     const game::CharacterState& p = m_match.body(0).state();
@@ -886,18 +895,17 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     // Nombre de lo que se lleva en la mano, sobre la fila de objetos.
     if (!m_buildMode && m_match.alive(0)) {
         const game::InventorySlot& held = inv.slot(inv.selected());
-        const char* name = inv.pickaxe() ? "Pico"
+        const char* name = inv.pickaxe() ? tr(T::WeaponPickaxe)
                            : game::isWeapon(held.type) ? held.weapon.config().name
-                                                        : game::itemDef(held.type).name;
+                                                        : game::itemName(held.type);
         if (name[0]) gfx::text::printShadow(static_cast<int>(kWeaponSlotX), static_cast<int>(kWeaponRowY) - 12, kWhite,
                                             "%s", name);
     }
     // Consumible en uso, o por que no se puede usar.
     const float use = m_match.useProgress();
     if (use >= 0.0f) {
-        const game::ItemDef& def = game::itemDef(m_match.usingItem());
         char line[48];
-        snprintf(line, sizeof(line), "Usando %s  %.1f s", def.name, (1.0f - use) * m_match.useDuration());
+        snprintf(line, sizeof(line), tr(T::Using), game::itemName(m_match.usingItem()), (1.0f - use) * m_match.useDuration());
         printCenteredShadow(154, kWhite, line);
     } else if (m_match.sinceUseError() < 1.5f) {
         printCenteredShadow(154, kErrorRed, game::useErrorName(m_match.lastUseError()));
@@ -924,7 +932,7 @@ void App::overlayDebug(const FrameInfo& frame) const {
 
     int y = 24;
     const int x = 8;
-    gfx::text::print(x, y, config::kColorGold, "JUGADOR");
+    gfx::text::print(x, y, config::kColorGold, "%s", tr(T::DebugPlayer));
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Pos %6.1f %5.1f %6.1f", p.position.x, p.position.y, p.position.z);
     y += kLineHeight;
@@ -932,13 +940,13 @@ void App::overlayDebug(const FrameInfo& frame) const {
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "%s, %s", game::jumpStateName(p.jumpState), game::locomotionName(p));
     y += kLineHeight + 4;
-    gfx::text::print(x, y, config::kColorGold, "RENDIMIENTO (%d bots)", m_match.botCount());
+    gfx::text::print(x, y, config::kColorGold, tr(T::DebugPerformance), m_match.botCount());
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Frame %5.2f ms trab %5.2f", frame.timer.frameMsAvg(), frame.workMs);
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "IA %5.2f ms  fis %5.2f ms", m_aiMsPerFrame, m_physicsMsPerFrame);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Decisiones %3d/s", m_decisionsPerSecond);
+    gfx::text::print(x, y, kWhite, tr(T::DebugDecisions), m_decisionsPerSecond);
     y += kLineHeight;
     gfx::text::print(x, y, kWhite, "Tris %5d+%5d lotes %3d", m_stats.trianglesDrawn, m_characterTriangles,
                      m_stats.batchesDrawn);
@@ -948,31 +956,31 @@ void App::overlayDebug(const FrameInfo& frame) const {
                      m_startHeapBytes / 1024);
     y += kLineHeight;
     if (m_audioReady) {
-        gfx::text::print(x, y, kWhite, "Audio: %d voces, %u perdidas", audio::mixer().activeVoices(),
+        gfx::text::print(x, y, kWhite, tr(T::DebugAudio), audio::mixer().activeVoices(),
                          static_cast<unsigned>(audio::mixer().droppedCommands()));
     } else {
-        gfx::text::print(x, y, kErrorRed, "Audio: sin canal");
+        gfx::text::print(x, y, kErrorRed, "%s", tr(T::DebugNoAudio));
     }
     y += kLineHeight + 4;
-    gfx::text::print(x, y, config::kColorGold, "PARTIDA %d", m_matchesPlayed);
+    gfx::text::print(x, y, config::kColorGold, tr(T::DebugMatch), m_matchesPlayed);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Vivos %d/%d  zona %2.0f m", m_match.aliveCount(), m_match.entityCount(),
+    gfx::text::print(x, y, kWhite, tr(T::DebugAlive), m_match.aliveCount(), m_match.entityCount(),
                      m_match.zoneRadius());
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Caminos %d (fallos %d)", s.pathRequests, s.pathFailures);
+    gfx::text::print(x, y, kWhite, tr(T::DebugPaths), s.pathRequests, s.pathFailures);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Max nodos A* %d  atascos %d", s.maxPathExpansions, s.stuckEvents);
+    gfx::text::print(x, y, kWhite, tr(T::DebugNodes), s.maxPathExpansions, s.stuckEvents);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Disparos %d imp %d pared %d", s.shotsFired, s.shotsHitEntity,
+    gfx::text::print(x, y, kWhite, tr(T::DebugShots), s.shotsFired, s.shotsHitEntity,
                      s.shotsBlockedByWorld);
     y += kLineHeight;
-    gfx::text::print(x, y, kWhite, "Paredes +%d -%d rotas %d", s.wallsBuilt, s.wallsRemoved, s.wallsDestroyed);
+    gfx::text::print(x, y, kWhite, tr(T::DebugWalls), s.wallsBuilt, s.wallsRemoved, s.wallsDestroyed);
     y += kLineHeight;
 
     // Lista de bots: estado, vida, objetivo y distancia.
     y = 24;
     const int bx = 244;
-    gfx::text::print(bx, y, config::kColorGold, "BOT ESTADO       VIDA OBJ");
+    gfx::text::print(bx, y, config::kColorGold, "%s", tr(T::DebugBotHeader));
     y += 10;
     const int maxRows = 23;
     for (int i = 0; i < m_match.botCount() && i < maxRows; ++i) {
@@ -984,7 +992,7 @@ void App::overlayDebug(const FrameInfo& frame) const {
                          "%2d %-12s %3.0f %s", i + 1, game::botStateName(b.state), b.body.state().health, target);
         y += 10;
     }
-    if (m_match.botCount() > maxRows) gfx::text::print(bx, y, kLightGrey, "... (%d mas)", m_match.botCount() - maxRows);
+    if (m_match.botCount() > maxRows) gfx::text::print(bx, y, kLightGrey, tr(T::DebugMore), m_match.botCount() - maxRows);
     ui::printHints(8, kFreeCameraHintY, config::kColorGold, kFreeCameraHint, 1);
 }
 
@@ -995,13 +1003,13 @@ void App::renderControlsPage(const FrameInfo& frame) const {
 
     gfx::fillRect(0, 0, gfx::kScreenWidth, 30, kNavy);
     gfx::fillRect(0, 30, gfx::kScreenWidth, 1, rgba(60, 90, 160));
-    if (m_atlas.ready()) m_atlas.drawCentered(atlas::kControles, 240, 4);
+    if (m_atlas.ready()) m_atlas.drawCentered(label(atlas::kControles, atlas::kControlsEn), 240, 4);
     gfx::fillRect(6, 36, 300, 208, rgba(0, 0, 0, 150));
     gfx::fillRect(312, 36, 162, 208, rgba(0, 0, 0, 150));
     gfx::fillRect(0, 250, gfx::kScreenWidth, 22, kNavy);
 
     forEachControlRow([&](const ControlRow& row, int y) {
-        if (row.title) return;
+        if (row.title != T::None) return;
         ui::drawHintIcons(m_atlas, kControlsX, y, row.left, row.leftCount);
         ui::drawHintIcons(m_atlas, kControlsColumn, y, row.right, row.rightCount);
     });
@@ -1040,8 +1048,8 @@ void App::overlayControlsPage(const FrameInfo& frame) const {
     gfx::text::print(400, 12, kLightGrey, "%5.1f FPS", frame.timer.fps());
 
     int y = forEachControlRow([&](const ControlRow& row, int rowY) {
-        if (row.title) {
-            gfx::text::print(kControlsX, rowY, config::kColorGold, "%s", row.title);
+        if (row.title != T::None) {
+            gfx::text::print(kControlsX, rowY, config::kColorGold, "%s", tr(row.title));
             return;
         }
         ui::printHints(kControlsX, rowY, kWhite, row.left, row.leftCount);
@@ -1050,13 +1058,13 @@ void App::overlayControlsPage(const FrameInfo& frame) const {
 
     char held[40];
     heldButtonsString(in.rawButtons(), held, 26);
-    gfx::text::print(kControlsX, y, config::kColorGold, "PRUEBA DEL MANDO");
+    gfx::text::print(kControlsX, y, config::kColorGold, "%s", tr(T::PadTest));
     y += kLineHeight;
-    gfx::text::print(kControlsX, y, kWhite, "Pulsado: %s", held);
+    gfx::text::print(kControlsX, y, kWhite, tr(T::PadPressed), held);
     y += kLineHeight;
     gfx::text::print(kControlsX, y, kWhite, "Stick %+.2f, %+.2f  CPU %d/%d MHz", in.analogX(), in.analogY(), m_cpuMhz,
                      m_busMhz);
-    gfx::text::print(357, 192, kLightGrey, "ANALOGICO");
+    gfx::text::print(357, 192, kLightGrey, "%s", tr(T::PadAnalog));
 
     const ui::Hint* footer = m_screen == Screen::Game ? kHudPageHint : kBackHint;
     ui::printHints(8, 257, kWhite, footer, 1);

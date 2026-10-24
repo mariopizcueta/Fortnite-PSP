@@ -6,6 +6,13 @@
 
 namespace input {
 
+namespace {
+float g_deadzone = config::kAnalogDeadzone;
+}  // namespace
+
+void setDeadzone(float deadzone) { g_deadzone = deadzone < 0.05f ? 0.05f : (deadzone > 0.5f ? 0.5f : deadzone); }
+float deadzone() { return g_deadzone; }
+
 void Input::init() {
     sceCtrlSetSamplingCycle(0);  // 0 = sincronizado con VBlank
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
@@ -16,13 +23,13 @@ void Input::normalizeStick(u8 rawX, u8 rawY, float& outX, float& outY) {
     const float y = (static_cast<float>(rawY) - 127.5f) / 127.5f;
     const float magnitude = sqrtf(x * x + y * y);
     // Zona muerta radial: no "engancha" las diagonales a los ejes como la zona por eje.
-    if (magnitude < config::kAnalogDeadzone) {
+    if (magnitude < g_deadzone) {
         outX = outY = 0.0f;
         return;
     }
     // Reescala para que la salida empiece en 0 justo al salir de la zona muerta y no
     // pase de 1 (las esquinas del recorrido fisico dan magnitudes de hasta ~1.4).
-    float scaled = (magnitude - config::kAnalogDeadzone) / (1.0f - config::kAnalogDeadzone);
+    float scaled = (magnitude - g_deadzone) / (1.0f - g_deadzone);
     if (scaled > 1.0f) scaled = 1.0f;
     outX = x / magnitude * scaled;
     outY = y / magnitude * scaled;

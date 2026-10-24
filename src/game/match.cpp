@@ -16,12 +16,12 @@ using namespace detail;
 
 const char* botStateName(BotState state) {
     switch (state) {
-        case BotState::Explore: return "Explorar";
-        case BotState::Travel: return "Desplazarse";
-        case BotState::Search: return "Buscar obj.";
-        case BotState::Attack: return "Atacar";
-        case BotState::Loot: return "Botin";
-        case BotState::Eliminated: return "Eliminado";
+        case BotState::Explore: return i18n::tr(i18n::T::BotExplore);
+        case BotState::Travel: return i18n::tr(i18n::T::BotTravel);
+        case BotState::Search: return i18n::tr(i18n::T::BotSearch);
+        case BotState::Attack: return i18n::tr(i18n::T::BotAttack);
+        case BotState::Loot: return i18n::tr(i18n::T::BotLoot);
+        case BotState::Eliminated: return i18n::tr(i18n::T::BotEliminated);
     }
     return "?";
 }
@@ -29,8 +29,8 @@ const char* botStateName(BotState state) {
 const char* useErrorName(UseError error) {
     switch (error) {
         case UseError::None: return "";
-        case UseError::FullHealth: return "Vida al maximo";
-        case UseError::FullShield: return "Escudo al maximo";
+        case UseError::FullHealth: return i18n::tr(i18n::T::UseFullHealth);
+        case UseError::FullShield: return i18n::tr(i18n::T::UseFullShield);
     }
     return "?";
 }
@@ -111,10 +111,10 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_nextDamageNumber = 0;
     m_eventCount = 0;
     m_assistTarget = -1;
-    snprintf(m_names[0], sizeof(m_names[0]), "Jugador");
+    snprintf(m_names[0], sizeof(m_names[0]), "%s", i18n::tr(i18n::T::PlayerDefaultName));
 
     m_bots.assign(m_config.botCount, Bot{});
-    for (int i = 0; i < m_config.botCount; ++i) snprintf(m_names[i + 1], sizeof(m_names[0]), "Bot %d", i + 1);
+    for (int i = 0; i < m_config.botCount; ++i) snprintf(m_names[i + 1], sizeof(m_names[0]), i18n::tr(i18n::T::BotName), i + 1);
     spawnBots(playerSpawn);
 
     m_phase = MatchPhase::Playing;

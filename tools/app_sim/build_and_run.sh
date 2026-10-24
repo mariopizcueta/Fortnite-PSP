@@ -30,6 +30,8 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/app/app.cpp" \
     "$ROOT/src/app/app_hud.cpp" \
     "$ROOT/src/app/app_menus.cpp" \
+    "$ROOT/src/app/app_settings.cpp" \
+    "$ROOT/src/app/settings.cpp" \
     "$ROOT/src/app/achievements.cpp" \
     "$ROOT/src/app/locker.cpp" \
     "$ROOT/src/app/build_visuals.cpp" \
@@ -63,6 +65,7 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/gfx/texture.cpp" \
     "$ROOT/src/input/input.cpp" \
     "$ROOT/src/math/math3d.cpp" \
+    "$ROOT/src/core/i18n.cpp" \
     "$ROOT/src/third_party/stb_image_impl.cpp" \
     "$ROOT/src/world/collision.cpp" \
     "$ROOT/src/world/scene_builder.cpp" \

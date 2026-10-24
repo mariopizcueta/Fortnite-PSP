@@ -1,5 +1,7 @@
 #include "game/character.h"
 
+#include "core/i18n.h"
+
 #include <math.h>
 
 #include "world/storm.h"
@@ -43,18 +45,18 @@ Vec3 forwardFromYaw(float yaw) { return {-sinf(yaw), 0.0f, -cosf(yaw)}; }
 
 const char* jumpStateName(JumpState state) {
     switch (state) {
-        case JumpState::Grounded: return "En suelo";
-        case JumpState::Rising: return "Saltando";
-        case JumpState::Falling: return "Cayendo";
+        case JumpState::Grounded: return i18n::tr(i18n::T::JumpGrounded);
+        case JumpState::Rising: return i18n::tr(i18n::T::JumpRising);
+        case JumpState::Falling: return i18n::tr(i18n::T::JumpFalling);
     }
     return "?";
 }
 
 const char* locomotionName(const CharacterState& s) {
     const float speed = s.horizontalSpeed();
-    if (speed < 0.2f) return "quieto";
-    if (speed < kRunSpeed * 0.6f) return "andando";
-    return "corriendo";
+    if (speed < 0.2f) return i18n::tr(i18n::T::MoveIdle);
+    if (speed < kRunSpeed * 0.6f) return i18n::tr(i18n::T::MoveWalk);
+    return i18n::tr(i18n::T::MoveRun);
 }
 
 void CharacterBody::reset(const Vec3& spawn, float yaw, const world::CollisionWorld& world) {

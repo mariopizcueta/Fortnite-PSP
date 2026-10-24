@@ -30,7 +30,7 @@ constexpr float kFootstepRange = 12.0f;
 constexpr float kStormFogRange = 30.0f;  // m antes del borde en que la niebla empieza a espesarse
 constexpr u32 kStormFogColor = gfx::rgba(150, 92, 200);
 constexpr u32 kStormInsideColor = gfx::rgba(98, 54, 142);        // m: pasos de los bots que se oyen
-constexpr float kCharacterLodDistance = 10.0f;  // m: bots mas lejos con el modelo simple        // m: mas lejos no se oyen disparos de bots
+
 
 // Aparicion del jugador: al sur del muro, mirando al deposito.
 constexpr Vec3 kPlayerSpawn{0.0f, 0.0f, 24.0f};
@@ -66,13 +66,21 @@ void App::logStage(const char* stage, u64 startMicros) const {
 }
 
 void App::setDataDirectory(const char* dir) {
-    snprintf(m_profilePath, sizeof(m_profilePath), "%s%sperfil.txt", dir ? dir : "",
-             dir && dir[0] && dir[strlen(dir) - 1] != '/' ? "/" : "");
+    const char* sep = dir && dir[0] && dir[strlen(dir) - 1] != '/' ? "/" : "";
+    snprintf(m_profilePath, sizeof(m_profilePath), "%s%sperfil.txt", dir ? dir : "", sep);
+    snprintf(m_settingsPath, sizeof(m_settingsPath), "%s%sajustes.txt", dir ? dir : "", sep);
 }
 
 void App::init() {
     const u64 bootStart = core::nowMicros();
     u64 t0 = bootStart;
+    // Ajustes primero: el idioma ya sale bien en la pantalla de carga.
+    if (m_settings.load(m_settingsPath)) {
+        platform::log::write("ajustes cargados de %s", m_settingsPath);
+    } else {
+        platform::log::write("sin ajustes en %s: valores por defecto", m_settingsPath);
+    }
+    applySettings();
     // Perfil guardado (nombre y estadisticas); si no existe, se pide el nombre tras el inicio.
     if (m_profile.load(m_profilePath)) {
         platform::log::write("perfil de %s: %d partidas, %d victorias, %d bajas", m_profile.name, m_profile.matches,
@@ -85,7 +93,7 @@ void App::init() {
     if (!gfx::loadPngFromMemory(m_login, login.data, login.size, GU_PSM_5551)) {
         platform::log::write("ERROR: login.png");
     }
-    presentBootFrame("Cargando...");
+    presentBootFrame(i18n::tr(i18n::T::BootLoading));
 
     const assets::Blob loading = assets::loadscreenPng();
     if (!gfx::loadPngFromMemory(m_loadscreen, loading.data, loading.size, GU_PSM_5551)) {
@@ -105,7 +113,7 @@ void App::init() {
     if (m_audioReady) audio::mixer().playMusic(true);
     logStage("audio", t0);
 
-    presentBootFrame("Construyendo el escenario...");
+    presentBootFrame(i18n::tr(i18n::T::BootBuilding));
     t0 = core::nowMicros();
     m_worldReady = m_world.build();
     platform::log::write("escenario: %s, %d lotes, %d triangulos, geometria %u KB, texturas %u KB "
@@ -315,6 +323,12 @@ void App::updateGame(const input::Input& in, float dt) {
         updatePause(in);
         return;
     }
+    // Botones de las acciones (ajustes > controles). Los fijos (cruceta izquierda/derecha,
+    // SELECT, START, L+SELECT y la salida L+R+START) siguen con los botones fisicos.
+    const u32 kJump = m_settings.button(Action::Jump), kBuild = m_settings.button(Action::Build);
+    const u32 kInteract = m_settings.button(Action::Interact), kPickaxe = m_settings.button(Action::Pickaxe);
+    const u32 kFire = m_settings.button(Action::Fire), kAim = m_settings.button(Action::Aim);
+    const u32 kCrouch = m_settings.button(Action::Crouch), kEmote = m_settings.button(Action::Emote);
     updateResults(in, dt);
     if (m_screen != Screen::Game) return;  // los resultados han vuelto al lobby o a cargar
     const bool overlay = m_results != Results::None;
@@ -370,22 +384,22 @@ void App::updateGame(const input::Input& in, float dt) {
             m_swapCursor = (m_swapCursor + game::Inventory::kSlots + step) % game::Inventory::kSlots;
             playSfx(audio::Sfx::MenuMove, 0.5f);
         }
-        if (in.pressed(PSP_CTRL_SQUARE)) {
+        if (in.pressed(kInteract)) {
             commands.swapPickup = m_swapPickup;
             commands.swapSlot = m_swapCursor;
             m_swapOpen = false;
-        } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+        } else if (in.pressed(kBuild)) {
             m_swapOpen = false;
             playSfx(audio::Sfx::MenuMove, 0.5f);
         }
     }
     // CIRCULO: modo construccion. Se desactiva solo si el jugador cae.
-    if (act && !swapInput && in.pressed(PSP_CTRL_CIRCLE)) {
+    if (act && !swapInput && in.pressed(kBuild)) {
         m_buildMode = !m_buildMode;
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
     // TRIANGULO: sacar / guardar el pico (desde construccion, vuelve al combate con el pico).
-    if (act && !freeCameraToggle && !swapInput && in.pressed(PSP_CTRL_TRIANGLE)) {
+    if (act && !freeCameraToggle && !swapInput && in.pressed(kPickaxe)) {
         if (m_buildMode) {
             m_buildMode = false;
             if (!m_match.inventory().pickaxe()) commands.togglePickaxe = true;
@@ -403,24 +417,24 @@ void App::updateGame(const input::Input& in, float dt) {
     }
     if (!m_match.alive(0)) m_buildMode = false;
     // Cruceta abajo: agacharse / levantarse. Cruceta arriba: bailar (hasta moverse o actuar).
-    if (act && in.pressed(PSP_CTRL_DOWN)) {
+    if (act && in.pressed(kCrouch)) {
         commands.toggleCrouch = true;
         m_dancing = false;
     }
-    if (act && !m_buildMode && !usingItem && in.pressed(PSP_CTRL_UP)) {
+    if (act && !m_buildMode && !usingItem && in.pressed(kEmote)) {
         m_dancing = !m_dancing;
         m_danceSoundTimer = 0.0f;
         if (m_dancing && m_match.playerCrouched()) commands.toggleCrouch = true;  // se levanta para bailar
     }
     const float stick = sqrtf(in.analogX() * in.analogX() + in.analogY() * in.analogY());
-    if (!act || m_buildMode || stick > 0.35f || in.held(PSP_CTRL_RTRIGGER) || in.held(PSP_CTRL_LTRIGGER) ||
-        in.pressed(PSP_CTRL_CROSS) || in.pressed(PSP_CTRL_SQUARE) || in.pressed(PSP_CTRL_TRIANGLE) || dpad != 0) {
+    if (!act || m_buildMode || stick > 0.35f || in.held(kFire) || in.held(kAim) || in.pressed(kJump) ||
+        in.pressed(kInteract) || in.pressed(kPickaxe) || dpad != 0) {
         m_dancing = false;
     }
     updateDanceSound(dt);
     // L: modo apuntado. Con un enemigo a la vista lo fija (y el stick mueve); sin el, el
     // stick gira la camara y sube o baja la mira en lugar de andar.
-    const bool aimHeld = act && in.held(PSP_CTRL_LTRIGGER);
+    const bool aimHeld = act && in.held(kAim);
     m_aimHeld = aimHeld;
     updateScopeTransition();
     const bool stickAims = aimHeld && !(m_lockTarget > 0);
@@ -436,28 +450,28 @@ void App::updateGame(const input::Input& in, float dt) {
             playerInput.moveX = in.analogX();
             playerInput.moveY = in.analogY();
         }
-        playerInput.jumpPressed = in.pressed(PSP_CTRL_CROSS);
-        playerInput.jumpHeld = in.held(PSP_CTRL_CROSS);
+        playerInput.jumpPressed = in.pressed(kJump);
+        playerInput.jumpHeld = in.held(kJump);
         playerInput.aiming = aimHeld;
         if (m_buildMode) {
             // Una pieza por pulsacion; con la cuarta, una trampa donde apunta la mira.
             if (m_buildPiece == kTrapPiece) {
-                commands.placeTrap = in.pressed(PSP_CTRL_RTRIGGER);
+                commands.placeTrap = in.pressed(kFire);
             } else {
-                commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);
+                commands.placeWall = in.pressed(kFire);
                 commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
             }
-            commands.cycleMaterial = in.pressed(PSP_CTRL_SQUARE);  // madera -> piedra -> metal
+            commands.cycleMaterial = in.pressed(kInteract);  // madera -> piedra -> metal
         } else {
             if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
                 // Disparar, o golpes seguidos con el pico (no mientras se elige que soltar).
-                aim.fire = !swapInput && in.held(PSP_CTRL_RTRIGGER);
+                aim.fire = !swapInput && in.held(kFire);
             } else {
-                commands.useItem = !swapInput && in.pressed(PSP_CTRL_RTRIGGER);  // consumible: R lo usa
+                commands.useItem = !swapInput && in.pressed(kFire);  // consumible: R lo usa
             }
             // CUADRADO: abrir o recoger (lleve lo que lleve en la mano, tambien un curativo) y,
             // si no hay nada al alcance, recargar. Si el objeto no cabe, se elige que soltar.
-            if (!swapInput && in.pressed(PSP_CTRL_SQUARE)) {
+            if (!swapInput && in.pressed(kInteract)) {
                 const game::Interactable it = m_match.playerInteractable();
                 if (it.kind == game::Interactable::Kind::Pickup && m_match.pickupRoom(it.index) <= 0 && !usingItem) {
                     m_swapOpen = true;
@@ -564,8 +578,10 @@ void App::updateStormFog() {
     m_fogColor = lerpColor(lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormFogColor,
                                      0.7f * closingT),
                            kStormInsideColor, inT);
-    m_fogStart = lerp(lerp(lerp(config::kFogStart, 6.0f, nearT), 4.0f, closingT), 0.0f, inT) + altitude * 0.6f;
-    const float edgeEnd = lerp(config::kFogEnd, 42.0f, nearT), closingEnd = lerp(config::kFogEnd, 38.0f, closingT);
+    // La distancia de dibujado de los ajustes fija la niebla normal.
+    const float baseStart = m_settings.fogStart(), baseEnd = m_settings.fogEnd();
+    m_fogStart = lerp(lerp(lerp(baseStart, 6.0f, nearT), 4.0f, closingT), 0.0f, inT) + altitude * 0.6f;
+    const float edgeEnd = lerp(baseEnd, 42.0f, nearT), closingEnd = lerp(baseEnd, 38.0f, closingT);
     m_fogEnd = lerp(fminf(edgeEnd, closingEnd), 13.0f, inT) + altitude * 1.4f;
 }
 
@@ -594,7 +610,7 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     }
     // L sin objetivo recoloca la camara detras del jugador, salvo con la mirilla: entonces
     // se sigue apuntando a donde estaba la mira (updateScopeTransition).
-    const bool recenter = control && in.pressed(PSP_CTRL_LTRIGGER) && !lock && !scoped;
+    const bool recenter = control && in.pressed(m_settings.button(Action::Aim)) && !lock && !scoped;
     if (m_freeCameraActive) {
         m_freeCamera.update(in, dt);
         return;
@@ -607,9 +623,10 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     camera::CameraInput cam;
     if (control && aimHeld && !lock) {
         // Modo apuntado sin objetivo: el stick mueve la mira.
-        const float slow = scoped ? 0.3f : 1.0f;
+        // Sensibilidad de los ajustes (camara y mirilla) e inversion del eje vertical.
+        const float slow = scoped ? 0.3f * m_settings.scopeScale() : m_settings.cameraScale();
         cam.turn = in.analogX() * slow;
-        cam.look = -in.analogY() * slow;
+        cam.look = -in.analogY() * slow * (m_settings.invertY ? -1.0f : 1.0f);
     } else if (!control || !aimHeld) {
         // Al andar, la camara se coloca detras poco a poco (no al ir hacia atras, para
         // poder retroceder sin girar). Mirando a otro tras caer, tambien le sigue.
@@ -1040,7 +1057,7 @@ void App::render(const FrameInfo& frame) {
             if (m_paused) renderPause();
             break;
     }
-    if (m_screen == Screen::Game || m_screen == Screen::Lobby) renderAchievementToast();
+    if ((m_screen == Screen::Game || m_screen == Screen::Lobby) && !m_settingsOpen) renderAchievementToast();
     if (m_exitProgress > 0.0f) renderExitBar(140, 4, 200, 4);
 }
 
@@ -1060,7 +1077,7 @@ void App::renderOverlay(const FrameInfo& frame) const {
             if (m_paused) overlayPause();
             break;
     }
-    if (m_screen == Screen::Game || m_screen == Screen::Lobby) overlayAchievementToast();
+    if ((m_screen == Screen::Game || m_screen == Screen::Lobby) && !m_settingsOpen) overlayAchievementToast();
 }
 
 void App::renderExitBar(float x, float y, float w, float h) const {
@@ -1177,8 +1194,8 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         if (eliminated && m_match.elapsed() - b.eliminatedAt > kCorpseSeconds) continue;
         const game::CharacterState s = renderState(id);
         if (!visible(s.position)) continue;
-        // Mas alla de kCharacterLodDistance, la version de pocos poligonos.
-        const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
+        // Mas alla de la distancia de detalle de los ajustes, la version de pocos poligonos.
+        const bool far = math3d::length(s.position - eye) > m_settings.lodDistance();
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
         // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
         const game::ItemModel held = b.healTimer > 0.0f && b.healSlot >= 0 ? game::itemModelFor(b.bag.slot(b.healSlot).type)
@@ -1193,6 +1210,7 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
 }
 
 void App::renderTracers() const {
+    if (!m_settings.tracers) return;
     gfx::LineVertex lines[game::Match::kMaxTracers * 2];
     int count = 0;
     const game::Tracer* tracers = m_match.tracers();

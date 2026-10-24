@@ -28,6 +28,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/gfx/mesh.cpp" \
     "$ROOT/src/gfx/texture.cpp" \
     "$ROOT/src/math/math3d.cpp" \
+    "$ROOT/src/core/i18n.cpp" \
     "$ROOT/src/third_party/stb_image_impl.cpp" \
     "$ROOT/src/world/collision.cpp" \
     "$ROOT/src/world/scene_builder.cpp" \

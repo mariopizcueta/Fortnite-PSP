@@ -289,3 +289,48 @@ pieza y paleta), pero:
   categoría vacía y equipar el pico, logro "Primera sangre" con aviso al eliminar bots, y
   al volver a cargar: logros con fecha, contadores y cada logro una sola vez en
   `perfil.txt`). Capturas `05b`–`05f`, `19b`.
+
+## 7. Bloque F: idioma y ajustes (v0.12.0)
+
+- **Inglés completo** con un sistema centralizado (`core/i18n.*`, 315 textos): menús,
+  lobby, logros, taquilla, HUD, inventario, armas, objetos, rarezas, errores de construcción
+  y trampas, resultados, pausa, consejos de carga y páginas de depuración/controles. Rótulos
+  del atlas en los dos idiomas. El español sigue disponible. Ver [AJUSTES.md](AJUSTES.md).
+- **Menú de ajustes** con START en el lobby: gráficos (solo opciones con efecto real),
+  sensibilidad, controles reasignables sin duplicados (con restaurar), idioma y borrado de
+  datos con confirmación. Se guarda en `ajustes.txt` con validación.
+- Comprobado (host): `make app-sim` 9a (textos que caben y formatos iguales en los dos
+  idiomas), 9b (START abre, L/R del menú no cambian el lobby, zona muerta al momento,
+  distancia "cerca" → niebla a 70 m en partida, reasignar saltar a TRIÁNGULO intercambia con
+  el pico y TRIÁNGULO salta del autobús, inglés en lobby, logros, taquilla, carga, HUD,
+  construcción, pausa y victoria; restaurar y volver al español, todo guardado), 9c (borrar:
+  confirmación, CÍRCULO cancela, X borra solo `perfil.txt` —los ajustes y un fichero ajeno de
+  la carpeta siguen—, se pide el nombre). Capturas `34*`, `35*`, `36*`.
+
+## 8. Criterios de aceptación
+
+| Criterio | Estado |
+| --- | --- |
+| Funcionalidades anteriores y 30 bots | Pruebas de host anteriores en verde, incluidas partidas completas con 30 bots (`make match-sim`, prueba 15). FPS en la PSP sin medir. |
+| Español y versión inglesa seleccionable | Sí (9a, 9b) |
+| Curaciones impiden el movimiento | Sí (16, 5d) |
+| Sustituir objetos del inventario | Sí, también curativos, eligiendo la ranura (16, 5d) |
+| Animaciones del personaje y del arma | Mejoradas (IK a dos manos, transiciones); revisadas en capturas del rasterizador de host |
+| Francotirador dispara donde apunta la mira | Sí (5c: horizontal, arriba, abajo, pared cercana) |
+| Agacharse mejora la precisión | Sí (16: dispersión y aciertos) |
+| Armas nuevas con los recursos | Sí (17, 5e, `20_armas_*`) |
+| Bots sueltan materiales | Sí (17) |
+| Llama 5 % y como mucho una | Sí (17: 600 partidas) |
+| Trampas en superficies válidas con efecto | Sí (18, 5g) |
+| Cajas de munición sin el sonido del cofre | Sí (5g) |
+| Logros que se desbloquean y persisten | Sí (5, 8) |
+| Taquilla preparada para skins | Sí (2, docs/TAQUILLA.md) |
+| Botones de PSP sin contorno azul | Sí (halo quitado en `prepare_assets.py`) |
+| START: cambiar y guardar ajustes | Sí (9b) |
+| Borrar datos con confirmación y solo del juego | Sí (9c) |
+| EBOOT.PBP válido | `make` lo genera sin errores ni avisos. **No probado en la PSP ni en emulador.** |
+
+**Pendiente de comprobar en la PSP real:** rendimiento con 30 bots (más triángulos por las
+armas en la mano y explosiones), lectura de los botones sin el halo sobre fondos oscuros,
+fecha de los logros (reloj de la consola) y que renombrar el temporal del guardado funciona
+en la Memory Stick (si no, el código escribe directamente).

@@ -48,6 +48,11 @@ private:
     u32 m_samples = 0;
 };
 
+// Zona muerta radial del stick (0..1; por defecto config::kAnalogDeadzone). Ajustes del
+// jugador (parche, fase 8).
+void setDeadzone(float deadzone);
+float deadzone();
+
 // Nombre corto de un boton (un solo bit). Devuelve nullptr si no se conoce.
 const char* buttonName(u32 bit);
 

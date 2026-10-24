@@ -4,6 +4,7 @@
 #include <psptypes.h>
 
 #include "assets/ui_atlas.h"
+#include "core/i18n.h"
 #include "gfx/texture.h"
 
 namespace app {
@@ -36,14 +37,25 @@ void frame(float x, float y, float w, float h, float thickness, u32 color);
 // --- Ayudas de controles con los botones de la PSP (Recursos/Texturas PSP) ---------------
 
 enum class Button : u8 {
-    Cross, Circle, Square, Triangle, L, R, Start, Select, Up, Down, Left, Right, Dpad, Stick
+    Cross, Circle, Square, Triangle, L, R, Start, Select, Up, Down, Left, Right, Dpad, Stick,
+    // Acciones de la partida que se pueden reasignar en los ajustes (parche, fase 8): se
+    // dibujan con el boton que tengan asignado (setActionButton).
+    Jump, Build, Interact, Pickaxe, Fire, Aim, Crouch, Emote,
+    Count
 };
+constexpr int kActionCount = 8;
+// Boton fisico de una accion (Button::Jump...). Lo fija la aplicacion con los ajustes.
+void setActionButton(Button action, Button physical);
+Button resolve(Button button);
 
-// Un boton y lo que hace. Con texto vacio, el siguiente boton va pegado (combinaciones
-// como L + R + START o izquierda/derecha).
+// Un boton y lo que hace (texto traducido al dibujar; `raw`, un texto ya hecho). Con texto
+// vacio, el siguiente boton va pegado (combinaciones como L + R + START o izq./dcha.).
 struct Hint {
     Button button;
-    const char* text;
+    i18n::T text;
+    const char* raw = nullptr;
+
+    const char* label() const { return raw ? raw : i18n::tr(text); }
 };
 
 const assets::ui::Rect& buttonRect(Button button);

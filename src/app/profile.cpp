@@ -166,7 +166,7 @@ bool Profile::load(const char* path) {
         if (strncmp(line, "equipado_", 9) == 0) {
             const Cosmetic* c = findCosmetic(value);
             for (int s = 0; s < kCosmeticSlotCount; ++s) {
-                if (c && strcmp(line + 9, cosmeticSlotName(static_cast<CosmeticSlot>(s))) == 0 &&
+                if (c && strcmp(line + 9, cosmeticSlotKey(static_cast<CosmeticSlot>(s))) == 0 &&
                     c->slot == static_cast<CosmeticSlot>(s)) {
                     equip(*c);
                 }
@@ -196,7 +196,7 @@ bool Profile::save(const char* path) const {
         }
         for (int s = 0; s < kCosmeticSlotCount; ++s) {
             if (!equipped[s][0]) continue;
-            ok &= fprintf(f, "equipado_%s=%s\n", cosmeticSlotName(static_cast<CosmeticSlot>(s)), equipped[s]) > 0;
+            ok &= fprintf(f, "equipado_%s=%s\n", cosmeticSlotKey(static_cast<CosmeticSlot>(s)), equipped[s]) > 0;
         }
         ok &= fflush(f) == 0;
         ok &= fclose(f) == 0;

@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "core/i18n.h"
 #include "game/character.h"
 #include "world/world_units.h"
 
@@ -12,22 +13,22 @@ using math3d::Vec3;
 const char* placementErrorName(PlacementError error) {
     switch (error) {
         case PlacementError::None: return "";
-        case PlacementError::LimitReached: return "Limite de construcciones alcanzado";
-        case PlacementError::OverlapsPlayer: return "Estas en medio";
-        case PlacementError::OverlapsBot: return "Hay alguien en medio";
-        case PlacementError::OverlapsStructure: return "Choca con otra estructura";
-        case PlacementError::Blocked: return "Hay un obstaculo en medio";
-        case PlacementError::OutOfBounds: return "Fuera del mapa";
-        case PlacementError::NoMaterials: return "Faltan materiales (10 por pieza)";
+        case PlacementError::LimitReached: return i18n::tr(i18n::T::BuildLimit);
+        case PlacementError::OverlapsPlayer: return i18n::tr(i18n::T::BuildOverPlayer);
+        case PlacementError::OverlapsBot: return i18n::tr(i18n::T::BuildOverBot);
+        case PlacementError::OverlapsStructure: return i18n::tr(i18n::T::BuildOverlap);
+        case PlacementError::Blocked: return i18n::tr(i18n::T::BuildBlocked);
+        case PlacementError::OutOfBounds: return i18n::tr(i18n::T::BuildOutOfBounds);
+        case PlacementError::NoMaterials: return i18n::tr(i18n::T::BuildNoMaterials);
     }
     return "?";
 }
 
 const char* pieceName(PieceType type) {
     switch (type) {
-        case PieceType::Wall: return "Pared";
-        case PieceType::Floor: return "Suelo";
-        case PieceType::Ramp: return "Rampa";
+        case PieceType::Wall: return i18n::tr(i18n::T::PieceWall);
+        case PieceType::Floor: return i18n::tr(i18n::T::PieceFloor);
+        case PieceType::Ramp: return i18n::tr(i18n::T::PieceRamp);
     }
     return "?";
 }

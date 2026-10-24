@@ -36,6 +36,8 @@
 #include "gfx/graphics.h"
 #include "platform/log.h"
 #include "game/fixed_timestep.h"
+#include "core/i18n.h"
+#include "input/input.h"
 #include "soft_gfx.h"
 #include "world/storm.h"
 
@@ -465,7 +467,7 @@ void testSwapAndHeal(Sim& sim) {
     for (int k = 0; k < 5; ++k) match.giveItem(game::ItemType::Bandage, 15);
     match.giveItem(game::ItemType::Medkit, 1);
     printf("  inventario: ");
-    for (int i = 0; i < game::Inventory::kSlots; ++i) printf("%s x%d  ", game::itemDef(inv.slot(i).type).name, inv.slot(i).count);
+    for (int i = 0; i < game::Inventory::kSlots; ++i) printf("%s x%d  ", game::itemName(inv.slot(i).type), inv.slot(i).count);
     printf("\n");
     // Con las vendas en la mano.
     for (int k = 0; k < 7 && (inv.pickaxe() || inv.activeType() != game::ItemType::Bandage); ++k) sim.press(PSP_CTRL_RIGHT);
@@ -491,7 +493,7 @@ void testSwapAndHeal(Sim& sim) {
     int onFloor = 0;
     for (const game::Pickup& p : match.pickups()) onFloor += p.active && p.item == replaced ? 1 : 0;
     printf("  selector: abierto %s en la ranura %d, elegida %d (%s) -> %s\n", opened ? "si" : "no", handSlot + 1, chosen + 1,
-           game::itemDef(replaced).name, game::itemDef(inv.slot(chosen).type).name);
+           game::itemName(replaced), game::itemName(inv.slot(chosen).type));
     check(opened, "CUADRADO con un curativo en la mano y el inventario lleno abre el selector de que soltar");
     check(inv.slot(chosen).type == game::ItemType::Smg && onFloor >= 1 && !sim.app().testSwapOpen(),
           "la cruceta elige la ranura y CUADRADO la cambia (lo soltado queda en el suelo)");
@@ -735,6 +737,257 @@ void testPatchC(Sim& sim) {
     }
 }
 
+
+// --- Parche F: idioma y ajustes -----------------------------------------------------------------
+
+bool fileContains(const char* path, const char* text) {
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
+    char buf[160];
+    bool found = false;
+    while (fgets(buf, sizeof(buf), f)) found |= strstr(buf, text) != nullptr;
+    fclose(f);
+    return found;
+}
+
+void testTextsFit() {
+    printf("\n9a) Textos en los dos idiomas: caben en pantalla\n");
+    // Ningun texto pasa de 58 caracteres (464 px con la fuente de 8x8) y los de sitios
+    // estrechos (estadisticas del lobby, nombres de logros) caben en su hueco.
+    int tooLong = 0, statsLong = 0, achievementLong = 0;
+    for (int lang = 0; lang < 2; ++lang) {
+        i18n::setLanguage(lang == 0 ? i18n::Lang::Es : i18n::Lang::En);
+        for (int i = 0; i < static_cast<int>(i18n::T::Count); ++i) {
+            const char* t = i18n::tr(static_cast<i18n::T>(i));
+            if (gfx::text::width(t) > 464) {
+                printf("  demasiado largo: %s\n", t);
+                ++tooLong;
+            }
+        }
+        const i18n::T stats[] = {i18n::T::StatWins, i18n::T::StatMatches, i18n::T::StatKills, i18n::T::StatHeadshots,
+                                 i18n::T::StatMostKills};
+        for (i18n::T t : stats) statsLong += gfx::text::width(i18n::tr(t)) > 88 ? 1 : 0;  // la cifra empieza a +94
+        // Nombres de las categorias de la taquilla: bajo casillas de 60 px separadas 8.
+        for (int c = 0; c < app::kCosmeticSlotCount; ++c) {
+            statsLong += gfx::text::width(i18n::tr(app::cosmeticSlotName(static_cast<app::CosmeticSlot>(c)))) > 80 ? 1 : 0;
+        }
+        for (int a = 0; a < app::kAchievementCount; ++a) {
+            const app::AchievementDef& d = app::achievementDef(static_cast<app::AchievementId>(a));
+            achievementLong += gfx::text::width(i18n::tr(d.name)) > 300 || gfx::text::width(i18n::tr(d.description)) > 270 ? 1 : 0;
+        }
+    }
+    i18n::setLanguage(i18n::Lang::Es);
+    printf("  %d textos x 2 idiomas: %d demasiado largos, %d estadisticas y %d logros sin sitio\n",
+           static_cast<int>(i18n::T::Count), tooLong, statsLong, achievementLong);
+    check(tooLong == 0 && statsLong == 0 && achievementLong == 0, "todos los textos caben en su sitio en espanol y en ingles");
+    // Los dos idiomas tienen los mismos formatos (%d, %s...) en el mismo orden.
+    int mismatched = 0;
+    for (int i = 0; i < static_cast<int>(i18n::T::Count); ++i) {
+        i18n::setLanguage(i18n::Lang::Es);
+        const char* es = i18n::tr(static_cast<i18n::T>(i));
+        i18n::setLanguage(i18n::Lang::En);
+        const char* en = i18n::tr(static_cast<i18n::T>(i));
+        char a[16] = "", b[16] = "";
+        int na = 0, nb = 0;
+        for (const char* c = es; *c && na < 15; ++c) {
+            if (*c == '%' && c[1] && c[1] != '%') {
+                const char* f = c + 1;
+                while (*f && strchr("0123456789.+- ", *f)) ++f;
+                a[na++] = *f;
+            }
+        }
+        for (const char* c = en; *c && nb < 15; ++c) {
+            if (*c == '%' && c[1] && c[1] != '%') {
+                const char* f = c + 1;
+                while (*f && strchr("0123456789.+- ", *f)) ++f;
+                b[nb++] = *f;
+            }
+        }
+        a[na] = b[nb] = '\0';
+        if (strcmp(a, b) != 0) {
+            printf("  formatos distintos: \"%s\" / \"%s\"\n", es, en);
+            ++mismatched;
+        }
+    }
+    i18n::setLanguage(i18n::Lang::Es);
+    check(mismatched == 0, "los formatos (%d, %s...) son los mismos en los dos idiomas");
+}
+
+void testSettingsAndEnglish(Sim& sim, const char* outDir) {
+    printf("\n9b) Ajustes (START en el lobby) e ingles\n");
+    char settingsPath[512];
+    snprintf(settingsPath, sizeof(settingsPath), "%s/ajustes.txt", outDir);
+    // START abre el menu; mientras esta abierto, L / R son sus secciones (no las del lobby).
+    const int tabBefore = sim.app().testLobbyTab();
+    sim.press(PSP_CTRL_START);
+    sim.wait(0.1f);
+    sim.shot("34a_ajustes_graficos");
+    const bool opened = sim.app().testSettingsOpen();
+    sim.press(PSP_CTRL_RTRIGGER);
+    const bool modal = sim.app().testSettingsSection() == 1 && sim.app().testLobbyTab() == tabBefore;
+    sim.shot("34b_ajustes_sensibilidad");
+    check(opened && modal, "START abre los ajustes y L / R cambian de seccion del menu (no del lobby)");
+    // Sensibilidad: zona muerta del stick al maximo (35 %) y se aplica al momento.
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    for (int k = 0; k < 5; ++k) sim.press(PSP_CTRL_RIGHT);
+    check(sim.app().testSettings().deadzone == 35 && fabsf(input::deadzone() - 0.35f) < 0.001f,
+          "la zona muerta del stick cambia y se aplica al momento");
+    for (int k = 0; k < 3; ++k) sim.press(PSP_CTRL_LEFT);  // 20 %
+    // Graficos: distancia de dibujado "cerca".
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LEFT);
+    check(sim.app().testSettings().drawDistance == 0, "la distancia de dibujado se puede bajar");
+    // Controles: saltar pasa a TRIANGULO (y el pico, que lo tenia, pasa a X: sin repetir).
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.shot("34c_ajustes_controles");
+    sim.press(PSP_CTRL_CROSS);  // reasignar "saltar"
+    sim.wait(0.1f);
+    sim.shot("34d_ajustes_pulsa_boton");
+    sim.press(PSP_CTRL_TRIANGLE);
+    const app::Settings& st = sim.app().testSettings();
+    check(st.button(app::Action::Jump) == PSP_CTRL_TRIANGLE && st.button(app::Action::Pickaxe) == PSP_CTRL_CROSS &&
+              st.controlsValid(),
+          "reasignar un boton intercambia con la accion que lo tenia (nunca dos acciones en el mismo)");
+    // Idioma: ingles.
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.1f);
+    sim.shot("34e_settings_language");
+    check(i18n::language() == i18n::Lang::En, "el idioma cambia a ingles al momento");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.1f);
+    sim.shot("34f_settings_data");
+    sim.press(PSP_CTRL_START);  // cerrar (guarda)
+    check(!sim.app().testSettingsOpen() && fileContains(settingsPath, "idioma=en") &&
+              fileContains(settingsPath, "boton_saltar=TRIANGULO") && fileContains(settingsPath, "distancia=0"),
+          "al cerrar se guardan en ajustes.txt");
+
+    // Todo en ingles: lobby, logros, taquilla, carga, partida, construccion, pausa, victoria.
+    sim.wait(0.3f);
+    sim.shot("35a_lobby_en");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.1f);
+    sim.shot("35b_achievements_en");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.1f);
+    sim.shot("35c_locker_en");
+    sim.press(PSP_CTRL_RTRIGGER);  // de vuelta a PLAY
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(1.0f);
+    sim.shot("35d_loading_en");
+    check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "partida en ingles");
+    game::Match& match = sim.app().testMatch();
+    sim.shot("35e_bus_en");
+    // X ya no salta: ahora es TRIANGULO.
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.2f);
+    const bool stillInBus = match.airState(0) == game::AirState::Bus;
+    sim.press(PSP_CTRL_TRIANGLE);
+    sim.wait(0.2f);
+    check(stillInBus && match.airState(0) == game::AirState::Freefall, "el boton reasignado (TRIANGULO) salta del autobus");
+    sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 30.0f);
+    match.setPlayerInvulnerable(true);
+    match.giveItem(game::ItemType::AssaultRifle, 1, game::Rarity::Rare);
+    match.giveAmmo(game::AmmoType::Medium, 60);
+    match.teleport(0, {0.0f, 0.0f, 24.0f}, 0.0f);
+    sim.press(PSP_CTRL_CROSS);  // pico (reasignado a X): se guarda y queda el fusil
+    sim.wait(0.5f);
+    sim.shot("35f_hud_en");
+    const float fogNear = sim.app().testFogEnd();
+    printf("  niebla con la distancia \"cerca\": %.0f m\n", static_cast<double>(fogNear));
+    check(fogNear <= 72.0f, "la distancia de dibujado cerca acorta la niebla (y lo que se dibuja)");
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.wait(0.2f);
+    sim.shot("35g_build_en");
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.press(PSP_CTRL_START);
+    sim.wait(0.2f);
+    sim.shot("35h_pause_en");
+    sim.press(PSP_CTRL_START);
+    killAllBots(sim);
+    sim.waitUntil([&] { return sim.results() == kVictory; }, 3.0f);
+    sim.wait(1.0f);
+    sim.shot("35i_victory_en");
+    sim.press(PSP_CTRL_CROSS);
+    check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
+
+    // Restaurar: controles por defecto, distancia media y espanol.
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);  // controles
+    for (int k = 0; k < 8; ++k) sim.press(PSP_CTRL_DOWN);  // "restaurar"
+    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);  // graficos
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.press(PSP_CTRL_RTRIGGER);  // idioma
+    sim.press(PSP_CTRL_CROSS);     // espanol (la primera opcion)
+    sim.press(PSP_CTRL_CIRCLE);
+    const app::Settings& back = sim.app().testSettings();
+    check(back.button(app::Action::Jump) == PSP_CTRL_CROSS && back.button(app::Action::Pickaxe) == PSP_CTRL_TRIANGLE &&
+              back.drawDistance == 1 && i18n::language() == i18n::Lang::Es && fileContains(settingsPath, "idioma=es"),
+          "restaurar predeterminados, distancia media y vuelta al espanol (guardado)");
+}
+
+// Borrar los datos del jugador: pide confirmacion, solo borra perfil.txt y vuelve a pedir el
+// nombre. Al terminar se restaura el perfil de la prueba (para comprobarlo al final).
+void testDeleteData(Sim& sim, const char* outDir, const char* profilePath) {
+    printf("\n9c) Borrar los datos del jugador\n");
+    char settingsPath[512], backup[512], other[512];
+    snprintf(settingsPath, sizeof(settingsPath), "%s/ajustes.txt", outDir);
+    snprintf(backup, sizeof(backup), "%s/perfil_copia.txt", outDir);
+    snprintf(other, sizeof(other), "%s/otro_fichero.txt", outDir);
+    const std::vector<unsigned char> saved = readFile(profilePath);
+    FILE* f = fopen(other, "w");  // un fichero ajeno en la misma carpeta: no se toca
+    if (f) {
+        fputs("no borrar\n", f);
+        fclose(f);
+    }
+    sim.press(PSP_CTRL_START);
+    for (int k = 0; k < 4; ++k) sim.press(PSP_CTRL_RTRIGGER);  // DATOS
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.1f);
+    sim.shot("36a_borrar_confirmar");
+    // CIRCULO cancela: no se borra nada.
+    sim.press(PSP_CTRL_CIRCLE);
+    FILE* p = fopen(profilePath, "r");
+    const bool keptAfterCancel = p != nullptr;
+    if (p) fclose(p);
+    check(keptAfterCancel && sim.app().testSettingsOpen(), "pide confirmacion y CIRCULO cancela sin borrar");
+    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_CROSS);  // confirmar
+    sim.wait(0.1f);
+    sim.shot("36b_borrado_pide_nombre");
+    p = fopen(profilePath, "r");
+    const bool gone = p == nullptr;
+    if (p) fclose(p);
+    FILE* o = fopen(other, "r");
+    FILE* a = fopen(settingsPath, "r");
+    check(gone && sim.screen() == kNickname && !sim.app().testProfile().hasName() && sim.app().testProfile().matches == 0 &&
+              sim.app().testProfile().unlockedCount() == 0,
+          "X confirma: se borran nombre, estadisticas y logros, y se vuelve a pedir el nombre");
+    check(o != nullptr && a != nullptr, "solo se borra perfil.txt: los ajustes y otros ficheros de la carpeta siguen");
+    if (o) fclose(o);
+    if (a) fclose(a);
+    remove(other);
+    // Nombre nuevo y de vuelta al lobby; despues se restaura el perfil de la prueba.
+    sim.press(PSP_CTRL_CROSS);  // "A"
+    sim.press(PSP_CTRL_START);
+    check(sim.screen() == kLobby, "con un nombre nuevo se vuelve al lobby");
+    FILE* w = fopen(profilePath, "wb");
+    if (w) {
+        fwrite(saved.data(), 1, saved.size(), w);
+        fclose(w);
+    }
+    (void)backup;
+}
+
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
 void testNewControls(Sim& sim) {
     printf("\n5b) Inventario, consumibles, pico y camara con el mando\n");
@@ -917,6 +1170,11 @@ int main(int argc, char** argv) {
     char profilePath[512];
     snprintf(profilePath, sizeof(profilePath), "%s/perfil.txt", outDir);
     remove(profilePath);
+    {
+        char settingsPath[512];
+        snprintf(settingsPath, sizeof(settingsPath), "%s/ajustes.txt", outDir);
+        remove(settingsPath);  // ajustes por defecto
+    }
 
     Sim sim(outDir);
     const unsigned heapBefore = heapBytes();
@@ -1364,6 +1622,12 @@ int main(int argc, char** argv) {
     sim.press(PSP_CTRL_CROSS);
     check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
 
+    // Parche F. El perfil de antes de probar a borrarlo es el que se comprueba en la seccion 8.
+    testTextsFit();
+    testSettingsAndEnglish(sim, outDir);
+    const app::Profile played = sim.app().testProfile();
+    testDeleteData(sim, outDir, profilePath);
+
     printf("\n7) Salir desde el lobby\n");
     sim.press(PSP_CTRL_DOWN);
     sim.press(PSP_CTRL_DOWN);
@@ -1375,7 +1639,6 @@ int main(int argc, char** argv) {
     check(sim.app().exitRequested(), "X en la confirmacion cierra el juego");
 
     sim.writeAudio();
-    const app::Profile played = sim.app().testProfile();
     sim.app().shutdown();
 
     printf("\n8) Perfil guardado\n");

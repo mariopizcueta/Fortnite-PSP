@@ -11,6 +11,8 @@
 
 #include <psptypes.h>
 
+#include "core/i18n.h"
+
 namespace app {
 
 // Contadores que se acumulan entre partidas.
@@ -30,8 +32,8 @@ enum class AchievementId : u8 {
 
 struct AchievementDef {
     const char* key;         // clave en perfil.txt ("logro_<key>")
-    const char* name;        // texto (se traduce con core/i18n en el bloque F)
-    const char* description;
+    i18n::T name;            // textos (core/i18n_texts.h)
+    i18n::T description;
     Stat stat;
     int goal;
 };

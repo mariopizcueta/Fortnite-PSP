@@ -32,6 +32,8 @@ OBJS = src/main.o \
        src/app/app.o \
        src/app/app_hud.o \
        src/app/app_menus.o \
+       src/app/app_settings.o \
+       src/app/settings.o \
        src/app/achievements.o \
        src/app/locker.o \
        src/app/build_visuals.o \
@@ -44,6 +46,7 @@ OBJS = src/main.o \
        src/audio/sound_data.o \
        src/camera/orbit_camera.o \
        src/camera/third_person_camera.o \
+       src/core/i18n.o \
        src/core/timer.o \
        src/game/character.o \
        src/game/character_model.o \

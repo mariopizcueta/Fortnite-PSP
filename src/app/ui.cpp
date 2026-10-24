@@ -31,9 +31,25 @@ void Atlas::drawClipped(const assets::ui::Rect& r, float x, float y, float x0, f
                          right - left, bottom - top, color);
 }
 
+namespace {
+// Boton fisico de cada accion (por defecto, los de siempre).
+Button g_actions[kActionCount] = {Button::Cross, Button::Circle, Button::Square, Button::Triangle,
+                                  Button::R,     Button::L,      Button::Down,   Button::Up};
+}  // namespace
+
+void setActionButton(Button action, Button physical) {
+    const int i = static_cast<int>(action) - static_cast<int>(Button::Jump);
+    if (i >= 0 && i < kActionCount) g_actions[i] = physical;
+}
+
+Button resolve(Button button) {
+    const int i = static_cast<int>(button) - static_cast<int>(Button::Jump);
+    return i >= 0 && i < kActionCount ? g_actions[i] : button;
+}
+
 const assets::ui::Rect& buttonRect(Button button) {
     namespace a = assets::ui;
-    switch (button) {
+    switch (resolve(button)) {
         case Button::Cross: return a::kBtnCross;
         case Button::Circle: return a::kBtnCircle;
         case Button::Square: return a::kBtnSquare;
@@ -48,6 +64,7 @@ const assets::ui::Rect& buttonRect(Button button) {
         case Button::Right: return a::kBtnRight;
         case Button::Dpad: return a::kBtnDpad;
         case Button::Stick: return a::kBtnStick;
+        default: break;
     }
     return a::kBtnCross;
 }
@@ -64,10 +81,11 @@ int layoutHints(int x, const Hint* hints, int count, Fn&& fn) {
     for (int i = 0; i < count; ++i) {
         const int iconX = x;
         x += buttonRect(hints[i].button).w;
-        const bool hasText = hints[i].text && hints[i].text[0];
+        const char* label = hints[i].label();
+        const bool hasText = label && label[0];
         if (hasText) x += kIconTextGap;
         fn(i, iconX, x);
-        if (hasText) x += gfx::text::width(hints[i].text) + (i + 1 < count ? kHintGap : 0);
+        if (hasText) x += gfx::text::width(label) + (i + 1 < count ? kHintGap : 0);
         else if (i + 1 < count) x += kComboGap;
     }
     return x;
@@ -89,7 +107,8 @@ void drawHintIcons(const Atlas& atlas, int x, int y, const Hint* hints, int coun
 
 void printHints(int x, int y, u32 color, const Hint* hints, int count) {
     layoutHints(x, hints, count, [&](int i, int, int textX) {
-        if (hints[i].text && hints[i].text[0]) gfx::text::printShadow(textX, y, color, "%s", hints[i].text);
+        const char* label = hints[i].label();
+        if (label && label[0]) gfx::text::printShadow(textX, y, color, "%s", label);
     });
 }
 

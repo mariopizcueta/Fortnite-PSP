@@ -5,26 +5,26 @@ namespace {
 
 const ItemDef kDefs[] = {
     // nombre            tipo                 rareza             pila  uso   vida  tope  escudo tope
-    {"", ItemKind::Empty, Rarity::Common, 0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Fusil de asalto", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Escopeta de corredera", ItemKind::Weapon, Rarity::Uncommon, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Subfusil con silenciador", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Francotirador de cerrojo", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Vendas", ItemKind::Consumable, Rarity::Common, 15, 3.5f, 15.0f, 75.0f, 0.0f, 0.0f},
-    {"Botiquin", ItemKind::Consumable, Rarity::Uncommon, 3, 10.0f, 100.0f, 100.0f, 0.0f, 0.0f},
-    {"Minipocion", ItemKind::Consumable, Rarity::Uncommon, 6, 2.0f, 0.0f, 0.0f, 25.0f, 50.0f},
-    {"Pocion de escudo", ItemKind::Consumable, Rarity::Rare, 3, 5.0f, 0.0f, 0.0f, 50.0f, 100.0f},
-    {"Fusil de rafagas", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Fusil con mira", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Subfusil", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Escopeta tactica", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Pistola", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Revolver", ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Francotirador semiautomatico", ItemKind::Weapon, Rarity::Uncommon, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Lanzacohetes", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Lanzagranadas", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Granada", ItemKind::Throwable, Rarity::Common, 6, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-    {"Trampa de pinchos", ItemKind::Trap, Rarity::Uncommon, 9, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::None, ItemKind::Empty, Rarity::Common, 0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemAssaultRifle, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemPumpShotgun, ItemKind::Weapon, Rarity::Uncommon, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSuppressedSmg, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemBoltSniper, ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemBandage, ItemKind::Consumable, Rarity::Common, 15, 3.5f, 15.0f, 75.0f, 0.0f, 0.0f},
+    {i18n::T::ItemMedkit, ItemKind::Consumable, Rarity::Uncommon, 3, 10.0f, 100.0f, 100.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSmallShield, ItemKind::Consumable, Rarity::Uncommon, 6, 2.0f, 0.0f, 0.0f, 25.0f, 50.0f},
+    {i18n::T::ItemShieldPotion, ItemKind::Consumable, Rarity::Rare, 3, 5.0f, 0.0f, 0.0f, 50.0f, 100.0f},
+    {i18n::T::ItemBurstRifle, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemScopedRifle, ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSmg, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemTacticalShotgun, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemPistol, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemRevolver, ItemKind::Weapon, Rarity::Common, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSemiAutoSniper, ItemKind::Weapon, Rarity::Uncommon, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemRocketLauncher, ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemGrenadeLauncher, ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemGrenade, ItemKind::Throwable, Rarity::Common, 6, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSpikeTrap, ItemKind::Trap, Rarity::Uncommon, 9, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) == static_cast<int>(ItemType::Count), "falta un objeto");
 
@@ -34,7 +34,7 @@ constexpr int kRarities = static_cast<int>(Rarity::Count);
 // rareza: comun, poco comun, rara, epica, legendaria; 0 = el arma no existe en esa rareza.
 struct WeaponSpec {
     ItemType type;
-    const char* name;
+    i18n::T name;
     WeaponClass family;
     float damage[kRarities];
     float reload[kRarities];
@@ -55,51 +55,51 @@ struct WeaponSpec {
 constexpr float kNoFalloff = 1000.0f;
 constexpr WeaponSpec kSpecs[] = {
     // Fusil de asalto (gris, verde y azul: el generico; morado y dorado: la SCAR).
-    {ItemType::AssaultRifle, "Fusil de asalto", WeaponClass::Rifle, {30, 31, 33, 35, 36}, {2.7f, 2.6f, 2.5f, 2.3f, 2.2f},
+    {ItemType::AssaultRifle, i18n::T::ItemAssaultRifle, WeaponClass::Rifle, {30, 31, 33, 35, 36}, {2.7f, 2.6f, 2.5f, 2.3f, 2.2f},
      1.0f / 5.5f, 30, 80.0f, AmmoType::Medium, 1, 2.4f, 0.7f, 0.55f, 3.0f, 8.0f, 0.6f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
-    {ItemType::Shotgun, "Escopeta", WeaponClass::Shotgun, {0, 90, 95, 100, 105}, {0, 4.8f, 4.6f, 4.4f, 4.2f},
+    {ItemType::Shotgun, i18n::T::WeaponShotgun, WeaponClass::Shotgun, {0, 90, 95, 100, 105}, {0, 4.8f, 4.6f, 4.4f, 4.2f},
      0.9f, 5, 28.0f, AmmoType::Shells, 10, 6.0f, 4.5f, 1.2f, 1.2f, 2.0f, 0.85f, 8.0f, 25.0f, 0.35f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
-    {ItemType::Smg, "Subfusil con silenciador", WeaponClass::Smg, {17, 18, 19, 20, 21}, {2.3f, 2.2f, 2.1f, 2.0f, 1.9f},
+    {ItemType::Smg, i18n::T::ItemSuppressedSmg, WeaponClass::Smg, {17, 18, 19, 20, 21}, {2.3f, 2.2f, 2.1f, 2.0f, 1.9f},
      0.1f, 30, 45.0f, AmmoType::Light, 1, 3.4f, 1.8f, 0.3f, 3.5f, 9.0f, 0.7f, 20.0f, 45.0f, 0.6f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
-    {ItemType::Sniper, "Francotirador", WeaponClass::Sniper, {0, 0, 105, 110, 116}, {0, 0, 3.1f, 2.9f, 2.7f},
+    {ItemType::Sniper, i18n::T::WeaponSniper, WeaponClass::Sniper, {0, 0, 105, 110, 116}, {0, 0, 3.1f, 2.9f, 2.7f},
      2.6f, 1, 200.0f, AmmoType::Heavy, 1, 7.0f, 0.0f, 2.5f, 2.5f, 2.5f, 0.5f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 15.0f},
     // Fusil de rafagas (Recursos/Weapons/Burst_Assault_Rifle): 3 balas por pulsacion.
-    {ItemType::BurstRifle, "Fusil de rafagas", WeaponClass::Rifle, {27, 29, 30, 32, 34}, {2.9f, 2.7f, 2.6f, 2.5f, 2.3f},
+    {ItemType::BurstRifle, i18n::T::ItemBurstRifle, WeaponClass::Rifle, {27, 29, 30, 32, 34}, {2.9f, 2.7f, 2.6f, 2.5f, 2.3f},
      0.45f, 30, 80.0f, AmmoType::Medium, 1, 2.8f, 0.9f, 0.45f, 3.0f, 8.0f, 0.6f, kNoFalloff, kNoFalloff, 1.0f, 3,
      ProjectileKind::None, 0, 0, 0, 0, 0},
     // Fusil con mira (Scoped_Assault_Rifle): L mira por la mirilla con menos zoom.
-    {ItemType::ScopedRifle, "Fusil con mira", WeaponClass::Rifle, {0, 0, 23, 24, 0}, {0, 0, 2.3f, 2.2f, 0},
+    {ItemType::ScopedRifle, i18n::T::ItemScopedRifle, WeaponClass::Rifle, {0, 0, 23, 24, 0}, {0, 0, 2.3f, 2.2f, 0},
      1.0f / 3.5f, 20, 120.0f, AmmoType::Medium, 1, 3.0f, 0.25f, 0.6f, 2.0f, 6.0f, 0.6f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 30.0f},
     // Subfusil (Submachine_Gun v1.6): mas cadencia y menos dano que el silenciado.
-    {ItemType::SubmachineGun, "Subfusil", WeaponClass::Smg, {16, 17, 18, 0, 0}, {2.2f, 2.1f, 2.0f, 0, 0},
+    {ItemType::SubmachineGun, i18n::T::ItemSmg, WeaponClass::Smg, {16, 17, 18, 0, 0}, {2.2f, 2.1f, 2.0f, 0, 0},
      1.0f / 12.0f, 30, 40.0f, AmmoType::Light, 1, 3.8f, 2.0f, 0.3f, 4.0f, 9.0f, 0.7f, 18.0f, 40.0f, 0.6f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
     // Escopeta tactica (Tactical_Shotgun): mas cadencia y cargador, menos dano.
-    {ItemType::TacticalShotgun, "Escopeta tactica", WeaponClass::Shotgun, {67, 70, 74, 77, 81}, {4.6f, 4.4f, 4.2f, 4.0f, 3.8f},
+    {ItemType::TacticalShotgun, i18n::T::ItemTacticalShotgun, WeaponClass::Shotgun, {67, 70, 74, 77, 81}, {4.6f, 4.4f, 4.2f, 4.0f, 3.8f},
      0.67f, 8, 25.0f, AmmoType::Shells, 9, 5.5f, 4.5f, 1.0f, 1.0f, 2.5f, 0.85f, 6.0f, 22.0f, 0.3f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
-    {ItemType::Pistol, "Pistola", WeaponClass::Pistol, {23, 24, 25, 0, 0}, {1.5f, 1.5f, 1.4f, 0, 0},
+    {ItemType::Pistol, i18n::T::ItemPistol, WeaponClass::Pistol, {23, 24, 25, 0, 0}, {1.5f, 1.5f, 1.4f, 0, 0},
      0.15f, 16, 50.0f, AmmoType::Light, 1, 1.8f, 0.9f, 0.6f, 2.5f, 7.0f, 0.65f, 25.0f, 50.0f, 0.65f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
-    {ItemType::Revolver, "Revolver", WeaponClass::Pistol, {54, 57, 60, 0, 0}, {2.2f, 2.1f, 2.0f, 0, 0},
+    {ItemType::Revolver, i18n::T::ItemRevolver, WeaponClass::Pistol, {54, 57, 60, 0, 0}, {2.2f, 2.1f, 2.0f, 0, 0},
      1.1f, 6, 60.0f, AmmoType::Medium, 1, 2.6f, 0.4f, 2.0f, 2.0f, 3.0f, 0.6f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 0},
     // Francotirador semiautomatico (Icon_Weapons_SK_Sniper_02): 10 balas, menos dano.
-    {ItemType::SemiAutoSniper, "Francotirador semiautomatico", WeaponClass::Sniper, {0, 63, 66, 0, 0}, {0, 2.5f, 2.4f, 0, 0},
+    {ItemType::SemiAutoSniper, i18n::T::ItemSemiAutoSniper, WeaponClass::Sniper, {0, 63, 66, 0, 0}, {0, 2.5f, 2.4f, 0, 0},
      0.85f, 10, 180.0f, AmmoType::Heavy, 1, 6.0f, 0.0f, 1.6f, 3.2f, 3.0f, 0.5f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::None, 0, 0, 0, 0, 15.0f},
     // Lanzacohetes (Bazooka): cohete a 45 m/s que derriba construcciones.
-    {ItemType::RocketLauncher, "Lanzacohetes", WeaponClass::Launcher, {0, 0, 110, 116, 121}, {0, 0, 3.4f, 3.1f, 2.8f},
+    {ItemType::RocketLauncher, i18n::T::ItemRocketLauncher, WeaponClass::Launcher, {0, 0, 110, 116, 121}, {0, 0, 3.4f, 3.1f, 2.8f},
      1.33f, 1, 120.0f, AmmoType::Rockets, 1, 1.5f, 0.4f, 0.0f, 0.0f, 8.0f, 0.7f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::Rocket, 45.0f, 3.5f, 400.0f, 0.0f, 0},
     // Lanzagranadas (Grenade_Launcher): granadas que rebotan y explotan a los 2 s o al
     // tocar a alguien.
-    {ItemType::GrenadeLauncher, "Lanzagranadas", WeaponClass::Launcher, {0, 0, 100, 105, 110}, {0, 0, 3.0f, 2.8f, 2.5f},
+    {ItemType::GrenadeLauncher, i18n::T::ItemGrenadeLauncher, WeaponClass::Launcher, {0, 0, 100, 105, 110}, {0, 0, 3.0f, 2.8f, 2.5f},
      1.0f, 6, 80.0f, AmmoType::Rockets, 1, 2.0f, 1.0f, 0.0f, 0.0f, 8.0f, 0.7f, kNoFalloff, kNoFalloff, 1.0f, 1,
      ProjectileKind::LauncherGrenade, 26.0f, 3.5f, 300.0f, 2.0f, 0},
 };
@@ -118,13 +118,15 @@ const ItemDef& itemDef(ItemType type) {
     return kDefs[i >= 0 && i < static_cast<int>(ItemType::Count) ? i : 0];
 }
 
+const char* itemName(ItemType type) { return i18n::tr(itemDef(type).name); }
+
 const char* rarityName(Rarity rarity) {
     switch (rarity) {
-        case Rarity::Common: return "Comun";
-        case Rarity::Uncommon: return "Poco comun";
-        case Rarity::Rare: return "Rara";
-        case Rarity::Epic: return "Epica";
-        case Rarity::Legendary: return "Legendaria";
+        case Rarity::Common: return i18n::tr(i18n::T::RarityCommon);
+        case Rarity::Uncommon: return i18n::tr(i18n::T::RarityUncommon);
+        case Rarity::Rare: return i18n::tr(i18n::T::RarityRare);
+        case Rarity::Epic: return i18n::tr(i18n::T::RarityEpic);
+        case Rarity::Legendary: return i18n::tr(i18n::T::RarityLegendary);
         case Rarity::Count: break;
     }
     return "";
@@ -132,11 +134,11 @@ const char* rarityName(Rarity rarity) {
 
 const char* ammoName(AmmoType type) {
     switch (type) {
-        case AmmoType::Light: return "Ligera";
-        case AmmoType::Medium: return "Media";
-        case AmmoType::Heavy: return "Pesada";
-        case AmmoType::Shells: return "Cartuchos";
-        case AmmoType::Rockets: return "Cohetes";
+        case AmmoType::Light: return i18n::tr(i18n::T::AmmoLight);
+        case AmmoType::Medium: return i18n::tr(i18n::T::AmmoMedium);
+        case AmmoType::Heavy: return i18n::tr(i18n::T::AmmoHeavy);
+        case AmmoType::Shells: return i18n::tr(i18n::T::AmmoShells);
+        case AmmoType::Rockets: return i18n::tr(i18n::T::AmmoRockets);
         case AmmoType::Count: break;
     }
     return "";
@@ -179,7 +181,8 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
     while (r > 0 && s->damage[r] <= 0.0f) --r;  // rareza inexistente: la mas cercana por debajo
     while (r < kRarities - 1 && s->damage[r] <= 0.0f) ++r;
     w.rarity = rarityName(static_cast<Rarity>(r));
-    w.name = type == ItemType::AssaultRifle && r >= static_cast<int>(Rarity::Epic) ? "SCAR" : s->name;
+    // El nombre se traduce al crear el arma (el idioma solo cambia fuera de la partida).
+    w.name = i18n::tr(type == ItemType::AssaultRifle && r >= static_cast<int>(Rarity::Epic) ? i18n::T::WeaponScar : s->name);
     w.damage = s->damage[r];
     w.reloadTime = s->reload[r];
     w.reserveAmmo = 0;  // la reserva es la municion del inventario
@@ -210,8 +213,8 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
 // Granada de mano (no es un arma: es un arrojadizo, pero explota como las del lanzagranadas).
 WeaponConfig grenadeConfig() {
     WeaponConfig w;
-    w.name = "Granada";
-    w.rarity = "Comun";
+    w.name = i18n::tr(i18n::T::ItemGrenade);
+    w.rarity = rarityName(Rarity::Common);
     w.damage = 105.0f;
     w.range = 40.0f;
     w.projectile = ProjectileKind::HandGrenade;

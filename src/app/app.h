@@ -14,6 +14,7 @@
 #include "app/lobby_scene.h"
 #include "app/profile.h"
 #include "app/prop_visuals.h"
+#include "app/settings.h"
 #include "app/ui.h"
 #include "audio/mixer.h"
 #include "camera/orbit_camera.h"
@@ -73,6 +74,9 @@ public:
     int testBuildPiece() const { return m_buildPiece; }
     const Profile& testProfile() const { return m_profile; }
     int testLobbyTab() const { return static_cast<int>(m_lobbyTab); }
+    bool testSettingsOpen() const { return m_settingsOpen; }
+    const Settings& testSettings() const { return m_settings; }
+    int testSettingsSection() const { return m_settingsSection; }
     int testToastCount() const { return m_toastCount; }
     int testLockerSlot() const { return m_lockerSlot; }
     bool testLockerChoosing() const { return m_lockerChoosing; }
@@ -127,6 +131,15 @@ private:
     void checkAchievements();
     void saveProfile();
     void updateAchievementToasts(float dt);
+    // --- app_settings.cpp: menu de ajustes (START en el lobby) --------------------------
+    void applySettings();
+    void openSettings();
+    void closeSettings();
+    void updateSettings(const input::Input& in);
+    void renderSettings() const;
+    void overlaySettings() const;
+    void deletePlayerData();
+    int settingsItemCount() const;
     void renderAchievementToast() const;
     void overlayAchievementToast() const;
     void renderFullMap() const;
@@ -308,6 +321,18 @@ private:
     int m_toastCount = 0;
     float m_toastTime = 0.0f;
     bool m_profileDirty = false;   // hay contadores sin guardar
+    // Ajustes (ajustes.txt) y su menu: seccion, opcion elegida, accion que se esta
+    // reasignando (-1: ninguna), confirmacion de borrar datos y un aviso temporal.
+    Settings m_settings;
+    char m_settingsPath[256] = "ajustes.txt";
+    bool m_settingsOpen = false;
+    int m_settingsSection = 0;
+    int m_settingsItem = 0;
+    int m_remapAction = -1;
+    bool m_confirmDelete = false;
+    i18n::T m_settingsMessage = i18n::T::None;
+    float m_settingsMessageTime = 0.0f;
+    bool m_settingsMessageError = false;
     bool m_confirmExit = false;
     float m_lobbyYaw = 0.0f;       // giro del personaje del lobby (stick)
     float m_lobbyTime = 0.0f;

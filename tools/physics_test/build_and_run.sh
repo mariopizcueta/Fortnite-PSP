@@ -13,6 +13,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/world/collision.cpp" \
     "$ROOT/src/math/math3d.cpp" \
+    "$ROOT/src/core/i18n.cpp" \
     "$ROOT/src/world/terrain.cpp" \
     -o "$OUT/physics_test"
 "$OUT/physics_test"

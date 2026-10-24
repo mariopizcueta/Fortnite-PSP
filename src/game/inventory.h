@@ -16,6 +16,7 @@
 
 #include <psptypes.h>
 
+#include "core/i18n.h"
 #include "game/weapon.h"
 #include "world/harvest.h"
 
@@ -38,7 +39,7 @@ enum class AmmoType : u8 { Light, Medium, Heavy, Shells, Rockets, Count };
 enum class WeaponClass : u8 { None, Rifle, Shotgun, Smg, Sniper, Pistol, Launcher };
 
 struct ItemDef {
-    const char* name;
+    i18n::T name;      // texto (i18n::tr); ver itemName()
     ItemKind kind;
     Rarity rarity;     // rareza habitual (los consumibles tienen una fija)
     int maxStack;
@@ -50,6 +51,8 @@ struct ItemDef {
 };
 
 const ItemDef& itemDef(ItemType type);
+// Nombre en el idioma actual.
+const char* itemName(ItemType type);
 const char* rarityName(Rarity rarity);
 const char* ammoName(AmmoType type);
 bool isWeapon(ItemType type);

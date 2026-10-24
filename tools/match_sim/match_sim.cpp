@@ -2042,7 +2042,7 @@ void testPatchB(world::World& world, game::NavGrid& nav) {
         const game::WeaponConfig w = game::weaponConfig(t, first);
         printf("  %-28s %d rarezas, %3.0f dano, %4.2f s entre disparos, cargador %2d, recarga %.1f s, alcance %3.0f m, "
                "dispersion %.1f/%.1f, retroceso %.2f%s%s\n",
-               game::itemDef(t).name, rarities, static_cast<double>(w.damage), static_cast<double>(w.fireInterval),
+               game::itemName(t), rarities, static_cast<double>(w.damage), static_cast<double>(w.fireInterval),
                w.magazineSize, static_cast<double>(w.reloadTime), static_cast<double>(w.range),
                static_cast<double>(w.hipSpread), static_cast<double>(w.aimSpread), static_cast<double>(w.recoil),
                w.burstCount > 1 ? ", rafagas de 3" : "", w.projectile != game::ProjectileKind::None ? ", proyectil" : "");
