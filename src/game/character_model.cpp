@@ -532,68 +532,222 @@ float smoothToward(float current, float target, float rate, float dt) {
     return current + (target - current) * (1.0f - expf(-rate * dt));
 }
 
+float lerpf(float a, float b, float t) { return a + (b - a) * t; }
+
+// --- Cinematica inversa de los brazos (parche, fase 8) -------------------------------------
+
+constexpr float kUpperArm = kElbowDrop;  // hombro -> codo
+constexpr float kForearm = 0.255f;       // codo -> palma
+constexpr float kMaxReach = kUpperArm + kForearm - 0.01f;
+
+Mat4 basisMatrix(const Vec3& x, const Vec3& y, const Vec3& z, const Vec3& origin) {
+    Mat4 m = Mat4::identity();
+    m.m[0] = x.x, m.m[1] = x.y, m.m[2] = x.z;
+    m.m[4] = y.x, m.m[5] = y.y, m.m[6] = y.z;
+    m.m[8] = z.x, m.m[9] = z.y, m.m[10] = z.z;
+    m.m[12] = origin.x, m.m[13] = origin.y, m.m[14] = origin.z;
+    return m;
+}
+
+Vec3 rotateAroundX(const Vec3& v, float a) {
+    const float c = cosf(a), sn = sinf(a);
+    return {v.x, v.y * c - v.z * sn, v.y * sn + v.z * c};
+}
+
+// Gira `v` un angulo `a` alrededor del eje unitario `k` (Rodrigues).
+Vec3 rotateAround(const Vec3& v, const Vec3& k, float a) {
+    const float c = cosf(a), sn = sinf(a);
+    return v * c + math3d::cross(k, v) * sn + k * (math3d::dot(k, v) * (1.0f - c));
+}
+
+// Hueso de `a` a `b` (las mallas de brazos y piernas cuelgan hacia -Y desde su origen) con
+// la articulacion (codo) apuntando hacia `pole`, que es el +Z local de la malla.
+Mat4 boneMatrix(const Vec3& a, const Vec3& b, const Vec3& pole) {
+    const Vec3 y = math3d::normalize(a - b);
+    Vec3 z = pole - y * math3d::dot(pole, y);
+    if (math3d::length(z) < 1e-4f) z = math3d::cross(y, {1.0f, 0.0f, 0.0f});
+    z = math3d::normalize(z);
+    return basisMatrix(math3d::cross(y, z), y, z, a);
+}
+
+// Brazo de dos huesos del hombro a la mano: devuelve el codo (la mano, si no llega, se queda
+// en la recta hacia el objetivo). `pole`: hacia donde se dobla el codo.
+Vec3 solveElbow(const Vec3& shoulder, Vec3* hand, const Vec3& pole) {
+    Vec3 to = *hand - shoulder;
+    float d = math3d::length(to);
+    const Vec3 dir = d > 1e-4f ? to * (1.0f / d) : Vec3{0.0f, -1.0f, 0.0f};
+    d = math3d::clampf(d, fabsf(kUpperArm - kForearm) + 0.01f, kMaxReach);
+    *hand = shoulder + dir * d;
+    const float x = (kUpperArm * kUpperArm - kForearm * kForearm + d * d) / (2.0f * d);
+    const float h = sqrtf(fmaxf(0.0f, kUpperArm * kUpperArm - x * x));
+    Vec3 bend = pole - dir * math3d::dot(pole, dir);
+    bend = math3d::length(bend) > 1e-4f ? math3d::normalize(bend) : Vec3{0.0f, -1.0f, 0.0f};
+    return shoulder + dir * x + bend * h;
+}
+
+// Punto del arma que alcanza la mano izquierda: el guardamanos o, si el brazo no llega
+// (armas largas), el punto mas adelantado del arma hacia la empunadura que si alcanza.
+Vec3 reachAlongGun(const Vec3& shoulder, const Vec3& support, const Vec3& grip) {
+    if (math3d::length(support - shoulder) <= kMaxReach) return support;
+    float lo = 0.0f, hi = 1.0f;  // 0 = guardamanos, 1 = empunadura
+    for (int i = 0; i < 10; ++i) {
+        const float mid = 0.5f * (lo + hi);
+        if (math3d::length(math3d::lerp(support, grip, mid) - shoulder) > kMaxReach) lo = mid;
+        else hi = mid;
+    }
+    return math3d::lerp(support, grip, hi);
+}
+
+// Postura del arma (en el espacio del cuerpo: X derecha, Y arriba, -Z delante): la
+// empunadura y hacia donde apunta. Entre "baja" (correr: cruzada y apuntando al suelo por
+// delante) y "a la cara" (apuntar), segun aimBlend; con el balanceo de la carrera, el
+// retroceso, la recarga y la inclinacion vertical de la mira.
+struct WeaponPose {
+    Vec3 grip, forward, up;
+};
+
+WeaponPose weaponPose(GripStyle style, const CharacterAnim& anim, float torsoPitch) {
+    struct Stance {
+        Vec3 grip, forward;
+    };
+    Stance aim, low;
+    switch (style) {
+        case GripStyle::Pistol:
+            aim = {{0.05f, 1.36f, -0.46f}, {0.0f, 0.0f, -1.0f}};
+            low = {{0.10f, 1.06f, -0.30f}, math3d::normalize({-0.05f, -0.75f, -1.0f})};
+            break;
+        case GripStyle::Shoulder:
+            aim = {{0.17f, 1.32f, -0.10f}, {0.0f, 0.0f, -1.0f}};
+            low = {{0.17f, 1.30f, -0.07f}, math3d::normalize({0.0f, -0.12f, -1.0f})};
+            break;
+        default:  // fusiles, escopetas, subfusiles, francotiradores
+            aim = {{0.12f, 1.31f, -0.23f}, {0.0f, 0.0f, -1.0f}};
+            low = {{0.14f, 1.09f, -0.19f}, math3d::normalize({-0.30f, -0.42f, -1.0f})};
+            break;
+    }
+    const float a = anim.aimBlend;
+    WeaponPose p;
+    p.grip = math3d::lerp(low.grip, aim.grip, a);
+    p.forward = math3d::normalize(math3d::lerp(low.forward, aim.forward, a));
+    // La culata se apoya en el hombro: inclinar la mira gira el arma alrededor de el. Se
+    // compensa la inclinacion del tronco (correr, agacharse) para que el canon no baje.
+    const Vec3 shoulder{kShoulderX, kShoulderY, 0.0f};
+    const float pitch = anim.aimPitch * (0.3f + 0.7f * a) + torsoPitch * (0.5f + 0.5f * a) + 0.12f * anim.recoil;
+    p.grip = shoulder + rotateAroundX(p.grip - shoulder, pitch);
+    p.forward = rotateAroundX(p.forward, pitch);
+    // Balanceo al correr (menos apuntando), retroceso hacia atras, gesto al recibir dano.
+    const float run = anim.runBlend * (1.0f - 0.7f * a) * (1.0f - anim.airBlend);
+    p.grip.y += 0.022f * sinf(2.0f * anim.walkPhase) * run - 0.03f * anim.flinch;
+    p.grip.x += 0.014f * sinf(anim.walkPhase) * run;
+    p.grip = p.grip + p.forward * (-0.05f * anim.recoil);
+    // Recarga: el arma baja un poco y se inclina hacia dentro.
+    const float r = anim.reloadBlend * sinf(math3d::kPi * math3d::clampf(anim.reload, 0.0f, 1.0f));
+    p.grip.y -= 0.07f * anim.reloadBlend;
+    // Arriba del arma: el vertical, con el canteo del arma baja y de la recarga.
+    Vec3 up = Vec3{0.0f, 1.0f, 0.0f} - p.forward * p.forward.y;
+    up = math3d::normalize(up);
+    up = rotateAround(up, p.forward, -0.35f * (1.0f - a) - 0.55f * r);
+    p.up = up;
+    return p;
+}
+
 }  // namespace
 
 // --- Animacion --------------------------------------------------------------------------
 
-void CharacterAnim::update(const CharacterState& state, bool aiming, bool alive, float dt) {
+void CharacterAnim::update(const CharacterState& state, const AnimInput& in, float dt) {
     idleTime += dt;
     recoil = smoothToward(recoil, 0.0f, 14.0f, dt);
     flinch = smoothToward(flinch, 0.0f, 8.0f, dt);
     swing = smoothToward(swing, 0.0f, 6.0f, dt);
-    if (!alive) {
+    landing = smoothToward(landing, 0.0f, 9.0f, dt);
+    if (!in.alive) {
         deathSeconds += dt;
         return;
     }
     deathSeconds = 0.0f;
     const float speed = state.horizontalSpeed();
-    float legL, legR, kneeL, kneeR;
-    float armL, armR, elbowL, elbowR, inL = 0.0f, inR = 0.0f;
-    if (state.grounded()) {
-        // La fase avanza con la distancia recorrida: los pies no "patinan".
+    const bool air = !state.grounded();
+
+    // Mezclas: ningun cambio de postura es instantaneo.
+    if (!air && airBlend > 0.6f) landing = 1.0f;  // acaba de tocar el suelo tras un salto
+    airBlend = smoothToward(airBlend, air ? 1.0f : 0.0f, air ? 10.0f : 16.0f, dt);
+    rise = smoothToward(rise, state.velocity.y > 0.5f ? 1.0f : -1.0f, 6.0f, dt);
+    runBlend = smoothToward(runBlend, math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f), 8.0f, dt);
+    aimBlend = smoothToward(aimBlend, in.aiming ? 1.0f : 0.0f, in.aiming ? 14.0f : 5.0f, dt);
+    crouchBlend = smoothToward(crouchBlend, in.crouched ? 1.0f : 0.0f, 10.0f, dt);
+    aimPitch = smoothToward(aimPitch, math3d::clampf(in.aimPitch, -0.9f, 0.9f), 12.0f, dt);
+    reloadBlend = smoothToward(reloadBlend, in.reloading ? 1.0f : 0.0f, 10.0f, dt);
+    if (in.reloading) reload = in.reloadProgress;
+    useBlend = smoothToward(useBlend, in.usingItem ? 1.0f : 0.0f, 8.0f, dt);
+    if (in.usingItem) use = in.useProgress;
+    // Hacia atras (respecto a donde mira): las piernas dan el paso al reves (no "patinan").
+    const Vec3 facing = forwardFromYaw(state.yaw);
+    const float along = state.velocity.x * facing.x + state.velocity.z * facing.z;
+    stride = smoothToward(stride, along < -0.3f * speed ? -1.0f : 1.0f, 10.0f, dt);
+    // Al correr el tronco se inclina hacia delante (menos apuntando; hacia atras al retroceder).
+    lean = smoothToward(lean, air ? 0.0f : 0.14f * runBlend * (1.0f - 0.6f * aimBlend) * (stride > 0.0f ? 1.0f : -0.4f), 8.0f, dt);
+
+    // --- Piernas: la fase avanza con la distancia recorrida (los pies no patinan); la
+    // zancada se alarga al correr. Un pie apoya en las fases 0 y pi.
+    const float strideLength = kStrideLength * (0.8f + 0.3f * runBlend);
+    if (!air) {
         const float before = walkPhase;
-        walkPhase += speed * dt * (2.0f * math3d::kPi / kStrideLength);
-        // Un pie apoya en las fases 0 y pi (piernas cruzandose bajo el cuerpo).
-        if (speed > 1.0f && static_cast<int>(walkPhase / math3d::kPi) != static_cast<int>(before / math3d::kPi)) {
-            ++footsteps;
-        }
+        walkPhase += speed * dt * (2.0f * math3d::kPi / strideLength) * (stride < 0.0f ? -1.0f : 1.0f);
+        if (speed > 1.0f && floorf(walkPhase / math3d::kPi) != floorf(before / math3d::kPi)) ++footsteps;
         if (walkPhase > 2.0f * math3d::kPi) walkPhase -= 2.0f * math3d::kPi;
-        const float amplitude = 0.65f * math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f);
-        const float s = sinf(walkPhase) * amplitude;
-        const float c = cosf(walkPhase);
-        legL = s;
-        legR = -s;
-        // La rodilla se dobla mientras la pierna avanza (fase de vuelo del paso).
-        kneeL = 0.06f + amplitude * 1.5f * (c > 0.0f ? c : 0.0f);
-        kneeR = 0.06f + amplitude * 1.5f * (c < 0.0f ? -c : 0.0f);
-        armL = -s * 0.8f + 0.06f;
-        armR = s * 0.8f + 0.06f;
-        elbowL = elbowR = 0.22f + amplitude * 0.9f;
-    } else {
-        legL = 0.65f;
-        kneeL = 0.95f;
-        legR = -0.10f;
-        kneeR = 0.40f;
-        armL = 0.55f;
-        armR = 0.45f;
-        elbowL = elbowR = 0.55f;
+        if (walkPhase < 0.0f) walkPhase += 2.0f * math3d::kPi;
     }
-    if (aiming) {
-        // Rifle al frente sujeto con las dos manos: el antebrazo derecho queda horizontal
-        // y la mano izquierda va al guardamanos.
+    const float amplitude = 0.70f * math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f) * (1.0f - 0.3f * crouchBlend);
+    const float sn = sinf(walkPhase) * amplitude;
+    const float c = cosf(walkPhase);
+    // En el suelo.
+    float legL = sn, legR = -sn;
+    float kneeL = 0.06f + amplitude * 1.6f * (c > 0.0f ? c : 0.0f);
+    float kneeR = 0.06f + amplitude * 1.6f * (c < 0.0f ? -c : 0.0f);
+    // En el aire: subiendo, una pierna encogida; cayendo, las dos algo adelantadas para caer.
+    const float up = 0.5f + 0.5f * rise;
+    legL = lerpf(legL, lerpf(0.30f, 0.75f, up), airBlend);
+    kneeL = lerpf(kneeL, lerpf(0.40f, 1.05f, up), airBlend);
+    legR = lerpf(legR, lerpf(0.20f, -0.08f, up), airBlend);
+    kneeR = lerpf(kneeR, lerpf(0.35f, 0.45f, up), airBlend);
+    // Aterrizaje: las rodillas absorben el golpe un instante.
+    legL += 0.30f * landing;
+    legR += 0.30f * landing;
+    kneeL += 0.60f * landing;
+    kneeR += 0.60f * landing;
+
+    // --- Brazos sin arma (o con el pico, un consumible o la granada): balanceo contrario a
+    // las piernas, con los codos mas doblados al correr. Con un arma de fuego los coloca la
+    // cinematica inversa al dibujar.
+    float armL = -sn * 0.85f + 0.06f, armR = sn * 0.85f + 0.06f;
+    float elbowL = 0.22f + 0.95f * runBlend * (amplitude > 0.05f ? 1.0f : 0.0f) + 0.1f;
+    float elbowR = elbowL, inL = 0.0f, inR = 0.0f;
+    armL = lerpf(armL, 0.55f, airBlend);
+    armR = lerpf(armR, 0.45f, airBlend);
+    elbowL = lerpf(elbowL, 0.6f, airBlend);
+    elbowR = lerpf(elbowR, 0.6f, airBlend);
+    if (in.aiming) {
+        // Apuntando sin arma de fuego (el pico): brazo derecho al frente.
         armR = 0.95f;
         elbowR = 0.62f;
         inR = 0.10f;
-        armL = 1.15f;
-        elbowL = 0.50f;
-        inL = 0.62f;
     }
-    // Retroceso: el rifle sube un poco con cada disparo.
-    armR += 0.22f * recoil;
-    armL += 0.16f * recoil;
+    // Curandose: la mano derecha sube a la boca (pociones) o las dos van al pecho (vendas).
+    if (useBlend > 0.01f) {
+        const float u = useBlend;
+        const float sip = 0.12f * sinf(idleTime * 5.0f);
+        armR = lerpf(armR, 0.95f + sip, u);
+        elbowR = lerpf(elbowR, 2.05f, u);
+        inR = lerpf(inR, 0.45f, u);
+        armL = lerpf(armL, 0.75f, u);
+        elbowL = lerpf(elbowL, 1.35f, u);
+        inL = lerpf(inL, 0.65f, u);
+    }
     float rate = 14.0f;
     if (swing > 0.03f) {
-        // Golpe de pico: el brazo baja desde encima de la cabeza hasta delante del pecho.
+        // Golpe de pico (y lanzar la granada): el brazo baja desde encima de la cabeza
+        // hasta delante del pecho.
         armR = 0.55f + 2.1f * swing;
         elbowR = 0.35f * (1.0f - swing);
         inR = 0.15f;
@@ -664,9 +818,13 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
                           const world::TextureLibrary& /*textures*/, bool eliminated, ItemModel held,
                           bool lowDetail, BodyPose pose, const ItemModels* items) const {
     const Vec3& pos = state.position;
-    const bool crouch = pose == BodyPose::Crouch, dance = pose == BodyPose::Dance;
+    const bool dance = pose == BodyPose::Dance;
+    const bool skydive = pose == BodyPose::Skydive, glide = pose == BodyPose::Glide;
+    // Agachado: con la mezcla suavizada (si la animacion no la lleva, de golpe).
+    const float crouch = pose == BodyPose::Crouch ? fmaxf(anim.crouchBlend, anim.crouchBlend > 0.01f ? 0.0f : 1.0f)
+                                                  : (skydive || glide || dance ? 0.0f : anim.crouchBlend);
     const float t = anim.idleTime;
-    if (!eliminated && (pose == BodyPose::Normal || crouch || dance)) {
+    if (!eliminated && !skydive && !glide) {
         // Sombra circular bajo los pies: encoge al subir, para leer la altura del salto.
         // Se apoya en la altura real de los pies al tocar suelo (cajas, altillo).
         const float groundY = state.grounded() ? pos.y : world::groundHeightAt(pos.x, pos.z);
@@ -679,37 +837,39 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     }
 
     Mat4 root = Mat4::translation(pos) * Mat4::rotationY(state.yaw);
+    float torsoPitch = 0.0f;  // inclinacion hacia delante del tronco (para compensar el arma)
     if (eliminated) {
         // Cae de espaldas en 0.45 s (acelerando, como con gravedad) y queda tumbado:
         // rotationX(+90) lleva la cabeza (+Y) hacia +Z (detras).
-        const float t = anim.deathSeconds > 0.0f ? math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f) : 1.0f;
-        const float fall = t * t;
+        const float k = anim.deathSeconds > 0.0f ? math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f) : 1.0f;
+        const float fall = k * k;
         root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) * Mat4::rotationX(math3d::kPi * 0.5f * fall);
-    } else if (pose == BodyPose::Skydive) {
+    } else if (skydive) {
         // Caida libre: boca abajo (la cabeza hacia delante), girando sobre la cadera.
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-1.35f) *
                Mat4::translation({0.0f, -kHipY, 0.0f});
-    } else if (pose == BodyPose::Glide) {
+    } else if (glide) {
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-0.18f) *
                Mat4::translation({0.0f, -kHipY, 0.0f});
-    } else if (crouch) {
-        // Agachado: la cadera baja (rodillas dobladas, ver piernas) y el tronco se inclina.
-        root = root * Mat4::translation({0.0f, -kCrouchDrop, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
-               Mat4::rotationX(-0.22f) * Mat4::translation({0.0f, -kHipY, 0.0f}) *
-               Mat4::rotationX(-0.22f * anim.flinch);
     } else if (dance) {
         // Baile: rebote al ritmo y vaiven de la cadera.
         const float beat = sinf(t * 6.0f);
         root = root * Mat4::translation({0.0f, 0.07f * fabsf(beat), 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
                Mat4::rotationZ(0.14f * sinf(t * 3.0f)) * Mat4::translation({0.0f, -kHipY, 0.0f});
     } else {
-        // Respiracion (muy leve) y sacudida hacia atras al recibir un impacto.
-        const float breath = 0.012f * sinf(anim.idleTime * 2.4f) * (state.horizontalSpeed() < 0.5f ? 1.0f : 0.0f);
-        root = root * Mat4::translation({0.0f, breath, 0.0f}) * Mat4::rotationX(-0.22f * anim.flinch);
+        // De pie, andando, corriendo o agachado (mezclados): la cadera baja al agacharse y al
+        // aterrizar, rebota un poco con cada zancada y el tronco se inclina al correr y al
+        // agacharse. Respiracion en reposo y sacudida hacia atras al recibir un impacto.
+        const float breath = 0.012f * sinf(t * 2.4f) * (1.0f - anim.runBlend);
+        const float bob = -0.035f * fabsf(cosf(anim.walkPhase)) * anim.runBlend * (1.0f - anim.airBlend);
+        const float drop = -kCrouchDrop * crouch - 0.08f * anim.landing + bob + breath;
+        torsoPitch = 0.22f * crouch + anim.lean;
+        root = root * Mat4::translation({0.0f, drop, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
+               Mat4::rotationX(-torsoPitch) * Mat4::translation({0.0f, -kHipY, 0.0f}) *
+               Mat4::rotationX(-0.22f * anim.flinch);
     }
 
     const Lod& lod = m_lods[lowDetail ? 1 : 0];
-    Mat4 heldMatrix = Mat4::identity();
     gfx::bindTexture(&m_skin);
     auto part = [&](PartId id, const Mat4& m) {
         gfx::setModelMatrix(m);
@@ -718,7 +878,6 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     part(kBody, root);
     const bool still = eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f);
     // Piernas: rotationX(+a) lleva el extremo hacia delante (-Z); la rodilla se dobla hacia atras.
-    const bool skydive = pose == BodyPose::Skydive, glide = pose == BodyPose::Glide;
     for (int s = 0; s < 2; ++s) {
         const float side = s == 0 ? -1.0f : 1.0f;
         float hip = still ? 0.0f : (s == 0 ? anim.leftLeg : anim.rightLeg);
@@ -731,21 +890,57 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         } else if (glide) {
             hip = s == 0 ? 0.25f : 0.05f;
             knee = 0.35f;
-        } else if (crouch) {
-            // Muslos hacia delante y rodillas muy dobladas (el paso, mas corto).
-            hip = 1.25f + hip * 0.4f;
-            knee = 1.7f + knee * 0.2f;
         } else if (dance) {
             hip = 0.35f * sinf(t * 6.0f + (s == 0 ? 0.0f : math3d::kPi));
             knee = 0.25f + 0.25f * fabsf(sinf(t * 6.0f + s));
             legSpread = 0.12f;
+        } else if (crouch > 0.0f) {
+            // Muslos hacia delante y rodillas muy dobladas (el paso, mas corto).
+            hip = lerpf(hip, 1.25f + hip * 0.4f, crouch);
+            knee = lerpf(knee, 1.7f + knee * 0.2f, crouch);
         }
         const Mat4 thigh = root * Mat4::translation({side * kHipX, kHipY, 0.0f}) * Mat4::rotationX(hip) *
                            Mat4::rotationZ(side * legSpread);
         part(s == 0 ? kThighL : kThighR, thigh);
         part(s == 0 ? kShinL : kShinR, thigh * Mat4::translation({0.0f, -kKneeDrop, 0.0f}) * Mat4::rotationX(-knee));
     }
-    // Brazos: separacion lateral, giro hacia delante, giro hacia el centro y codo.
+
+    // Brazos. Con un arma de fuego (dos manos): cinematica inversa sobre la empunadura y el
+    // guardamanos de la postura del arma. Si no (nada, pico, consumible, granada, poses
+    // especiales): angulos de la animacion, y el objeto en la palma derecha.
+    const GripStyle grip = items && held != ItemModel::None ? items->info(held).grip : GripStyle::None;
+    const bool twoHanded = !eliminated && !skydive && !glide && !dance &&
+                           (grip == GripStyle::Rifle || grip == GripStyle::Pistol || grip == GripStyle::Shoulder);
+    if (twoHanded) {
+        const WeaponPose wp = weaponPose(grip, anim, torsoPitch);
+        const Vec3 z = wp.forward * -1.0f;
+        const Mat4 gun = basisMatrix(math3d::cross(wp.up, z), wp.up, z, wp.grip);
+        const ItemModelInfo& info = items->info(held);
+        const Vec3 shoulders[2] = {{-kShoulderX, kShoulderY, 0.0f}, {kShoulderX, kShoulderY, 0.0f}};
+        // Mano derecha: cerrada en la empunadura. Izquierda: bajo el guardamanos (en la
+        // recarga, al cargador; en la pistola, junto a la derecha).
+        const float r = anim.reloadBlend * sinf(math3d::kPi * math3d::clampf(anim.reload, 0.0f, 1.0f));
+        const Vec3 support = math3d::lerp(info.support, {0.0f, -0.10f, -0.10f}, r);
+        Vec3 hands[2] = {gun.transformPoint(support + Vec3{-0.035f, -0.025f, 0.0f}),
+                         gun.transformPoint({0.03f, -0.03f, 0.02f})};
+        hands[0] = reachAlongGun(shoulders[0], hands[0], gun.transformPoint({-0.035f, -0.02f, 0.0f}));
+        // Codos hacia abajo y hacia fuera (el izquierdo, algo mas abajo: sostiene el arma).
+        const Vec3 poles[2] = {{-0.6f, -0.9f, 0.15f}, {0.9f, -0.6f, 0.45f}};
+        for (int s = 0; s < 2; ++s) {
+            Vec3 hand = hands[s];
+            const Vec3 elbow = solveElbow(shoulders[s], &hand, poles[s]);
+            part(s == 0 ? kUpperArmL : kUpperArmR, root * boneMatrix(shoulders[s], elbow, poles[s]));
+            // El antebrazo, con su +Z hacia el mismo lado que el del brazo (sin torcerse).
+            const Vec3 upperZ = boneMatrix(shoulders[s], elbow, poles[s]).transformPoint({0.0f, 0.0f, 1.0f}) - shoulders[s];
+            part(s == 0 ? kForearmL : kForearmR, root * boneMatrix(elbow, hand, upperZ));
+        }
+        items->draw(held, root * gun, lowDetail);
+        gfx::bindTexture(&m_skin);
+        gfx::setModelMatrix(Mat4::identity());
+        return;
+    }
+
+    Mat4 heldMatrix = Mat4::identity();
     for (int s = 0; s < 2; ++s) {
         const float side = s == 0 ? -1.0f : 1.0f;
         float shoulder = still ? (s == 0 ? 0.2f : -0.2f) : (s == 0 ? anim.leftArm : anim.rightArm);
@@ -770,6 +965,16 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             elbow = 0.25f;
             inward = 0.0f;
             spread = 0.3f;
+        } else if (s == 1 && grip == GripStyle::Throw && anim.swing < 0.03f) {
+            // Granada lista: la mano derecha arriba, junto al hombro.
+            shoulder = 1.9f;
+            elbow = 1.9f;
+            inward = 0.1f;
+        } else if (s == 1 && grip == GripStyle::None && held != ItemModel::None && anim.useBlend < 0.05f) {
+            // Consumible en la mano: delante del pecho.
+            shoulder = 0.55f;
+            elbow = 1.2f;
+            inward = 0.35f;
         }
         const Mat4 upper = root * Mat4::translation({side * kShoulderX, kShoulderY, 0.0f}) *
                            Mat4::rotationY(side * inward) * Mat4::rotationX(shoulder) *
@@ -781,8 +986,12 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     }
     // Lo que lleva en la mano derecha (sin textura): en la palma, con el canon a lo largo
     // de los dedos (-Y del antebrazo) y la parte de arriba del arma hacia -Z del antebrazo.
-    if (items && held != ItemModel::None && !eliminated) {
-        items->draw(held, heldMatrix, lowDetail);
+    // Los consumibles van de pie en la mano.
+    if (items && held != ItemModel::None && !eliminated && !skydive && !glide && !dance) {
+        const bool upright = grip == GripStyle::None || grip == GripStyle::Throw;
+        items->draw(held, upright ? heldMatrix * Mat4::translation({0.04f, 0.0f, 0.02f}) * Mat4::rotationX(0.5f * math3d::kPi)
+                                  : heldMatrix,
+                    lowDetail);
         gfx::bindTexture(&m_skin);
     }
     gfx::setModelMatrix(Mat4::identity());

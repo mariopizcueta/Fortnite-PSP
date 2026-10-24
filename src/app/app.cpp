@@ -477,10 +477,34 @@ void App::updateGame(const input::Input& in, float dt) {
     processEvents();
 
     // 4) Animaciones (visuales, con el tiempo de frame). Los eliminados tambien: caen.
-    m_playerAnim.update(renderState(0), m_match.playerAiming(), m_match.alive(0), dt);
+    {
+        game::AnimInput a;
+        a.alive = m_match.alive(0);
+        a.aiming = m_match.playerAiming();
+        a.aimPitch = a.aiming ? m_followCamera.pitch() + 0.065f : 0.0f;  // la mira en reposo baja 4 grados
+        a.crouched = m_match.playerCrouched();
+        if (const game::Weapon* w = m_match.inventory().activeWeapon()) {
+            a.reloading = w->reloading();
+            a.reloadProgress = w->reloadProgress();
+        }
+        a.usingItem = m_match.useProgress() >= 0.0f;
+        a.useProgress = a.usingItem ? m_match.useProgress() : 0.0f;
+        m_playerAnim.update(renderState(0), a, dt);
+    }
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);
-        m_botAnims[i].update(renderState(i + 1), b.aiming, b.state != game::BotState::Eliminated, dt);
+        game::AnimInput a;
+        a.alive = b.state != game::BotState::Eliminated;
+        a.aiming = b.aiming;
+        // Apuntan a la altura del pecho de su objetivo.
+        if (b.aiming && b.target >= 0 && m_match.alive(b.target)) {
+            const Vec3 d = m_match.chestOf(b.target) - m_match.eyeOf(i + 1);
+            a.aimPitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
+        }
+        a.reloading = b.armed && b.weapon.reloading();
+        a.reloadProgress = b.weapon.reloadProgress();
+        a.usingItem = b.healTimer > 0.0f;
+        m_botAnims[i].update(renderState(i + 1), a, dt);
     }
     playFootsteps();
     updateChestHum(dt);
@@ -1111,7 +1135,7 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
                                                      : game::itemModelFor(slot.type, slot.rarity);
         m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0), &m_items);
         if (m_propsReady && m_match.airState(0) == game::AirState::Glide) m_props.drawGlider(player.position, player.yaw);
-        triangles += m_models[0].triangles();
+        triangles += m_models[0].triangles() + m_items.triangles(held);
     }
     for (int i = 0; i < m_match.botCount(); ++i) {
         const game::Bot& b = m_match.bot(i);
@@ -1125,12 +1149,13 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
         // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
-        const game::ItemModel held = !b.armed ? game::ItemModel::Pickaxe
+        const game::ItemModel held = b.healTimer > 0.0f && b.healSlot >= 0 ? game::itemModelFor(b.bag.slot(b.healSlot).type)
+                                     : !b.armed                             ? game::ItemModel::Pickaxe
                                      : b.weaponType == game::ItemType::None ? game::ItemModel::AssaultRifle
                                                                             : game::itemModelFor(b.weaponType, b.weaponRarity);
         model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id), &m_items);
         if (m_propsReady && m_match.airState(id) == game::AirState::Glide) m_props.drawGlider(s.position, s.yaw);
-        triangles += far ? model.lowDetailTriangles() : model.triangles();
+        triangles += (far ? model.lowDetailTriangles() : model.triangles()) + m_items.triangles(held, far);
     }
     return triangles;
 }

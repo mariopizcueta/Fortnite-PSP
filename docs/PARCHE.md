@@ -228,3 +228,47 @@ capturas `31*` y `32*`), `make preview` (`20_armas_*`, `21_armas_en_mano_*`): 0 
   techo bajo un altillo del mapa, tronco demasiado pequeño); `make app-sim` 5g con el mando
   (cuarta pieza, R, un bot la pisa con sonido, caja de munición con su sonido sin repetirse,
   cofre con el suyo). Capturas `33a/b/c`.
+
+## 5. Bloque D: animaciones y mejoras visuales (v0.12.0-d)
+
+### Animaciones (`game/character_model.*`)
+
+Los modelos y su esqueleto (9 piezas: cuerpo, brazos, antebrazos, muslos y espinillas) se
+inspeccionaron antes de cambiar nada: las piezas se siguen dibujando igual (una malla por
+pieza y paleta), pero:
+
+- **El arma ya no está pegada a la malla del antebrazo**: es un modelo aparte
+  (`game::ItemModels`, bloque B) que se coloca con una **postura del arma** según su tipo
+  (`GripStyle`): fusil/escopeta/subfusil/francotirador (culata al hombro), pistola/revólver
+  (brazos estirados) y lanzacohetes (al hombro).
+- **Correr con el arma con las dos manos**: los brazos se colocan con **cinemática inversa
+  de dos huesos** (hombro–codo–mano): la mano derecha cierra la empuñadura y la izquierda va
+  al guardamanos de cada modelo (`ItemModelInfo::support`); si el brazo no llega (armas
+  largas) la mano se coloca en el punto más adelantado del arma que alcanza, siempre sobre
+  ella. Codos hacia abajo y hacia fuera: no atraviesan el cuerpo ni el arma.
+- **Posturas mezcladas** (`CharacterAnim`, todas suavizadas, nunca de golpe): quieto,
+  andando y corriendo (zancada según la velocidad; paso al revés al retroceder; los pies no
+  patinan porque la fase avanza con la distancia), arma baja al correr ↔ arma a la cara al
+  apuntar, inclinación vertical de la mira (los bots apuntan a la altura de su objetivo),
+  agachado (entra y sale suave), salto (subiendo encoge una pierna; cayendo, piernas
+  adelantadas), aterrizaje (las rodillas absorben), recarga (el arma baja y se inclina, la
+  mano izquierda va al cargador), retroceso, impacto, curarse (poción a la boca, vendas al
+  pecho) y lanzar la granada. El tronco se inclina al correr y el arma lo compensa para no
+  apuntar al suelo.
+- Hoja de posturas en `build/preview/22_posturas_*` (`make preview`).
+
+### Botones de la PSP sin contorno azul
+
+- **Causa**: no estaba en las texturas de `Recursos/Texturas PSP` (su borde es oscuro), sino
+  en `tools/prepare_assets.py`, que les añadía un halo claro azulado de 1 px para que se
+  leyeran sobre los paneles oscuros. Sobre el azul de la interfaz se veía como un contorno
+  azul.
+- **Arreglo**: el halo se quita; los iconos se redimensionan con alfa premultiplicado (sin
+  orlas de color en los bordes semitransparentes). Los botones L y R conservan su forma
+  clara, que es parte de su diseño. Los ficheros de `Recursos` no se modifican.
+
+### Otros
+
+- Curándose no se ofrece recoger nada (no se puede).
+- Comprobado (host): `make preview`, `make app-sim`, `make match-sim`, `make physics-test`
+  con 0 fallos. Las posturas solo se han revisado en capturas del rasterizador de host.

@@ -388,6 +388,67 @@ int main(int argc, char** argv) {
         }
     }
 
+    // --- Parche (fase 8): hoja de posturas con cada tipo de arma ------------------------------
+    {
+        struct Sheet {
+            const char* name;
+            game::ItemModel held;
+        };
+        const Sheet sheets[] = {{"22_posturas_fusil", game::ItemModel::Scar},
+                                {"22_posturas_pistola", game::ItemModel::Pistol},
+                                {"22_posturas_lanzacohetes", game::ItemModel::RocketLauncher},
+                                {"22_posturas_escopeta", game::ItemModel::PumpShotgun},
+                                {"22_posturas_sin_arma", game::ItemModel::None},
+                                {"22_posturas_curativo", game::ItemModel::ShieldPotion}};
+        // Columnas: quieto, corriendo, apuntando, apuntando arriba, agachado apuntando,
+        // recargando, saltando (subiendo), cayendo.
+        const int kPoses = 8;
+        const Mat4 proj = Mat4::perspective(math3d::toRadians(config::kFovYDegrees), 480.0f / 272.0f, 0.2f, 140.0f);
+        // Dos imagenes por arma (cuatro posturas cada una), de frente-lado y de cerca.
+        for (int half = 0; half < 2; ++half) {
+            for (const Sheet& sh : sheets) {
+                clear(config::kColorSky);
+                const Vec3 eye{0.9f, 1.25f, 33.6f};
+                const Mat4 v = Mat4::lookAt(eye, {0.0f, 0.95f, 30.0f}, {0.0f, 1.0f, 0.0f});
+                gfx::FogSettings fog;
+                fog.enabled = true;
+                fog.start = config::kFogStart;
+                fog.end = config::kFogEnd;
+                fog.color = config::kColorSky;
+                gfx::begin3D(proj, v, fog);
+                w.draw(math3d::Frustum::fromMatrix(proj * v), eye, config::kFogEnd);
+                for (int k = 0; k < 4; ++k) {
+                    const int i = half * 4 + k;
+                    game::CharacterState s;
+                    s.position = {-1.8f + 1.15f * k, 0.0f, 30.0f};
+                    s.yaw = -0.35f * pi;  // tres cuartos, mirando hacia +X
+                    game::AnimInput in;
+                    if (i == 1) s.velocity = game::forwardFromYaw(s.yaw) * 5.5f;
+                    in.aiming = i == 2 || i == 3 || i == 4;
+                    in.aimPitch = i == 3 ? 0.5f : 0.0f;
+                    in.crouched = i == 4;
+                    in.reloading = i == 5;
+                    in.reloadProgress = 0.5f;
+                    in.usingItem = sh.held == game::ItemModel::ShieldPotion && i == 2;
+                    in.useProgress = 0.5f;
+                    if (i == 6 || i == 7) {
+                        s.jumpState = i == 6 ? game::JumpState::Rising : game::JumpState::Falling;
+                        s.velocity = {0.0f, i == 6 ? 6.0f : -6.0f, 0.0f};
+                        s.position.y = 0.5f;
+                    }
+                    game::CharacterAnim anim;
+                    for (int f = 0; f < 50; ++f) anim.update(s, in, 1.0f / 60.0f);
+                    models[i % 4].draw(s, anim, w.textures(), false, sh.held, false,
+                                       in.crouched ? game::BodyPose::Crouch : game::BodyPose::Normal, &items);
+                }
+                char path[512];
+                snprintf(path, sizeof(path), "%s/%s_%d.png", outDir, sh.name, half + 1);
+                savePng(path, true);
+            }
+        }
+        printf("22_posturas_*      quieto, corriendo, apuntando, arriba, agachado, recargando, saltando, cayendo\n");
+    }
+
     items.destroy();
     for (game::CharacterModel& m : models) m.destroy();
     w.destroy();

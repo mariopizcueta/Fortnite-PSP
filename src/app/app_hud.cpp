@@ -362,7 +362,10 @@ const ui::Hint* App::interactionHint(int* count) const {
     // CUADRADO: lo que se abriria o recogeria ahora (texto en m_promptText).
     static ui::Hint hint{ui::Button::Square, ""};
     static char text[64];
-    if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground) return nullptr;
+    // (Curandose no se puede recoger ni abrir nada: no se ofrece.)
+    if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground || m_match.useProgress() >= 0.0f) {
+        return nullptr;
+    }
     const game::Interactable it = m_match.playerInteractable();
     if (it.kind == game::Interactable::Kind::None) return nullptr;
     if (it.kind == game::Interactable::Kind::Container) {

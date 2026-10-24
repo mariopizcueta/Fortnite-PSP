@@ -46,10 +46,27 @@ extern const CharacterPalette kOrange;    // bots: mono naranja
 extern const CharacterPalette kRanger;    // bots: rojo y azul con casco
 }  // namespace palettes
 
+// Lo que hace el personaje este frame, ademas de su estado fisico (lo rellena la
+// aplicacion para el jugador y los bots).
+struct AnimInput {
+    bool alive = true;
+    bool aiming = false;        // apuntando o disparando: el arma sube a la cara
+    float aimPitch = 0.0f;      // rad: hacia donde apunta en vertical (+ arriba)
+    bool crouched = false;
+    bool reloading = false;
+    float reloadProgress = 0.0f;  // 0..1
+    bool usingItem = false;       // curandose (el consumible en la mano)
+    float useProgress = 0.0f;     // 0..1
+};
+
 // Estado de animacion de una entidad (solo visual, avanza con el tiempo de frame).
-// Paso con flexion de rodillas y codos, salto, respiracion en reposo, rifle sujeto con
-// las dos manos al apuntar, retroceso al disparar, sacudida al recibir un impacto, golpe
-// de pico y caida al ser eliminado.
+//
+// Parche (fase 8): ademas de las articulaciones de antes (piernas y brazos sin arma), lleva
+// mezclas suavizadas entre posturas: quieto / andando / corriendo (con la zancada segun la
+// velocidad y hacia atras al retroceder), en el aire subiendo o cayendo, el aterrizaje,
+// agachado, apuntar, recargar, curarse y el retroceso. Con un arma en la mano los brazos no
+// se animan por angulos: se colocan con cinematica inversa sobre la empunadura y el
+// guardamanos de una postura del arma que depende de su tipo (fusil, pistola, al hombro).
 struct CharacterAnim {
     float walkPhase = 0.0f;
     float leftLeg = 0.0f, rightLeg = 0.0f, leftArm = 0.0f, rightArm = 0.0f;
@@ -61,8 +78,29 @@ struct CharacterAnim {
     float deathSeconds = 0.0f; // tiempo desde la eliminacion (0 = vivo)
     float swing = 0.0f;        // 1 al golpear con el pico, decae
     u32 footsteps = 0;         // pisadas dadas (sube cada vez que un pie apoya: sonido de pasos)
+    // Mezclas (0..1, suavizadas) y estado de las acciones.
+    float aimBlend = 0.0f;     // 0 = arma baja (correr), 1 = arma a la cara
+    float runBlend = 0.0f;     // 0 = quieto, 1 = corriendo a la velocidad maxima
+    float airBlend = 0.0f;     // 0 = en el suelo, 1 = en el aire
+    float rise = 0.0f;         // en el aire: 1 subiendo, -1 cayendo
+    float landing = 0.0f;      // 1 al tocar el suelo tras un salto, decae
+    float crouchBlend = 0.0f;
+    float aimPitch = 0.0f;     // suavizado
+    float reload = 0.0f;       // 0..1 de la recarga (0 si no recarga)
+    float reloadBlend = 0.0f;
+    float use = 0.0f;          // 0..1 del consumible en uso
+    float useBlend = 0.0f;
+    float lean = 0.0f;         // inclinacion del tronco al correr (rad)
+    float stride = 1.0f;       // +1 hacia delante, -1 hacia atras
 
-    void update(const CharacterState& state, bool aiming, bool alive, float dt);
+    void update(const CharacterState& state, const AnimInput& in, float dt);
+    // Forma corta (lobby, previsualizaciones): solo apuntar y vivo.
+    void update(const CharacterState& state, bool aiming, bool alive, float dt) {
+        AnimInput in;
+        in.aiming = aiming;
+        in.alive = alive;
+        update(state, in, dt);
+    }
     void onShot() { recoil = 1.0f; }
     void onHit() { flinch = 1.0f; }
     void onSwing() { swing = 1.0f; }

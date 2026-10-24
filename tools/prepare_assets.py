@@ -113,20 +113,15 @@ def slot_art(path, size=32, margin=0.06):
 
 
 def button(name, height):
-    """Boton de PSP de Recursos/Texturas PSP, recortado y a `height` px de alto."""
+    """Boton de PSP de Recursos/Texturas PSP, recortado y a `height` px de alto.
+
+    Sin contorno: hasta la fase 7 se le anadia aqui un halo claro azulado de 1 px que en la
+    interfaz se veia como un contorno azul (parche, fase 8). Se redimensiona con el alfa
+    premultiplicado (modo RGBa) para que los bordes semitransparentes no saquen el color
+    de los pixeles transparentes del original."""
     img = alpha_crop(Image.open(RES / "Texturas PSP" / name).convert("RGBA"), 8)
     width = max(1, round(img.width * height / img.height))
-    img = img.resize((width, height), Image.LANCZOS)
-    # Contorno claro de 1 px: los botones son oscuros y deben leerse sobre los paneles
-    # azul marino de los menus y sobre el escenario.
-    out = Image.new("RGBA", (width + 2, height + 2), (0, 0, 0, 0))
-    halo = Image.new("RGBA", out.size, (235, 240, 250, 0))
-    alpha = Image.new("L", out.size, 0)
-    alpha.paste(img.getchannel("A"), (1, 1))
-    halo.putalpha(alpha.filter(ImageFilter.MaxFilter(3)).point(lambda v: 210 if v > 60 else 0))
-    out.alpha_composite(halo)
-    out.alpha_composite(img, (1, 1))
-    return out
+    return img.convert("RGBa").resize((width, height), Image.LANCZOS).convert("RGBA")
 
 
 BUTTONS = {

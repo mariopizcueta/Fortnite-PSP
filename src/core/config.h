@@ -7,8 +7,8 @@
 namespace config {
 
 constexpr const char* kGameTitle = "FortnitePSP";
-constexpr const char* kVersion = "0.12.0-c";
-constexpr const char* kPhase = "Fase 8 - parche (bloque C)";
+constexpr const char* kVersion = "0.12.0-d";
+constexpr const char* kPhase = "Fase 8 - parche (bloque D)";
 
 // Reloj de CPU/bus en MHz (maximo estandar de la PSP).
 constexpr int kCpuClockMhz = 333;
