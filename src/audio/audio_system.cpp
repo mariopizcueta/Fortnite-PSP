@@ -52,6 +52,14 @@ bool init() {
     load(Sfx::SmgShot, assets::sfxSubfusil());
     load(Sfx::Pickup, assets::sfxRecoger());
     load(Sfx::Dance, assets::sfxBaile());
+    load(Sfx::PistolShot, assets::sfxPistola());
+    load(Sfx::RocketLaunch, assets::sfxCohete());
+    load(Sfx::GrenadeLaunch, assets::sfxLanzagranadas());
+    load(Sfx::GrenadeThrow, assets::sfxGranadaLanzar());
+    load(Sfx::Explosion, assets::sfxExplosion());
+    load(Sfx::AmmoBoxOpen, assets::sfxCajaMunicion());
+    load(Sfx::LlamaOpen, assets::sfxLlama());
+    load(Sfx::TrapTrigger, assets::sfxTrampa());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

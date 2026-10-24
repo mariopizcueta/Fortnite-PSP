@@ -20,18 +20,42 @@ constexpr float kPickupReach = 2.0f;     // m (en horizontal) para recoger con C
 constexpr float kContainerReach = 2.3f;  // m para abrir
 constexpr float kAmmoAutoReach = 1.4f;   // la municion se recoge sola al pasar por encima
 
+constexpr float kLlamaReach = 2.8f;      // la llama es mas grande que un cofre
+
 // Puntuacion de un arma para los bots (mejor rareza y tipos mas versatiles primero).
 float weaponScore(ItemType type, Rarity rarity) {
     float base = 0.0f;
     switch (type) {
         case ItemType::AssaultRifle: base = 30.0f; break;
+        case ItemType::BurstRifle: base = 28.0f; break;
+        case ItemType::ScopedRifle: base = 27.0f; break;
         case ItemType::Shotgun: base = 27.0f; break;
+        case ItemType::TacticalShotgun: base = 26.0f; break;
         case ItemType::Smg: base = 25.0f; break;
+        case ItemType::SubmachineGun: base = 24.0f; break;
+        case ItemType::RocketLauncher: base = 22.0f; break;
+        case ItemType::GrenadeLauncher: base = 20.0f; break;
         case ItemType::Sniper: base = 20.0f; break;
+        case ItemType::SemiAutoSniper: base = 21.0f; break;
+        case ItemType::Revolver: base = 19.0f; break;
+        case ItemType::Pistol: base = 16.0f; break;
         default: return 0.0f;
     }
     return base + 6.0f * static_cast<float>(rarity);
 }
+
+// Armas del botin con su peso (las mas comunes, mas a menudo).
+struct WeaponWeight {
+    ItemType type;
+    float weight;
+};
+constexpr WeaponWeight kWeaponWeights[] = {
+    {ItemType::AssaultRifle, 20}, {ItemType::BurstRifle, 9},     {ItemType::ScopedRifle, 4},
+    {ItemType::Shotgun, 10},      {ItemType::TacticalShotgun, 10}, {ItemType::Smg, 8},
+    {ItemType::SubmachineGun, 8}, {ItemType::Pistol, 9},         {ItemType::Revolver, 6},
+    {ItemType::Sniper, 4},        {ItemType::SemiAutoSniper, 4},  {ItemType::RocketLauncher, 3},
+    {ItemType::GrenadeLauncher, 3},
+};
 
 }  // namespace
 
@@ -54,8 +78,17 @@ Pickup Match::randomWeaponPickup(bool chest) {
     Pickup p;
     p.active = true;
     p.kind = PickupKind::Item;
-    const float r = m_rng.uniform();
-    p.item = r < 0.40f ? ItemType::AssaultRifle : r < 0.65f ? ItemType::Shotgun : r < 0.87f ? ItemType::Smg : ItemType::Sniper;
+    float total = 0.0f;
+    for (const WeaponWeight& w : kWeaponWeights) total += w.weight;
+    float r = m_rng.range(0.0f, total);
+    p.item = kWeaponWeights[0].type;
+    for (const WeaponWeight& w : kWeaponWeights) {
+        if (r < w.weight) {
+            p.item = w.type;
+            break;
+        }
+        r -= w.weight;
+    }
     p.rarity = randomRarity(chest);
     // Si el arma no existe en esa rareza (escopeta comun, francotirador comun...), la
     // rareza mas cercana por encima.
@@ -72,9 +105,12 @@ Pickup Match::randomConsumablePickup() {
     p.active = true;
     p.kind = PickupKind::Item;
     const float r = m_rng.uniform();
-    if (r < 0.35f) {
+    if (r < 0.30f) {
         p.item = ItemType::Bandage;
         p.count = 5;
+    } else if (r < 0.40f) {
+        p.item = ItemType::Grenade;
+        p.count = 3;
     } else if (r < 0.65f) {
         p.item = ItemType::SmallShield;
         p.count = 3;
@@ -152,6 +188,54 @@ void Match::spawnLoot() {
     }
 }
 
+void Match::spawnLlama() {
+    // Un punto transitable al aire libre (sin techo encima: nada de naves ni altillos), fuera
+    // de la tormenta, lejos de la aparicion y de los otros contenedores, y con sitio libre
+    // para la llama (ni paredes ni objetos solapandola).
+    const Vec3 spawn = body(0).state().position;
+    for (int attempt = 0; attempt < 80; ++attempt) {
+        Vec3 p;
+        if (!m_nav->randomPointNear(m_config.zoneCenter, m_config.zoneStartRadius - 6.0f, m_rng, &p)) continue;
+        if (world::stormDepth(p.x, p.z) > -18.0f || distXZ(p, spawn) < 12.0f) continue;
+        p.y = m_world->supportHeight(p.x, p.z, 0.6f, p.y + 0.5f);
+        const world::Aabb room{{p.x - 1.0f, p.y + 0.15f, p.z - 1.0f}, {p.x + 1.0f, p.y + 2.2f, p.z + 1.0f}};
+        if (m_world->overlapsAny(room, world::kBlocksMovement)) continue;
+        if (m_world->ceilingHeight(p.x, p.z, 0.8f, p.y + 0.5f) < p.y + 30.0f) continue;
+        bool clear = true;
+        for (const Container& c : m_containers) clear &= distXZ(c.position, p) > 3.0f;
+        if (!clear) continue;
+        const int index = addContainer(ContainerKind::Llama, p, m_rng.range(-math3d::kPi, math3d::kPi));
+        m_containers[index].health = m_config.llamaHealth;
+        m_llama = index;
+        pushEvent(GameEventType::LlamaSpawned, -1, index, p);
+        return;
+    }
+}
+
+bool Match::llamaStanding() const {
+    return m_llama >= 0 && m_llama < static_cast<int>(m_containers.size()) && !m_containers[m_llama].opened;
+}
+
+world::Aabb Match::llamaBox() const {
+    // Cuerpo, cuello y cabeza de la llama (PropVisuals la dibuja dentro de esta caja).
+    const Vec3 p = m_containers[m_llama].position;
+    return {{p.x - 0.55f, p.y, p.z - 0.55f}, {p.x + 0.55f, p.y + 1.75f, p.z + 0.55f}};
+}
+
+void Match::damageContainer(int index, float amount, int by, const Vec3& point) {
+    if (index < 0 || index >= static_cast<int>(m_containers.size())) return;
+    Container& c = m_containers[index];
+    if (c.opened || c.kind != ContainerKind::Llama) return;
+    pushEvent(GameEventType::HitStructure, -1, by, point);
+    c.health -= amount;
+    if (c.health > 0.0f) return;
+    // Rota: suelta lo mismo que al abrirla (una sola vez).
+    Interactable it;
+    it.kind = Interactable::Kind::Container;
+    it.index = index;
+    interact(by >= 0 ? by : -1, it);
+}
+
 int Match::addContainer(ContainerKind kind, const Vec3& position, float yaw) {
     Container c;
     c.kind = kind;
@@ -177,14 +261,30 @@ int Match::dropPickup(const Pickup& pickup) {
     return static_cast<int>(m_pickups.size()) - 1;
 }
 
-void Match::dropAround(const Vec3& center, const Pickup& pickup, int index, int total) {
+void Match::dropAround(const Vec3& center, const Pickup& pickup, int index, int total, float radius, float turn) {
     // Repartidos en corro alrededor del cofre / del sitio (como el botin que "salta").
     Pickup p = pickup;
     if (total > 1) {
-        const float a = 2.0f * math3d::kPi * static_cast<float>(index) / static_cast<float>(total) + 0.4f;
-        p.position = center + Vec3{cosf(a) * 0.9f, 0.0f, sinf(a) * 0.9f};
+        const float a = 2.0f * math3d::kPi * static_cast<float>(index) / static_cast<float>(total) + 0.4f + turn;
+        p.position = center + Vec3{cosf(a) * radius, 0.0f, sinf(a) * radius};
     } else {
         p.position = center;
+    }
+    // Nunca exactamente encima de otro objeto (dos bots que caen en el mismo sitio): se
+    // aparta un poco hacia fuera.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        bool crowded = false;
+        for (const Pickup& o : m_pickups) {
+            if (o.active && distXZ(o.position, p.position) < 0.3f && fabsf(o.position.y - p.position.y) < 1.0f) {
+                crowded = true;
+                break;
+            }
+        }
+        if (!crowded) break;
+        const Vec3 out = flatten(p.position - center);
+        const float len = math3d::length(out);
+        const Vec3 dir = len > 0.05f ? out * (1.0f / len) : Vec3{cosf(attempt * 2.1f), 0.0f, sinf(attempt * 2.1f)};
+        p.position = p.position + dir * 0.45f;
     }
     p.position.y = m_world->supportHeight(p.position.x, p.position.z, 0.2f, center.y + 0.5f);
     dropPickup(p);
@@ -210,11 +310,46 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 0, 2);
             dropAround(front, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 1, 2);
             break;
+        case ContainerKind::Llama: {
+            // Como en Fortnite: muchos materiales, municion de todo tipo, curas y granadas.
+            // En corro alrededor de la llama (el suelo se ajusta a cada objeto).
+            const int total = 12;
+            int slot = 0;
+            for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
+                Pickup m;
+                m.active = true;
+                m.kind = PickupKind::Materials;
+                m.resource = static_cast<world::Resource>(r);
+                m.count = 200;
+                dropAround(c.position, m, slot++, total, 1.6f);
+            }
+            for (int a = 0; a < static_cast<int>(AmmoType::Count); ++a) {
+                dropAround(c.position, ammoPickup(static_cast<AmmoType>(a)), slot++, total, 1.6f);
+            }
+            Pickup potion;
+            potion.active = true;
+            potion.item = ItemType::ShieldPotion;
+            potion.rarity = Rarity::Rare;
+            potion.count = 2;
+            dropAround(c.position, potion, slot++, total, 1.6f);
+            Pickup grenades;
+            grenades.active = true;
+            grenades.item = ItemType::Grenade;
+            grenades.rarity = itemDef(ItemType::Grenade).rarity;
+            grenades.count = 3;
+            dropAround(c.position, grenades, slot++, total, 1.6f);
+            dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
+            dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
+            break;
+        }
         case ContainerKind::Airdrop: {
             // Dos armas legendarias distintas, su municion y dos pociones de escudo.
-            const ItemType options[] = {ItemType::AssaultRifle, ItemType::Shotgun, ItemType::Sniper, ItemType::Smg};
-            const int first = m_rng.index(4);
-            const int second = (first + 1 + m_rng.index(3)) % 4;
+            const ItemType options[] = {ItemType::AssaultRifle, ItemType::Shotgun,       ItemType::Sniper,
+                                        ItemType::Smg,          ItemType::BurstRifle,    ItemType::TacticalShotgun,
+                                        ItemType::RocketLauncher, ItemType::GrenadeLauncher};
+            constexpr int kOptions = sizeof(options) / sizeof(options[0]);
+            const int first = m_rng.index(kOptions);
+            const int second = (first + 1 + m_rng.index(kOptions - 1)) % kOptions;
             const ItemType chosen[2] = {options[first], options[second]};
             int slot = 0;
             for (ItemType type : chosen) {
@@ -255,7 +390,8 @@ Interactable Match::interactableFor(int id) const {
     for (size_t i = 0; i < m_containers.size(); ++i) {
         const Container& c = m_containers[i];
         if (c.opened || !c.landed) continue;
-        if (distXZ(c.position, pos) > kContainerReach || fabsf(c.position.y - pos.y) > 1.6f) continue;
+        const float reach = c.kind == ContainerKind::Llama ? kLlamaReach : kContainerReach;
+        if (distXZ(c.position, pos) > reach || fabsf(c.position.y - pos.y) > 1.6f) continue;
         const float s = score(c.position);
         if (s < best) {
             best = s;
@@ -316,8 +452,8 @@ bool Match::pickUp(int id, int index) {
         return true;
     }
 
-    if (p.kind == PickupKind::Ammo) {
-        const int added = m_inventory.addAmmo(p.ammo, p.count);
+    if (p.kind == PickupKind::Ammo || p.kind == PickupKind::Materials) {
+        const int added = p.kind == PickupKind::Ammo ? m_inventory.addAmmo(p.ammo, p.count) : m_materials.add(p.resource, p.count);
         if (added <= 0) return false;
         p.count -= added;
         if (p.count <= 0) p.active = false;
@@ -390,11 +526,12 @@ void Match::dropSlot(const InventorySlot& slot, const Vec3& where) {
 }
 
 void Match::autoPickupAmmo(int id) {
+    // La municion y los materiales se recogen solos al pasar por encima.
     if (id != 0 || !alive(0) || m_air[0] != AirState::Ground) return;
     const Vec3 pos = body(0).state().position;
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
-        if (!p.active || p.kind != PickupKind::Ammo) continue;
+        if (!p.active || p.kind == PickupKind::Item) continue;
         if (distXZ(p.position, pos) < kAmmoAutoReach && fabsf(p.position.y - pos.y) < 1.5f) {
             pickUp(0, static_cast<int>(i));
         }
@@ -442,6 +579,25 @@ void Match::dropBotWeapon(int index) {
         const ItemType t = b.bag.slot(i).type;
         total += t == ItemType::None ? 0 : (isWeapon(t) ? 2 : 1);
     }
+    // Materiales (como en Fortnite): madera siempre; piedra y metal, a veces.
+    Pickup mats[3];
+    int matCount = 0;
+    if (m_config.botsDropMaterials) {
+        const int wood = 30 + m_rng.index(31);
+        const int stone = m_rng.chance(0.6f) ? 20 + m_rng.index(21) : 0;
+        const int metal = m_rng.chance(0.35f) ? 10 + m_rng.index(21) : 0;
+        const int amounts[3] = {wood, stone, metal};
+        for (int r = 0; r < 3; ++r) {
+            if (amounts[r] <= 0) continue;
+            Pickup& m = mats[matCount++];
+            m.kind = PickupKind::Materials;
+            m.resource = static_cast<world::Resource>(r);
+            m.count = amounts[r];
+        }
+    }
+    total += matCount;
+    const float turn = m_rng.range(0.0f, 2.0f * math3d::kPi);  // cada bot, su corro girado
+    for (int k = 0; k < matCount; ++k) dropAround(pos, mats[k], total - matCount + k, total, 0.9f, turn);
     int slot = 0;
     for (int i = 0; i < Inventory::kSlots; ++i) {
         const InventorySlot s = b.bag.take(i);
@@ -452,9 +608,10 @@ void Match::dropBotWeapon(int index) {
         w.rarity = s.rarity;
         w.count = s.count;
         w.loaded = isWeapon(s.type) ? s.weapon.ammo() : -1;
-        dropAround(pos, w, slot++, total);
+        dropAround(pos, w, slot++, total, 0.9f, turn);
         if (isWeapon(s.type)) {
-            dropAround(pos, ammoPickup(static_cast<AmmoType>(weaponConfig(s.type, s.rarity).ammoType)), slot++, total);
+            dropAround(pos, ammoPickup(static_cast<AmmoType>(weaponConfig(s.type, s.rarity).ammoType)), slot++, total, 0.9f,
+                       turn);
         }
     }
     b.armed = false;
@@ -463,6 +620,7 @@ void Match::dropBotWeapon(int index) {
 
 bool Match::botWants(const Bot& b, const Pickup& p) const {
     if (!p.active || p.kind != PickupKind::Item) return false;
+    if (itemDef(p.item).kind == ItemKind::Throwable) return false;  // los bots no lanzan granadas
     if (!isWeapon(p.item)) {
         // Consumibles: si caben (en un monton suyo o en una ranura libre).
         if (!b.bag.full()) return true;
@@ -505,9 +663,15 @@ void Match::botEquip(Bot& b, float distance) {
         const InventorySlot& s = b.bag.slot(i);
         if (!isWeapon(s.type)) continue;
         float score = weaponScore(s.type, s.rarity);
-        if (s.type == ItemType::Shotgun) score += distance < 9.0f ? 25.0f : (distance > 16.0f ? -20.0f : 0.0f);
-        if (s.type == ItemType::Sniper) score += distance > 28.0f ? 25.0f : (distance < 14.0f ? -20.0f : 0.0f);
-        if (s.type == ItemType::Smg && distance < 14.0f) score += 6.0f;
+        switch (weaponClass(s.type)) {
+            case WeaponClass::Shotgun: score += distance < 9.0f ? 25.0f : (distance > 16.0f ? -20.0f : 0.0f); break;
+            case WeaponClass::Sniper: score += distance > 28.0f ? 25.0f : (distance < 14.0f ? -20.0f : 0.0f); break;
+            case WeaponClass::Smg: score += distance < 14.0f ? 6.0f : 0.0f; break;
+            // Explosivos: nunca de cerca (el bot tambien se haria dano).
+            case WeaponClass::Launcher: score += distance < 8.0f ? -60.0f : (distance < 35.0f ? 6.0f : -10.0f); break;
+            default: break;
+        }
+        if (s.type == ItemType::ScopedRifle && distance > 25.0f) score += 6.0f;
         if (score > bestScore) {
             bestScore = score;
             best = i;

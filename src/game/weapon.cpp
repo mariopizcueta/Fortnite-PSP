@@ -14,6 +14,7 @@ void Weapon::reset(const WeaponConfig& config) {
     m_reloadTimer = 0.0f;
     m_sinceShot = 99.0f;
     m_shotsFired = 0;
+    m_burstLeft = 0;
 }
 
 void Weapon::update(float dt) {
@@ -34,23 +35,32 @@ void Weapon::update(float dt) {
 bool Weapon::tryFire() {
     if (reloading() || m_cooldown > 0.0f) return false;
     if (m_ammo <= 0) {
+        m_burstLeft = 0;
         startReload();
         return false;
     }
     --m_ammo;
     ++m_shotsFired;
     m_sinceShot = 0.0f;
+    // Rafaga: la primera bala la empieza; entre balas, burstGap; tras la ultima, el
+    // intervalo entre rafagas.
+    if (m_burstLeft > 0) --m_burstLeft;
+    else if (m_config.burstCount > 1) m_burstLeft = m_config.burstCount - 1;
     // Siguiente disparo dentro de un intervalo. Se arrastra como mucho 20 ms de sobrante
     // (para que la media sea la cadencia exacta con pasos de 1/60 s), nunca mas: aunque el
     // gatillo lleve rato pulsado o haya habido un tiron, no se acumulan disparos.
     const float carry = m_cooldown < -kMaxCarry ? -kMaxCarry : m_cooldown;
-    m_cooldown = carry + m_config.fireInterval;
-    if (m_ammo == 0) startReload();
+    m_cooldown = carry + (m_burstLeft > 0 ? m_config.burstGap : m_config.fireInterval);
+    if (m_ammo == 0) {
+        m_burstLeft = 0;
+        startReload();
+    }
     return true;
 }
 
 bool Weapon::startReload() {
     if (reloading() || m_ammo >= m_config.magazineSize || m_reserve == 0) return false;
+    m_burstLeft = 0;
     m_reloadTimer = m_config.reloadTime;
     return true;
 }

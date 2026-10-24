@@ -83,6 +83,10 @@ enum class GameEventType : u8 {
     PickedUp,      // entity = quien recoge, other = ItemType (o -1: municion)
     AirdropIncoming,  // position = donde caera
     AirdropLanded,
+    // Parche (fase 8).
+    Explosion,     // entity = quien la causa, other = ItemType del arma, amount = radio (dm)
+    Thrown,        // entity = quien lanza, other = ItemType (granada de mano)
+    LlamaSpawned,  // position = donde esta la llama de esta partida
 };
 
 // Fase de la caida desde el autobus de cada personaje.
@@ -91,8 +95,9 @@ const char* airStateName(AirState state);
 
 // --- Botin (docs/BOTIN.md) ----------------------------------------------------------------
 
-// Objeto en el suelo: un arma o consumible (con su rareza) o municion.
-enum class PickupKind : u8 { Item, Ammo };
+// Objeto en el suelo: un arma o consumible (con su rareza), municion o materiales de
+// construccion (los sueltan los bots al caer y la llama; se recogen solos al pasar).
+enum class PickupKind : u8 { Item, Ammo, Materials };
 struct Pickup {
     bool active = false;
     PickupKind kind = PickupKind::Item;
@@ -101,11 +106,14 @@ struct Pickup {
     AmmoType ammo = AmmoType::Medium;
     int count = 0;
     int loaded = -1;  // arma: balas en el cargador (-1: lleno). Al soltarla conserva las suyas.
+    world::Resource resource = world::Resource::Wood;  // PickupKind::Materials
     math3d::Vec3 position;
     int claimedBy = -1;  // bot que va a por el
 };
 
-enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop };
+// Llama: como mucho una por partida (MatchConfig::llamaChance, 5 %); se abre con CUADRADO o
+// se rompe a disparos o con el pico y suelta materiales, municion y objetos.
+enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop, Llama };
 struct Container {
     ContainerKind kind = ContainerKind::Chest;
     math3d::Vec3 position;
@@ -114,6 +122,28 @@ struct Container {
     float openedAt = 0.0f;  // s de partida en que se abrio (se ve abierto un instante y desaparece)
     bool landed = true;   // airdrop: false mientras baja con el globo
     int claimedBy = -1;
+    float health = 0.0f;  // llama: vida antes de romperse (las demas no se rompen)
+};
+
+// Proyectil en vuelo: cohete, granada del lanzagranadas o granada de mano.
+struct Projectile {
+    bool active = false;
+    ProjectileKind kind = ProjectileKind::None;
+    int owner = -1;
+    int weaponType = -1;  // ItemType (sonido y dibujo)
+    math3d::Vec3 position, velocity;
+    float age = 0.0f;
+    float traveled = 0.0f;
+    float damage = 0.0f, blastRadius = 0.0f, structureDamage = 0.0f;
+    float fuse = 0.0f;         // granadas: s hasta explotar
+    float maxDistance = 0.0f;  // cohete: explota al recorrerla
+};
+
+// Explosion reciente (para dibujarla).
+struct Explosion {
+    math3d::Vec3 position;
+    float radius = 0.0f;
+    float age = 99.0f;
 };
 
 // Lo que hay al alcance para abrir o recoger con CUADRADO.
@@ -271,6 +301,21 @@ public:
     // Metros sobre el suelo (caida libre: para el HUD).
     float heightAboveGround(int id) const;
 
+    // Proyectiles y explosiones (parche, fase 8).
+    static constexpr int kMaxProjectiles = 24;
+    static constexpr int kMaxExplosions = 6;
+    const Projectile* projectiles() const { return m_projectiles; }
+    const Explosion* explosions() const { return m_explosions; }
+    // Explosion: dano decreciente con la distancia (a quien la ve desde el centro), y dano
+    // a construcciones, objetos del mapa y la llama. Publico para las pruebas.
+    void explode(const math3d::Vec3& at, int owner, float damage, float radius, float structureDamage, int weaponType);
+    int spawnProjectile(int owner, const math3d::Vec3& from, const math3d::Vec3& direction, const WeaponConfig& weapon,
+                        float damageScale, int weaponType);
+    // Lanza una granada de mano hacia la mira (como si el jugador pulsara R con ella).
+    bool throwGrenade();
+    // Llama de esta partida (indice en containers()) o -1.
+    int llama() const { return m_llama; }
+
     // Botin.
     const std::vector<Pickup>& pickups() const { return m_pickups; }
     const std::vector<Container>& containers() const { return m_containers; }
@@ -386,9 +431,17 @@ private:
     void spawnLoot();
     math3d::Vec3 lootSpot(float minSpacing, bool nearPoi);
     void spawnContainerLoot(int container, int opener);
-    void dropAround(const math3d::Vec3& center, const Pickup& pickup, int index, int total);
+    void dropAround(const math3d::Vec3& center, const Pickup& pickup, int index, int total, float radius = 0.9f,
+                    float turn = 0.0f);
     void updateAirdrops(float dt);
     void autoPickupAmmo(int id);
+    void spawnLlama();
+    void damageContainer(int index, float amount, int by, const math3d::Vec3& point);
+    // Cajas de la llama (para disparos, pico y explosiones) y si la llama esta en pie.
+    bool llamaStanding() const;
+    world::Aabb llamaBox() const;
+    void updateProjectiles(float dt);
+    void playerLaunch(const WeaponConfig& weapon, float spreadDegrees, int weaponType);
     bool pickUp(int id, int pickup);
     Pickup randomWeaponPickup(bool chest);
     Pickup randomConsumablePickup();
@@ -506,6 +559,11 @@ private:
     std::vector<Container> m_containers;
     int m_nextAirdrop = 0;
     std::vector<math3d::Vec3> m_lootSpots;  // usados al repartir (separacion minima)
+    Projectile m_projectiles[kMaxProjectiles];
+    Explosion m_explosions[kMaxExplosions];
+    int m_nextExplosion = 0;
+    float m_throwCooldown = 0.0f;
+    int m_llama = -1;
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
 };

@@ -64,7 +64,7 @@ struct MatchConfig {
     };
     StartItem startItems[Inventory::kSlots] = {};
     int startMaterials[static_cast<int>(world::Resource::Count)] = {0, 0, 0};  // madera, piedra, metal
-    int startAmmo[static_cast<int>(AmmoType::Count)] = {0, 0, 0, 0};
+    int startAmmo[static_cast<int>(AmmoType::Count)] = {};
 
     // Autobus de batalla: quieto en el cielo; se salta con X (o al acabar el tiempo).
     bool startInBus = true;
@@ -83,6 +83,12 @@ struct MatchConfig {
     int ammoBoxCount = 16;
     float airdropTimes[2] = {75.0f, 165.0f};  // s de partida en que cae un airdrop
     float airdropFallSpeed = 3.5f;
+    // Llama de suministros: se tira UNA vez al empezar cada partida (con su semilla).
+    float llamaChance = 0.05f;
+    bool forceLlama = false;   // pruebas: siempre hay llama
+    float llamaHealth = 250.0f;
+    // Los bots sueltan materiales al caer (madera siempre; piedra y metal a veces).
+    bool botsDropMaterials = true;
 
     // Consumibles: segundos de uso de cada uno (0 = el de ItemDef: vendas 3.5, botiquin 10,
     // minipocion 2, pocion de escudo 5). Mientras se usa no se puede mover ni saltar.

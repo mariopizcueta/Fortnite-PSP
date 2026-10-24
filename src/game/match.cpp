@@ -144,8 +144,15 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
         m_stormTimer[i] = 0.0f;
         m_air[i] = AirState::Ground;
     }
-    // Botin repartido por el mapa y, si se empieza en el autobus, todos dentro.
+    for (Projectile& p : m_projectiles) p = Projectile{};
+    for (Explosion& e : m_explosions) e.age = 99.0f;
+    m_nextExplosion = 0;
+    m_throwCooldown = 0.0f;
+    m_llama = -1;
+    // Botin repartido por el mapa y, si se empieza en el autobus, todos dentro. La llama se
+    // tira una sola vez aqui (5 %): reiniciar la partida es otra tirada con otra semilla.
     spawnLoot();
+    if (m_config.loot && (m_config.forceLlama || m_rng.chance(m_config.llamaChance))) spawnLlama();
     if (m_config.startInBus) startBus();
     if (m_alive <= 1) {
         m_phase = MatchPhase::Finished;
@@ -282,12 +289,15 @@ void Match::step(float dt) {
     m_sincePlayerDamaged += dt;
     for (Tracer& t : m_tracers) t.age += dt;
     for (DamageNumber& d : m_damageNumbers) d.age += dt;
+    for (Explosion& e : m_explosions) e.age += dt;
+    if (m_throwCooldown > 0.0f) m_throwCooldown -= dt;
     m_structures.update(dt);
     updateAirdrops(dt);
 
     updatePlayer(dt);
     autoPickupAmmo(0);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
+    updateProjectiles(dt);
     separateCharacters();
     if (m_storm.update(m_time, m_stormRng)) pushEvent(GameEventType::StormClosing, -1, m_storm.phase(), m_storm.nextCenter());
     updateStorm(dt);
@@ -433,19 +443,23 @@ void Match::updatePlayerItems(float dt, bool reload) {
         if (reload) weapon->startReload();
         // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
         const float range = weapon->config().range;
-        const bool sniperScope = m_inventory.activeType() == ItemType::Sniper && m_input.aiming;
+        const bool sniperScope = hasScope(m_inventory.activeType()) && m_input.aiming;
         const float assist = sniperScope ? m_config.sniperAssistDegrees : m_config.aimAssistDegrees;
         m_assistTarget = assist > 0.0f ? findLockTarget(m_aim.eye, m_aim.direction, assist, range) : -1;
         // tryFire() aplica municion y cadencia: mantener R da como mucho un disparo por
-        // intervalo (y por paso), nunca uno por frame.
-        if (m_aim.fire && m_phase != MatchPhase::Finished) {
+        // intervalo (y por paso), nunca uno por frame. Una rafaga empezada sigue sola.
+        if ((m_aim.fire || weapon->burstPending()) && m_phase != MatchPhase::Finished) {
             const float spread = playerSpread(weapon->config());  // antes de tryFire (primer disparo)
             if (weapon->tryFire()) {
                 const WeaponConfig& w = weapon->config();
                 m_recoilBloom = fminf(m_recoilBloom + w.recoil, fmaxf(w.maxRecoil, m_recoilBloom));
                 const int type = static_cast<int>(m_inventory.activeType());
-                for (int pellet = 0; pellet < w.pellets; ++pellet) {
-                    playerShot(m_aim, w.damage / static_cast<float>(w.pellets), range, spread, &w, pellet == 0, type);
+                if (w.projectile != ProjectileKind::None) {
+                    playerLaunch(w, spread, type);
+                } else {
+                    for (int pellet = 0; pellet < w.pellets; ++pellet) {
+                        playerShot(m_aim, w.damage / static_cast<float>(w.pellets), range, spread, &w, pellet == 0, type);
+                    }
                 }
             }
         }
@@ -453,9 +467,14 @@ void Match::updatePlayerItems(float dt, bool reload) {
         m_inventory.setAmmo(ammo, weapon->reserve());
         return;
     }
+    // Granada: R la lanza hacia la mira (una cada 0.8 s).
+    m_assistTarget = -1;
+    if (itemDef(m_inventory.activeType()).kind == ItemKind::Throwable) {
+        if (use) throwGrenade();
+        return;
+    }
     // Consumible: R lo empieza a usar; termina tras su tiempo de uso si no se cambia de
     // ranura ni se construye (moverse y recibir dano no lo interrumpen, como en Fortnite).
-    m_assistTarget = -1;
     if (use && m_useSlot < 0) startUse();
     if (m_useSlot < 0) return;
     if (m_inventory.selected() != m_useSlot) {
@@ -609,8 +628,18 @@ void Match::swingPickaxe() {
             victim = id;
         }
     }
+    bool llamaHit = false;
+    if (llamaStanding()) {
+        float t;
+        if (world::segmentVsAabb(chest, end - chest, llamaBox(), &t) && t < bestT) {
+            bestT = t;
+            victim = -1;
+            llamaHit = true;
+        }
+    }
     world::RayHit hit;
     const bool worldHit = m_world->raycast(chest, end, world::kBlocksShots, &hit) && hit.t < bestT;
+    if (worldHit) llamaHit = false;
     int wall = -1, resource = -1;
     Vec3 point = chest + (end - chest) * bestT;
     if (worldHit) {
@@ -647,9 +676,13 @@ void Match::swingPickaxe() {
         }
     }
 
-    const bool any = victim >= 0 || worldHit || resource >= 0;
+    const bool any = victim >= 0 || worldHit || resource >= 0 || llamaHit;
     pushEvent(GameEventType::PickaxeSwing, 0, any ? 1 : 0, point);
-    if (victim >= 0) {
+    if (llamaHit) {
+        m_sincePlayerHit = 0.0f;
+        addDamageNumber(point, m_config.pickaxeStructureDamage, true);
+        damageContainer(m_llama, m_config.pickaxeStructureDamage, 0, point);
+    } else if (victim >= 0) {
         m_sincePlayerHit = 0.0f;
         addDamageNumber(chestOf(victim), m_config.pickaxeDamage, false);
         pushEvent(GameEventType::HitEntity, victim, 0, chestOf(victim));
@@ -721,6 +754,14 @@ Vec3 Match::aimPoint(const Vec3& eye, const Vec3& dir, float range) const {
 
 void Match::fireWeapon(int shooter, const Vec3& origin, const Vec3& direction, const WeaponConfig& weapon,
                        float spreadDegrees, float damageScale, int weaponType) {
+    if (weapon.projectile != ProjectileKind::None) {
+        const Vec3 dir = perturb(direction, math3d::toRadians(spreadDegrees), m_rng);
+        spawnProjectile(shooter, origin, dir, weapon, damageScale, weaponType);
+        ++m_stats.shotsFired;
+        pushEvent(GameEventType::Shot, shooter, weaponType, origin);
+        hearShot(shooter, origin);
+        return;
+    }
     // Un disparo (un sonido); la escopeta reparte el dano entre sus perdigones.
     const int pellets = weapon.pellets > 0 ? weapon.pellets : 1;
     const float spread = weapon.pellets > 1 ? fmaxf(spreadDegrees, weapon.hipSpread) : spreadDegrees;
@@ -748,6 +789,16 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
             victim = id;
         }
     }
+    // La llama (si esta en pie) tambien para las balas.
+    bool llamaHit = false;
+    if (llamaStanding()) {
+        float t;
+        if (world::segmentVsAabb(origin, seg, llamaBox(), &t) && t < best) {
+            best = t;
+            victim = -1;
+            llamaHit = true;
+        }
+    }
     result.end = origin + seg * best;
     if (emitShot) {
         ++m_stats.shotsFired;
@@ -760,7 +811,14 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         const float t = math3d::clampf((d - weapon->falloffStart) / (weapon->falloffEnd - weapon->falloffStart), 0.0f, 1.0f);
         damage *= 1.0f + (weapon->falloffMin - 1.0f) * t;
     }
-    if (victim >= 0) {
+    if (llamaHit) {
+        result.blockedByWorld = true;
+        if (shooter == 0) {
+            m_sincePlayerHit = 0.0f;
+            addDamageNumber(result.end, damage, true);
+        }
+        damageContainer(m_llama, damage, shooter, result.end);
+    } else if (victim >= 0) {
         // En la cabeza (lo mas alto de la caja de impacto): dano doble.
         const world::Aabb box = hitBox(victim);
         bool headshot = result.end.y >= box.max.y - kHeadSize;
@@ -956,8 +1014,12 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
 void Match::eliminate(int victim, int killer) {
     pushEvent(GameEventType::Eliminated, victim, killer, body(victim).state().position);
     if (victim > 0) {
-        if (m_config.loot) dropBotWeapon(victim - 1);  // su arma queda en el suelo
         Bot& b = m_bots[victim - 1];
+        // Su inventario (y materiales) quedan en el suelo, una sola vez por eliminacion.
+        if (m_config.loot && !b.lootDropped) {
+            b.lootDropped = true;
+            dropBotWeapon(victim - 1);
+        }
         b.state = BotState::Eliminated;
         b.eliminatedAt = m_time;
         b.aiming = false;
@@ -1028,6 +1090,24 @@ void Match::updateStorm(float dt) {
 
 void Match::separateCharacters() {
     const int n = entityCount();
+    // La llama es solida: quien la toca se aparta (no es una caja del mundo para no tocar
+    // la navegacion ni las cajas dinamicas de las construcciones).
+    if (llamaStanding()) {
+        const world::Aabb box = llamaBox();
+        const Vec3 center = (box.min + box.max) * 0.5f;
+        for (int id = 0; id < n; ++id) {
+            if (!alive(id) || m_air[id] != AirState::Ground) continue;
+            CharacterState& st = mutableBody(id).state();
+            if (st.position.y > box.max.y - 0.1f || st.position.y + kBodyHeight < box.min.y) continue;
+            const float hx = (box.max.x - box.min.x) * 0.5f + kBodyRadius, hz = (box.max.z - box.min.z) * 0.5f + kBodyRadius;
+            const float dx = st.position.x - center.x, dz = st.position.z - center.z;
+            if (fabsf(dx) >= hx || fabsf(dz) >= hz) continue;
+            // Sale por el lado mas cercano.
+            if (hx - fabsf(dx) < hz - fabsf(dz)) st.position.x = center.x + (dx < 0.0f ? -hx : hx);
+            else st.position.z = center.z + (dz < 0.0f ? -hz : hz);
+            mutableBody(id).depenetrate(*m_world);
+        }
+    }
     for (int a = 0; a < n; ++a) {
         if (!alive(a) || m_air[a] != AirState::Ground) continue;
         for (int c = a + 1; c < n; ++c) {

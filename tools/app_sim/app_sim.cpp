@@ -287,7 +287,10 @@ void testAudio(const char* outDir) {
                                   assets::sfxVictoria(), assets::sfxDerrota(), assets::sfxPico(),
                                   assets::sfxCuracion(), assets::sfxMuerteJugador(), assets::sfxMiniescudo(),
                                   assets::sfxPocionEscudo(), assets::sfxPaso(), assets::sfxAvisoTormenta(),
-                                  assets::sfxCofreAbrir(), assets::sfxCofreCerca(), assets::sfxSaltoAutobus(), assets::sfxAlaDelta(), assets::sfxFrancotirador(), assets::sfxEscopeta(), assets::sfxSubfusil(), assets::sfxRecoger()};
+                                  assets::sfxCofreAbrir(), assets::sfxCofreCerca(), assets::sfxSaltoAutobus(), assets::sfxAlaDelta(), assets::sfxFrancotirador(), assets::sfxEscopeta(), assets::sfxSubfusil(), assets::sfxRecoger(),
+                                  assets::sfxBaile(), assets::sfxPistola(), assets::sfxCohete(), assets::sfxLanzagranadas(),
+                                  assets::sfxGranadaLanzar(), assets::sfxExplosion(), assets::sfxCajaMunicion(),
+                                  assets::sfxLlama(), assets::sfxTrampa()};
     bool clipsOk = true;
     int clipBytes = 0;
     for (const assets::Blob& b : clips) {
@@ -295,8 +298,8 @@ void testAudio(const char* outDir) {
         clipsOk &= audio::parseWav(b.data, b.size, &clip) && clip.rate == 22050 && clip.count > 0;
         clipBytes += static_cast<int>(b.size);
     }
-    printf("  26 efectos, %d KB en total\n", clipBytes / 1024);
-    check(clipsOk, "los 26 efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
+    printf("  %d efectos, %d KB en total\n", static_cast<int>(sizeof(clips) / sizeof(clips[0])), clipBytes / 1024);
+    check(clipsOk, "todos los efectos son WAV PCM 16 bits mono a 22050 Hz y se leen sin copiarlos");
 
     // Musica: el decodificador frente a la conversion de afconvert (la misma de prepare_assets).
     static audio::ImaStream music;
@@ -512,6 +515,119 @@ void testSwapAndHeal(Sim& sim) {
     printf("  vendas con el stick adelante y X: se mueve %.2f m mientras se cura; vida %.0f\n", static_cast<double>(moved),
            static_cast<double>(health));
     check(moved < 0.05f && health > hurt, "curandose el jugador no se mueve ni salta; al terminar sigue andando");
+}
+
+
+// Parche B: armas nuevas en la mano, cohete contra una pared, granada y la llama.
+void testPatchBVisuals(Sim& sim) {
+    printf("\n5e) Parche B: armas nuevas, explosivos y llama\n");
+    game::Match& match = sim.app().testMatch();
+    const game::Inventory& inv = match.inventory();
+    for (int i = 1; i < match.entityCount(); ++i) {
+        if (match.alive(i)) match.teleport(i, {-80.0f + i * 2.0f, 0.0f, 80.0f}, 0.0f);
+    }
+    // Vaciar el inventario cambiando cada ranura por un arma nueva del suelo.
+    const game::ItemType weapons[] = {game::ItemType::BurstRifle, game::ItemType::TacticalShotgun,
+                                      game::ItemType::RocketLauncher, game::ItemType::Pistol, game::ItemType::Grenade};
+    match.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+    sim.wait(0.3f);
+    for (int k = 0; k < 5; ++k) {
+        game::Pickup p;
+        p.kind = game::PickupKind::Item;
+        p.item = weapons[k];
+        p.rarity = game::weaponHasRarity(weapons[k], game::Rarity::Epic) ? game::Rarity::Epic : game::Rarity::Rare;
+        p.count = weapons[k] == game::ItemType::Grenade ? 4 : 1;
+        p.position = match.body(0).state().position;
+        const int index = match.dropPickup(p);
+        match.swapPickup(index, k);
+    }
+    match.giveAmmo(game::AmmoType::Rockets, 6);
+    match.giveAmmo(game::AmmoType::Medium, 60);
+    match.giveAmmo(game::AmmoType::Shells, 16);
+    match.giveAmmo(game::AmmoType::Light, 60);
+    bool allNew = true;
+    for (int k = 0; k < 5; ++k) allNew &= inv.slot(k).type == weapons[k];
+    check(allNew, "el inventario se llena con armas nuevas (cambiando ranuras)");
+    // Fusil de rafagas en la mano.
+    while (inv.pickaxe() || inv.selected() != 0) sim.press(inv.pickaxe() ? PSP_CTRL_TRIANGLE : PSP_CTRL_RIGHT);
+    sim.wait(0.3f);
+    sim.shot("31a_fusil_rafagas");
+    const int before = match.stats().shotsFired;
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.4f);
+    printf("  fusil de rafagas: una pulsacion de R -> %d balas\n", match.stats().shotsFired - before);
+    check(match.stats().shotsFired - before == 3, "R con el fusil de rafagas: rafaga de 3");
+    // Lanzacohetes contra una pared construida delante.
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.3f);
+    // La pared a 8 m (el cohete tambien hace dano a quien lo dispara de cerca).
+    match.giveMaterials(world::Resource::Wood, 30);
+    const int walls = match.structures().count();
+    match.teleport(0, {70.0f, 0.0f, 25.5f}, 0.0f);
+    match.buildWall(0.0f);
+    match.teleport(0, {70.0f, 0.0f, 32.0f}, 0.0f);
+    sim.app().testSetCameraAim(0.0f, -0.05f);
+    sim.wait(0.5f);
+    sim.shot("31b_lanzacohetes");
+    sim.takeAudioPeak();
+    const u32 cursor = match.eventCount();
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.05f);
+    sim.shot("31c_cohete_vuela");
+    bool exploded = false;
+    for (int i = 0; i < 60 && !exploded; ++i) {
+        sim.frame(0);
+        for (u32 e = cursor; e < match.eventCount(); ++e) exploded |= match.event(e).type == game::GameEventType::Explosion;
+    }
+    sim.wait(0.05f);
+    sim.shot("31d_explosion");
+    printf("  cohete: explosion %s, paredes del jugador %d -> %d\n", exploded ? "si" : "no", walls + 1, match.structures().count());
+    check(exploded && match.structures().count() == walls && sim.takeAudioPeak() > 4000,
+          "el cohete explota contra la pared, la derriba y suena");
+    // Granada de mano.
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RIGHT);
+    const int grenades = inv.slot(4).count;
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.3f);
+    sim.shot("31e_granada");
+    check(inv.slot(4).count == grenades - 1, "R con la granada la lanza");
+    sim.wait(2.5f);
+    sim.press(PSP_CTRL_LEFT);
+    sim.shot("31f_pistola");
+}
+
+void testLlamaVisual(Sim& sim) {
+    printf("\n5f) Parche B: llama de suministros\n");
+    game::Match& match = sim.app().testMatch();
+    if (match.llama() < 0) {
+        check(false, "la partida forzada tiene llama");
+        return;
+    }
+    const game::Container l = match.containers()[match.llama()];
+    const float yaw = sim.app().testCameraYaw();
+    const Vec3 forward{-sinf(yaw), 0.0f, -cosf(yaw)};
+    const Vec3 right{-forward.z, 0.0f, forward.x};
+    match.teleport(0, l.position - forward * 4.5f - right * 1.6f, yaw);
+    sim.wait(1.0f);
+    sim.shot("32a_llama");
+    match.teleport(0, l.position - forward * 2.0f, yaw);
+    sim.wait(0.3f);
+    sim.shot("32b_llama_abrir");
+    const int wood = match.materials().get(world::Resource::Wood);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.3f);
+    sim.shot("32c_llama_abierta");
+    check(match.containers()[match.llama()].opened, "CUADRADO abre la llama");
+    for (const game::Pickup& p : match.pickups()) {
+        if (!p.active || p.kind != game::PickupKind::Materials || math3d::length(p.position - l.position) > 3.0f) continue;
+        match.teleport(0, p.position, yaw);
+        sim.wait(0.1f);
+    }
+    printf("  madera %d -> %d tras abrir la llama y pasar por encima del botin\n", wood,
+           match.materials().get(world::Resource::Wood));
+    check(match.materials().get(world::Resource::Wood) > wood, "los materiales de la llama se recogen");
 }
 
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
@@ -917,6 +1033,7 @@ int main(int argc, char** argv) {
           "la partida nueva empieza limpia (11 vivos, sin paredes ni cajas dinamicas)");
     check(landAndEquip(sim), "salto, aterrizaje y equipo de pruebas");
     testNewControls(sim);
+    testPatchBVisuals(sim);
     sim.takeAudioPeak();
     killAllBots(sim);
     check(sim.takeAudioPeak() > 4000, "las eliminaciones suenan");
@@ -1084,6 +1201,18 @@ int main(int argc, char** argv) {
     printf("  pocion de escudo (6.6 s): voces activas %d al segundo, %d a los 7.5 s\n", playing,
            audio::mixer().activeVoices());
     check(playing == 1 && audio::mixer().activeVoices() == 0, "un sonido largo suena una vez y termina (no se repite)");
+
+    // Partida con llama (forzada) para verla y abrirla.
+    sim.app().testForceLlama(true);
+    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "partida con llama");
+    sim.app().testForceLlama(false);
+    check(landAndEquip(sim), "salto, aterrizaje y equipo");
+    testLlamaVisual(sim);
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);
+    check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
 
     printf("\n7) Salir desde el lobby\n");
     sim.press(PSP_CTRL_DOWN);

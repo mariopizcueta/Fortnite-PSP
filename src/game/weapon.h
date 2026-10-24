@@ -10,7 +10,13 @@
 // mas de un disparo por paso de fisica ni rafagas tras un tiron de FPS.
 #pragma once
 
+#include <psptypes.h>
+
 namespace game {
+
+// Proyectiles (lanzacohetes, lanzagranadas, granada de mano): vuelan con su velocidad (y
+// gravedad las granadas) y explotan con dano en un radio (ver game::Match).
+enum class ProjectileKind : u8 { None, Rocket, LauncherGrenade, HandGrenade };
 
 struct WeaponConfig {
     const char* name = "SCAR";
@@ -32,6 +38,19 @@ struct WeaponConfig {
     float recoilRecovery = 8.0f;
     // Agachado: fraccion de la dispersion que queda (segun el tipo de arma).
     float crouchSpreadScale = 1.0f;
+    // Rafagas (fusil de rafagas): cada pulsacion dispara burstCount balas separadas
+    // burstGap s; fireInterval es la espera entre rafagas.
+    int burstCount = 1;
+    float burstGap = 0.07f;
+    // Proyectil en vez de bala instantanea: velocidad (m/s), radio de la explosion (m),
+    // dano a construcciones y objetos del mapa (los cohetes las derriban) y espoleta (s).
+    ProjectileKind projectile = ProjectileKind::None;
+    float projectileSpeed = 0.0f;
+    float blastRadius = 0.0f;
+    float structureDamage = 0.0f;
+    float fuseSeconds = 0.0f;
+    // Mirilla con L (0 = sin mirilla): campo de vision vertical en grados.
+    float scopeFov = 0.0f;
     float falloffStart = 1000.0f;      // m: a partir de aqui el dano baja...
     float falloffEnd = 1000.0f;        // ...hasta falloffMin de su valor
     float falloffMin = 1.0f;
@@ -44,8 +63,10 @@ public:
     void update(float dt);
 
     // Intenta disparar: true si sale una bala (gasta una). Con el cargador vacio empieza a
-    // recargar sola.
+    // recargar sola. En un arma de rafagas, el primer disparo empieza la rafaga y las
+    // demas balas salen solas (burstPending) aunque se suelte el gatillo.
     bool tryFire();
+    bool burstPending() const { return m_burstLeft > 0; }
     // Recarga manual (si falta municion en el cargador y hay reserva).
     bool startReload();
 
@@ -58,7 +79,10 @@ public:
     void setLoaded(int rounds) { m_ammo = rounds < 0 ? 0 : (rounds > m_config.magazineSize ? m_config.magazineSize : rounds); }
 
     // Interrumpe la recarga (al cambiar de objeto en la mano); las balas no cambian.
-    void cancelReload() { m_reloadTimer = 0.0f; }
+    void cancelReload() {
+        m_reloadTimer = 0.0f;
+        m_burstLeft = 0;
+    }
 
     // Anade un retardo extra antes del siguiente disparo (los bots varian su cadencia).
     void addCooldown(float seconds) { m_cooldown += seconds; }
@@ -79,6 +103,7 @@ private:
     float m_reloadTimer = 0.0f;
     float m_sinceShot = 99.0f;
     int m_shotsFired = 0;
+    int m_burstLeft = 0;  // balas que quedan de la rafaga en curso
 };
 
 }  // namespace game

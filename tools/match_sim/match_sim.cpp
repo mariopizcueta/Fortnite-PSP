@@ -2008,6 +2008,348 @@ void testPatchA(world::World& world, game::NavGrid& nav) {
     check(hits[1] > hits[0] + 20 && hits[1] < 400, "agachado se acierta mas (sin acertar siempre)");
 }
 
+// --- Parche (fase 8), bloque B --------------------------------------------------------------------
+
+Vec3 lastExplosion(const Match& m, u32 from) {
+    Vec3 at{0.0f, -99.0f, 0.0f};
+    for (u32 i = from; i < m.eventCount(); ++i) {
+        if (m.event(i).type == game::GameEventType::Explosion) at = m.event(i).position;
+    }
+    return at;
+}
+
+int countPickups(const Match& m, game::PickupKind kind) {
+    int n = 0;
+    for (const game::Pickup& p : m.pickups()) n += p.active && p.kind == kind ? 1 : 0;
+    return n;
+}
+
+void testPatchB(world::World& world, game::NavGrid& nav) {
+    printf("\n17) Parche B: armas nuevas, explosivos, materiales de los bots y llama\n");
+    world.mutableCollision().clearDynamic();
+    using game::ItemType;
+    using game::Rarity;
+    // Catalogo: cada arma nueva con sus estadisticas y rarezas.
+    const ItemType news[] = {ItemType::BurstRifle,  ItemType::ScopedRifle,    ItemType::SubmachineGun,
+                             ItemType::TacticalShotgun, ItemType::Pistol,     ItemType::Revolver,
+                             ItemType::SemiAutoSniper,  ItemType::RocketLauncher, ItemType::GrenadeLauncher};
+    bool catalog = true;
+    for (ItemType t : news) {
+        int rarities = 0;
+        for (int r = 0; r < 5; ++r) rarities += game::weaponHasRarity(t, static_cast<Rarity>(r)) ? 1 : 0;
+        Rarity first = Rarity::Common;
+        while (!game::weaponHasRarity(t, first)) first = static_cast<Rarity>(static_cast<int>(first) + 1);
+        const game::WeaponConfig w = game::weaponConfig(t, first);
+        printf("  %-28s %d rarezas, %3.0f dano, %4.2f s entre disparos, cargador %2d, recarga %.1f s, alcance %3.0f m, "
+               "dispersion %.1f/%.1f, retroceso %.2f%s%s\n",
+               game::itemDef(t).name, rarities, static_cast<double>(w.damage), static_cast<double>(w.fireInterval),
+               w.magazineSize, static_cast<double>(w.reloadTime), static_cast<double>(w.range),
+               static_cast<double>(w.hipSpread), static_cast<double>(w.aimSpread), static_cast<double>(w.recoil),
+               w.burstCount > 1 ? ", rafagas de 3" : "", w.projectile != game::ProjectileKind::None ? ", proyectil" : "");
+        catalog &= game::isWeapon(t) && rarities >= 2 && w.damage > 0.0f && w.magazineSize > 0 && w.reloadTime > 0.0f &&
+                   w.range > 0.0f && w.crouchSpreadScale < 1.0f;
+    }
+    check(catalog, "las 9 armas nuevas tienen dano, cadencia, cargador, recarga, alcance, dispersion y retroceso");
+    check(std::string(game::weaponConfig(ItemType::AssaultRifle, Rarity::Common).name) == "Fusil de asalto" &&
+              std::string(game::weaponConfig(ItemType::AssaultRifle, Rarity::Rare).name) == "Fusil de asalto" &&
+              std::string(game::weaponConfig(ItemType::AssaultRifle, Rarity::Legendary).name) == "SCAR" &&
+              game::weaponConfig(ItemType::AssaultRifle, Rarity::Uncommon).damage == 31.0f,
+          "el fusil gris, verde y azul es el fusil de asalto generico (la SCAR, solo morada y dorada)");
+    check(game::itemDef(ItemType::Grenade).kind == game::ItemKind::Throwable && game::itemDef(ItemType::Grenade).maxStack == 6,
+          "la granada es un arrojadizo que se apila (6)");
+
+    MatchConfig cfg;
+    cfg.botCount = 2;
+    cfg.startInBus = false;
+    cfg.loot = false;
+    cfg.stormCloses = false;
+    cfg.aimAssistDegrees = 0.0f;
+    const Vec3 spot{70.0f, 0.0f, 25.0f};
+    game::PlayerInput still;
+    auto fresh = [&](Match& m, ItemType weapon, Rarity rarity, game::AmmoType ammo, int rounds) {
+        MatchConfig c = cfg;
+        c.startItems[0] = {weapon, 1, rarity};
+        c.startAmmo[static_cast<int>(ammo)] = rounds;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        m.teleport(0, spot, 0.0f);
+        m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+        m.teleport(2, {-76.0f, 0.0f, 80.0f}, 0.0f);
+        stepWith(m, still, game::PlayerAim{});
+    };
+
+    // Rafagas: una pulsacion corta dispara 3 balas.
+    {
+        Match m;
+        fresh(m, ItemType::BurstRifle, Rarity::Rare, game::AmmoType::Medium, 60);
+        game::PlayerAim aim;
+        aim.eye = m.eyeOf(0);
+        aim.direction = math3d::normalize(Vec3{0.0f, 0.3f, -1.0f});
+        aim.fire = true;
+        const int before = m.stats().shotsFired;
+        stepWith(m, still, aim);
+        aim.fire = false;
+        for (int i = 0; i < 40; ++i) stepWith(m, still, aim);
+        const int burst = m.stats().shotsFired - before;
+        printf("  fusil de rafagas: una pulsacion -> %d balas\n", burst);
+        check(burst == 3 && m.inventory().slot(0).weapon.ammo() == 27, "el fusil de rafagas dispara 3 balas por pulsacion");
+    }
+
+    // Lanzacohetes contra una pared de madera a 9 m con un bot detras y otro al lado.
+    {
+        Match m;
+        fresh(m, ItemType::RocketLauncher, Rarity::Legendary, game::AmmoType::Rockets, 6);
+        m.giveMaterials(world::Resource::Wood, 50);
+        // La pared, construida desde 9 m mas adelante (mirando hacia el jugador) a la rejilla.
+        m.teleport(0, spot + Vec3{0.0f, 0.0f, -10.0f}, 0.0f);
+        const int wall = m.buildWall(0.0f);
+        m.teleport(0, spot, 0.0f);
+        const world::Aabb box = m.structures().wall(wall).box;
+        const float wallZ = (box.min.z + box.max.z) * 0.5f;
+        m.teleport(1, {spot.x, 0.0f, wallZ - 1.2f}, 0.0f);  // detras de la pared
+        m.teleport(2, {spot.x + 2.6f, 0.0f, wallZ + 1.0f}, 0.0f);  // delante, a un lado
+        game::PlayerAim aim;
+        aim.eye = m.eyeOf(0);
+        aim.direction = math3d::normalize(Vec3{spot.x, 1.2f, wallZ} - aim.eye);
+        aim.fire = true;
+        const u32 cursor = m.eventCount();
+        stepWith(m, still, aim);
+        aim.fire = false;
+        bool flying = false;
+        for (int i = 0; i < 60; ++i) {
+            for (int k = 0; k < Match::kMaxProjectiles; ++k) flying |= m.projectiles()[k].active;
+            stepWith(m, still, aim);
+        }
+        const int explosions = countEvents(m, cursor, game::GameEventType::Explosion);
+        const float behind = m.body(1).state().health, side = m.body(2).state().health;
+        const Vec3 at = lastExplosion(m, cursor);
+        printf("  (explosion en %.1f %.1f %.1f; jugador %.0f; pared z %.1f)\n", static_cast<double>(at.x), static_cast<double>(at.y),
+               static_cast<double>(at.z), static_cast<double>(m.body(0).state().health), static_cast<double>(wallZ));
+        printf("  cohete contra pared de madera a %.0f m: explosiones %d, pared %s, bot detras %.0f, bot al lado %.0f, "
+               "cohetes %d\n",
+               static_cast<double>(spot.z - wallZ), explosions, m.structures().wall(wall).active ? "en pie" : "destruida",
+               static_cast<double>(behind), static_cast<double>(side), m.inventory().ammo(game::AmmoType::Rockets));
+        // (El bot herido se cubre con su propia pared: se cuentan solo las del jugador.)
+        check(flying && explosions == 1 && m.structures().count() == 0, "el cohete vuela, explota al tocar la pared y la derriba");
+        check(side < 100.0f && behind == 100.0f, "la explosion dana a quien la ve y la pared protege a quien esta detras");
+        const game::Weapon& rl = m.inventory().slot(0).weapon;
+        check(rl.ammo() == 0 && rl.reloading() && m.inventory().ammo(game::AmmoType::Rockets) == 6,
+              "cada cohete gasta su municion (el cargador de 1 se vacia y empieza a recargar)");
+    }
+
+    // Lanzagranadas: la granada rebota y explota con la espoleta (o al tocar a alguien).
+    {
+        Match m;
+        fresh(m, ItemType::GrenadeLauncher, Rarity::Rare, game::AmmoType::Rockets, 6);
+        // El bot se queda quieto en su sitio (si no, la IA lo mueve mientras vuela la granada).
+        const Vec3 target = spot + Vec3{0.0f, 0.0f, -12.0f};
+        m.teleport(1, target, 0.0f);
+        game::PlayerAim aim;
+        aim.eye = m.eyeOf(0);
+        aim.direction = math3d::normalize(m.chestOf(1) - aim.eye);
+        aim.fire = true;
+        const u32 cursor = m.eventCount();
+        stepWith(m, still, aim);
+        aim.fire = false;
+        for (int i = 0; i < 150; ++i) {
+            m.teleport(1, target, 0.0f);
+            stepWith(m, still, aim);
+        }
+        const Vec3 at = lastExplosion(m, cursor);
+        printf("  (explosion en %.1f %.1f %.1f; bot en %.1f %.1f)\n", static_cast<double>(at.x), static_cast<double>(at.y),
+               static_cast<double>(at.z), static_cast<double>(m.body(1).state().position.x),
+               static_cast<double>(m.body(1).state().position.z));
+        printf("  lanzagranadas a un bot a 12 m: explosiones %d, vida del bot %.0f\n",
+               countEvents(m, cursor, game::GameEventType::Explosion), static_cast<double>(m.body(1).state().health));
+        check(countEvents(m, cursor, game::GameEventType::Explosion) == 1 && m.body(1).state().health < 100.0f,
+              "la granada del lanzagranadas explota y dana al bot");
+        // Hacia el suelo lejos de todos: rebota y explota a los 2 s.
+        m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+        aim.direction = math3d::normalize(Vec3{0.0f, -0.25f, -1.0f});
+        aim.fire = true;
+        const int shotsBefore = m.stats().shotsFired;
+        for (int i = 0; i < 120 && m.stats().shotsFired == shotsBefore; ++i) stepWith(m, still, aim);
+        aim.fire = false;
+        const u32 second = m.eventCount();
+        int frames = 0;
+        while (countEvents(m, second, game::GameEventType::Explosion) == 0 && frames < 300) {
+            stepWith(m, still, aim);
+            ++frames;
+        }
+        printf("  granada al suelo: explota a los %.2f s\n", frames / 60.0);
+        check(frames > 60 && frames < 150, "contra el suelo rebota y explota con la espoleta");
+    }
+
+    // Granada de mano: R la lanza (gasta una) y explota a los 2.2 s cerca de un bot.
+    {
+        Match m;
+        fresh(m, ItemType::Pistol, Rarity::Common, game::AmmoType::Light, 0);
+        m.giveItem(ItemType::Grenade, 3);
+        const Vec3 target = spot + Vec3{0.0f, 0.0f, -10.0f};
+        m.teleport(1, target, 0.0f);
+        const int slot = selectSlotOf(m, ItemType::Grenade);
+        game::PlayerAim aim;
+        aim.eye = m.eyeOf(0);
+        aim.direction = math3d::normalize(m.chestOf(1) - aim.eye);
+        game::PlayerCommands use;
+        use.useItem = true;
+        const u32 cursor = m.eventCount();
+        stepWith(m, still, aim, use);
+        const int left = m.inventory().slot(slot).count;
+        for (int i = 0; i < 170; ++i) {
+            m.teleport(1, target, 0.0f);
+            stepWith(m, still, aim);
+        }
+        const Vec3 at = lastExplosion(m, cursor);
+        printf("  (explosion a %.1f m del bot)\n", static_cast<double>(distXZ(at, target)));
+        printf("  granada de mano a 10 m: quedan %d, explosiones %d, vida del bot %.0f\n", left,
+               countEvents(m, cursor, game::GameEventType::Explosion), static_cast<double>(m.body(1).state().health));
+        check(slot >= 0 && left == 2 && countEvents(m, cursor, game::GameEventType::Thrown) == 1, "R lanza la granada y gasta una");
+        check(countEvents(m, cursor, game::GameEventType::Explosion) == 1 && m.body(1).state().health < 100.0f,
+              "la granada explota con su espoleta y dana al bot cercano");
+    }
+    // La explosion tambien rompe objetos del mapa y hace dano a quien la lanza.
+    {
+        Match m;
+        fresh(m, ItemType::Pistol, Rarity::Common, game::AmmoType::Light, 0);
+        m.explode(m.body(0).state().position + Vec3{1.0f, 0.3f, 0.0f}, 0, 100.0f, 3.5f, 300.0f, -1);
+        check(m.body(0).state().health < 100.0f, "una explosion cerca de quien la lanza tambien le hace dano");
+    }
+
+    // Materiales de los bots: al caer sueltan madera (y a veces piedra y metal), una vez.
+    {
+        MatchConfig c = cfg;
+        c.loot = true;
+        c.chestCount = c.ammoBoxCount = c.floorLootCount = 0;
+        c.airdropTimes[0] = c.airdropTimes[1] = 9999.0f;
+        c.botCount = 6;
+        Match m;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        m.teleport(0, spot, 0.0f);
+        // Dos bots en el mismo sitio exacto.
+        for (int b = 1; b <= 6; ++b) m.teleport(b, spot + Vec3{b <= 2 ? 6.0f : 6.0f + b, 0.0f, 0.0f}, 0.0f);
+        for (int b = 1; b <= 6; ++b) {
+            m.applyDamage(b, 500.0f, 0);
+            m.applyDamage(b, 500.0f, 0);  // la misma eliminacion procesada otra vez: nada nuevo
+        }
+        int wood = 0, piles = 0, overlaps = 0;
+        int byResource[3] = {0, 0, 0};
+        for (size_t i = 0; i < m.pickups().size(); ++i) {
+            const game::Pickup& p = m.pickups()[i];
+            if (!p.active || p.kind != game::PickupKind::Materials) continue;
+            ++piles;
+            byResource[static_cast<int>(p.resource)] += p.count;
+            if (p.resource == world::Resource::Wood) ++wood;
+            for (size_t j = i + 1; j < m.pickups().size(); ++j) {
+                const game::Pickup& q = m.pickups()[j];
+                if (q.active && distXZ(p.position, q.position) < 0.25f) ++overlaps;
+            }
+        }
+        printf("  6 bots eliminados: %d montones de materiales (madera %d, piedra %d, metal %d), %d solapados\n", piles,
+               byResource[0], byResource[1], byResource[2], overlaps);
+        check(wood == 6 && byResource[0] >= 180 && byResource[0] <= 360, "cada bot suelta un monton de madera (30-60), una sola vez");
+        check(overlaps == 0, "los objetos de dos bots que caen en el mismo sitio no quedan en la misma posicion");
+        // Se recogen solos al pasar por encima.
+        const int before = m.materials().get(world::Resource::Wood);
+        for (size_t i = 0; i < m.pickups().size(); ++i) {
+            const game::Pickup& p = m.pickups()[i];
+            if (!p.active || p.kind != game::PickupKind::Materials) continue;
+            m.teleport(0, p.position, 0.0f);
+            stepWith(m, still, game::PlayerAim{});
+        }
+        check(m.materials().get(world::Resource::Wood) == before + byResource[0] &&
+                  countPickups(m, game::PickupKind::Materials) == 0,
+              "los materiales se recogen al pasar por encima y suman al inventario");
+    }
+
+    // Llama: 5 % por partida (una tirada al empezar), en un sitio valido, como mucho una.
+    {
+        MatchConfig c = cfg;
+        c.loot = true;
+        c.botCount = 1;
+        int with = 0, bad = 0, many = 0;
+        const int runs = 600;
+        for (int i = 0; i < runs; ++i) {
+            c.seed = 1000u + static_cast<u32>(i) * 7919u;
+            Match m;
+            m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+            int llamas = 0;
+            for (const game::Container& k : m.containers()) llamas += k.kind == game::ContainerKind::Llama ? 1 : 0;
+            many += llamas > 1 ? 1 : 0;
+            if (llamas == 0) continue;
+            ++with;
+            const game::Container& l = m.containers()[m.llama()];
+            const world::Aabb room{{l.position.x - 0.55f, l.position.y + 0.15f, l.position.z - 0.55f},
+                                   {l.position.x + 0.55f, l.position.y + 1.7f, l.position.z + 0.55f}};
+            bad += world.collision().overlapsAny(room, world::kBlocksMovement) ||
+                           world::stormDepth(l.position.x, l.position.z) > -10.0f ||
+                           world.collision().ceilingHeight(l.position.x, l.position.z, 0.5f, l.position.y + 0.5f) <
+                               l.position.y + 30.0f
+                       ? 1
+                       : 0;
+        }
+        printf("  %d partidas: %d con llama (%.1f %%), %d mal colocadas, %d con mas de una\n", runs, with,
+               100.0 * with / runs, bad, many);
+        check(with >= runs * 0.025 && with <= runs * 0.08, "la llama aparece en ~1 de cada 20 partidas (5 %)");
+        check(bad == 0 && many == 0, "siempre al aire libre, accesible, fuera de solidos y de la tormenta, y nunca mas de una");
+        // La tirada es la unica fuente de variacion: forzada, siempre encuentra sitio.
+        int placed = 0;
+        for (int i = 0; i < 150; ++i) {
+            MatchConfig f = c;
+            f.forceLlama = true;
+            f.seed = 777u + static_cast<u32>(i) * 104729u;
+            Match m;
+            m.start(f, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+            placed += m.llama() >= 0 ? 1 : 0;
+        }
+        printf("  con la llama forzada: colocada en %d de 150 partidas\n", placed);
+        check(placed == 150, "cuando sale la tirada, la llama siempre encuentra un sitio valido");
+
+        // Abrirla con CUADRADO o romperla a tiros: suelta materiales, municion y objetos, una vez.
+        for (int mode = 0; mode < 2; ++mode) {
+            c.forceLlama = true;
+            c.seed = 4242u + mode;
+            c.startItems[0] = {ItemType::AssaultRifle, 1, Rarity::Legendary};
+            c.startAmmo[static_cast<int>(game::AmmoType::Medium)] = 200;
+            Match m;
+            m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+            m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+            const game::Container l = m.containers()[m.llama()];
+            const float yaw = 0.0f;
+            const Vec3 front = l.position + Vec3{0.0f, 0.0f, mode == 0 ? 1.6f : 8.0f};
+            m.teleport(0, front, yaw);
+            stepWith(m, still, game::PlayerAim{});
+            const int matsBefore = countPickups(m, game::PickupKind::Materials);
+            const u32 cursor = m.eventCount();
+            if (mode == 0) {
+                game::PlayerCommands square;
+                square.reload = true;
+                game::PlayerInput look;
+                look.cameraYaw = game::yawTowards(front, l.position);
+                stepWith(m, look, game::PlayerAim{}, square);
+            } else {
+                game::PlayerAim aim;
+                aim.eye = m.eyeOf(0);
+                aim.direction = math3d::normalize(l.position + Vec3{0.0f, 0.9f, 0.0f} - aim.eye);
+                aim.fire = true;
+                for (int i = 0; i < 60 * 4 && !m.containers()[m.llama()].opened; ++i) stepWith(m, still, aim);
+            }
+            stepWith(m, still, game::PlayerAim{});
+            const int opened = countEvents(m, cursor, game::GameEventType::ContainerOpened);
+            // Los materiales que caen al lado del jugador se recogen solos: se cuentan los
+            // del suelo y los ya recogidos (200 de cada tipo).
+            int matsNow = countPickups(m, game::PickupKind::Materials);
+            for (int r = 0; r < 3; ++r) matsNow += m.materials().get(static_cast<world::Resource>(r)) >= 200 ? 1 : 0;
+            printf("  llama %s: abierta %s (%d sucesos), %d montones de materiales, %d objetos en total\n",
+                   mode == 0 ? "con CUADRADO" : "a tiros", m.containers()[m.llama()].opened ? "si" : "no", opened,
+                   matsNow - matsBefore,
+                   countPickups(m, game::PickupKind::Materials) + countPickups(m, game::PickupKind::Ammo) +
+                       countPickups(m, game::PickupKind::Item));
+            check(m.containers()[m.llama()].opened && opened == 1 && matsNow - matsBefore == 3,
+                  mode == 0 ? "CUADRADO abre la llama y suelta su recompensa" : "a tiros la llama se rompe y suelta su recompensa (una vez)");
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -2039,6 +2381,7 @@ int main() {
     testBotInventory(world, nav);
     testHeadshotsAndCrouch(world, nav);
     testPatchA(world, nav);
+    testPatchB(world, nav);
     testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);

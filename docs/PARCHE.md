@@ -148,3 +148,66 @@ mirilla horizontal con la cámara girada 50 grados, hacia arriba, hacia abajo y 
 pared a 4 m; selector con curativo en la mano; curarse con el stick y X pulsados),
 `make physics-test`, `make preview`: 0 fallos. Capturas: `build/app_sim/30b_selector_cambio.png`,
 `26e_mirilla_pared_cerca.png`, `30c_curandose_quieto.png`. Falta probarlo en la PSP.
+
+## 3. Bloque B: armas nuevas, materiales de los bots y llama (v0.12.0-b)
+
+### Armas (`game/inventory.cpp`, tabla `kSpecs`)
+
+Todas las de `Recursos/Weapons` se integran; cada una con daño y recarga por rareza,
+cadencia, cargador, alcance, munición, dispersión (cadera/apuntando), retroceso, factor de
+precisión agachado y, si procede, caída del daño, ráfaga, proyectil o mirilla:
+
+| Arma | Icono | Rarezas | Daño | Notas |
+| --- | --- | --- | --- | --- |
+| Fusil de asalto (gris/verde/azul) | `Assault_rifle_icon.png` | C, PC, R | 30–33 | **Antes usaba el modelo y el icono de la SCAR**; ahora modelo propio (tipo M16) e icono propio. Morado y dorado siguen siendo la SCAR. |
+| Fusil de ráfagas | `Burst_Assault_Rifle…webp` | C–L | 27–34 | 3 balas por pulsación (`WeaponConfig::burstCount`) |
+| Fusil con mira | `Scoped_Assault_Rifle…webp` | R, É | 23–24 | Mirilla con L (campo de visión 30°) |
+| Subfusil | `Submachine_Gun (v1.6)…webp` | C, PC, R | 16–18 | 12 disparos/s |
+| Escopeta táctica | `Tactical_Shotgun.webp` | C–L | 67–81 | 9 perdigones, cargador de 8 |
+| Pistola | `pistola.png` | C, PC, R | 23–25 | |
+| Revólver | `revolver.jpeg` (se le quita el fondo blanco al empaquetar) | C, PC, R | 54–60 | |
+| Francotirador semiautomático | `Icon_Weapons_SK_Sniper_02_L.webp` | PC, R | 63–66 | Mirilla con L, 10 balas |
+| Lanzacohetes | `Bazooka…webp` | R–L | 110–121 | Cohete a 45 m/s, radio 3.5 m, 400 a construcciones; munición nueva: cohetes |
+| Lanzagranadas | `Icon_Weapons_SK_Grenade_Launcher_L.webp` | R–L | 100–110 | Granada que rebota, explota a los 2 s o al tocar a alguien |
+| Granada | `Granada.png` | C | 105 | Arrojadizo apilable (6): R la lanza hacia la mira |
+
+- **Explosiones** (`game/match_projectiles.cpp`): daño de 100 % en el centro a 40 % en el
+  borde a quien se ve desde el centro (una pared protege) — también a quien la lanza —, y
+  daño a construcciones, objetos del mapa y la llama.
+- **Modelos 3D** (`game/item_models.*`): un modelo propio por arma (también nuevos para las
+  cuatro de antes), el pico, los consumibles, la granada y los proyectiles. Se crean una vez
+  y los comparten la mano de todos los personajes (ya no hay una malla de antebrazo por
+  arma y paleta) y el botín del suelo. Dos niveles de detalle. Galería en
+  `build/preview/20_armas_*.png`.
+- **Iconos**: ranuras por rareza generadas desde `Recursos/Weapons` por
+  `tools/prepare_assets.py` (los ficheros de `Recursos` no se modifican).
+- **Bots**: usan todas las armas (los explosivos nunca a menos de 8 m) y prefieren cada
+  familia a su distancia; no recogen granadas.
+- **Sonidos**: las armas nuevas usan el de su familia (fusiles, subfusiles, escopetas,
+  francotiradores); pistola, cohete, lanzagranadas, lanzar granada y explosión son sonidos
+  sintetizados nuevos en `tools/generate_sounds.py` (no había grabaciones).
+
+### Materiales de los bots
+
+Al caer, cada bot suelta madera (30–60), a veces piedra (60 %, 20–40) y metal (35 %,
+10–30), como montones (`PickupKind::Materials`) que se recogen solos al pasar. La
+eliminación se procesa una vez (`Bot::lootDropped`); el corro de cada bot va girado al azar
+y ningún objeto cae a menos de 0.3 m de otro.
+
+### Llama de suministros
+
+- Tirada única al empezar cada partida con su semilla (`MatchConfig::llamaChance` = 5 %;
+  reiniciar es otra tirada). Como mucho una.
+- Sitio: punto transitable al aire libre (sin techo en 30 m), con 2×2 m libres, a 18 m o
+  más de la tormenta del borde, lejos de la aparición y de otros contenedores.
+- CUADRADO la abre; también se rompe a tiros, con el pico o con explosiones (250 de vida).
+  Suelta 200 de cada material, munición de los cinco tipos, pociones de escudo, granadas y
+  dos consumibles. Es sólida para los personajes. Modelo 3D según
+  `Referencias/Supply_Llama…webp`; sonido propio sintetizado.
+
+### Comprobado (host, no PSP)
+
+`make match-sim` (prueba 17: catálogo, ráfaga, cohete contra pared con bots detrás/al lado,
+lanzagranadas, granada de mano, materiales de 6 bots, 600 partidas → 23 con llama, 150 con la
+llama forzada → siempre colocada, abrir y romper la llama), `make app-sim` (5e, 5f con
+capturas `31*` y `32*`), `make preview` (`20_armas_*`, `21_armas_en_mano_*`): 0 fallos.

@@ -77,6 +77,8 @@ public:
     int testSwapCursor() const { return m_swapCursor; }
     const camera::ThirdPersonCamera& testFollowCamera() const { return m_followCamera; }
     void testSetCameraAim(float yaw, float look) { m_followCamera.setAim(yaw, look); }
+    // La siguiente partida tiene llama seguro (para las capturas).
+    void testForceLlama(bool on) { m_testForceLlama = on; }
     math3d::Vec3 testAimPoint() const { return aimPointFrom(cameraEye(), m_followCamera.lookDirection()); }
     u32 testFootsteps() const { return m_playerSteps; }
     float testFogEnd() const { return m_fogEnd; }
@@ -128,6 +130,8 @@ private:
     // Mirilla del francotirador (L con el francotirador): vista desde la cabeza con zoom.
     bool sniperScoped() const;
     math3d::Vec3 scopeEye() const;
+    float scopeFov() const;  // campo de vision con la mirilla del arma en la mano
+    static audio::Sfx shotSound(int weaponType);
     void renderScope() const;
     game::CharacterState renderState(int id) const;
     int spectateTarget() const;
@@ -201,6 +205,7 @@ private:
     game::FixedTimestep m_timestep;
     game::CharacterModel m_models[kModelCount];
     bool m_modelsReady = false;
+    game::ItemModels m_items;  // armas, consumibles y proyectiles (en la mano y en el suelo)
     game::CharacterAnim m_playerAnim;
     game::CharacterAnim m_botAnims[game::kMaxBots];
     u32 m_playerSteps = 0;  // pisadas ya sonadas (CharacterAnim::footsteps)
@@ -230,6 +235,7 @@ private:
     int m_swapPickup = -1;
     int m_swapCursor = 0;
     bool m_wasScoped = false;        // la mirilla estaba puesta el frame anterior
+    bool m_testForceLlama = false;   // solo pruebas de host (testForceLlama)
     bool m_dancing = false;          // cruceta arriba: baile (hasta moverse o actuar)
     bool m_danceSoundOn = false;
     float m_danceSoundTimer = 0.0f;

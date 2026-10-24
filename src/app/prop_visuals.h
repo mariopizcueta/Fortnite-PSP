@@ -8,6 +8,7 @@
 
 #include <vector>
 
+#include "game/item_models.h"
 #include "game/match.h"
 #include "math/math3d.h"
 #include "world/scene_builder.h"
@@ -20,9 +21,14 @@ public:
     bool build();
     void destroy();
 
-    // Cofres, cajas, airdrops y objetos del suelo cercanos (opaco). Requiere gfx::begin3D().
+    // Cofres, cajas, airdrops, la llama y objetos del suelo cercanos (opaco; las armas y
+    // consumibles con los modelos de `items`). Requiere gfx::begin3D().
     void drawLoot(const game::Match& match, const math3d::Frustum& frustum, const math3d::Vec3& eye,
-                  float maxDistance, float time, const world::TextureLibrary& textures) const;
+                  float maxDistance, float time, const world::TextureLibrary& textures,
+                  const game::ItemModels& items) const;
+    // Cohetes y granadas en vuelo (opaco) y explosiones (translucidas, al final).
+    void drawProjectiles(const game::Match& match, const math3d::Frustum& frustum, const game::ItemModels& items) const;
+    void drawExplosions(const game::Match& match, const math3d::Frustum& frustum) const;
     // Haces de luz de rareza (translucidos): despues de todo lo opaco.
     void drawBeams(const game::Match& match, const math3d::Frustum& frustum, const math3d::Vec3& eye,
                    float time) const;
@@ -35,15 +41,15 @@ public:
 private:
     using Batches = std::vector<world::StaticBatch>;
     enum Mesh {
-        kChest, kChestOpen, kAmmoBox, kAirdrop, kBalloon, kBus, kGlider,
-        kRifle, kShotgun, kSmg, kSniper, kBandage, kMedkit, kSmallShield, kShieldPotion,
-        kAmmoLight, kAmmoMedium, kAmmoHeavy, kAmmoShells,
+        kChest, kChestOpen, kAmmoBox, kAirdrop, kBalloon, kBus, kGlider, kLlama,
+        kAmmoLight, kAmmoMedium, kAmmoHeavy, kAmmoShells, kAmmoRockets,
+        kMatWood, kMatStone, kMatMetal,
         kBeam0, kBeam1, kBeam2, kBeam3, kBeam4,
+        kBlast0, kBlast1, kBlast2,  // explosion: tres niveles de transparencia
         kMeshCount
     };
 
     void draw(Mesh mesh, const math3d::Mat4& model, const world::TextureLibrary* textures) const;
-    static Mesh pickupMesh(const game::Pickup& pickup);
 
     Batches m_meshes[kMeshCount];
     int m_triangles = 0;

@@ -158,30 +158,46 @@ u32 rarityColor(game::Rarity r) {
 // Recursos/HUD/Armas sobre el fondo de su rareza), o nullptr.
 const assets::ui::Rect* slotArt(game::ItemType type, game::Rarity rarity) {
     namespace a = assets::ui;
-    const int r = static_cast<int>(rarity);
+    // Por rareza (comun ... legendaria); en las rarezas en que no existe el arma, la mas
+    // cercana que si (no deberia ocurrir: game::weaponConfig hace lo mismo).
+    using Row = const a::Rect* [5];
+    static const Row kAR = {&a::kSlotAR0, &a::kSlotAR1, &a::kSlotAR2, &a::kSlotScar3, &a::kSlotScar};
+    static const Row kShotgun = {&a::kSlotShotgun1, &a::kSlotShotgun1, &a::kSlotShotgun2, &a::kSlotShotgun3, &a::kSlotShotgun4};
+    static const Row kSmg = {&a::kSlotSmg0, &a::kSlotSmg1, &a::kSlotSmg2, &a::kSlotSmg3, &a::kSlotSmg4};
+    static const Row kSniper = {&a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper3, &a::kSlotSniper4};
+    static const Row kBurst = {&a::kSlotBurst0, &a::kSlotBurst1, &a::kSlotBurst2, &a::kSlotBurst3, &a::kSlotBurst4};
+    static const Row kScoped = {&a::kSlotScoped2, &a::kSlotScoped2, &a::kSlotScoped2, &a::kSlotScoped3, &a::kSlotScoped3};
+    static const Row kSmg2 = {&a::kSlotSmg20, &a::kSlotSmg21, &a::kSlotSmg22, &a::kSlotSmg22, &a::kSlotSmg22};
+    static const Row kTactical = {&a::kSlotTactical0, &a::kSlotTactical1, &a::kSlotTactical2, &a::kSlotTactical3,
+                                  &a::kSlotTactical4};
+    static const Row kPistol = {&a::kSlotPistol0, &a::kSlotPistol1, &a::kSlotPistol2, &a::kSlotPistol2, &a::kSlotPistol2};
+    static const Row kRevolver = {&a::kSlotRevolver0, &a::kSlotRevolver1, &a::kSlotRevolver2, &a::kSlotRevolver2,
+                                  &a::kSlotRevolver2};
+    static const Row kSemi = {&a::kSlotSemiSniper1, &a::kSlotSemiSniper1, &a::kSlotSemiSniper2, &a::kSlotSemiSniper2,
+                              &a::kSlotSemiSniper2};
+    static const Row kRocket = {&a::kSlotRocket2, &a::kSlotRocket2, &a::kSlotRocket2, &a::kSlotRocket3, &a::kSlotRocket4};
+    static const Row kLauncher = {&a::kSlotLauncher2, &a::kSlotLauncher2, &a::kSlotLauncher2, &a::kSlotLauncher3,
+                                  &a::kSlotLauncher4};
+    const int r = static_cast<int>(rarity) < 5 ? static_cast<int>(rarity) : 4;
     switch (type) {
-        case game::ItemType::AssaultRifle: {
-            static const a::Rect* kArt[] = {&a::kSlotAR0, &a::kSlotAR1, &a::kSlotAR2, &a::kSlotAR3, &a::kSlotScar};
-            return kArt[r];
-        }
-        case game::ItemType::Shotgun: {
-            static const a::Rect* kArt[] = {&a::kSlotShotgun1, &a::kSlotShotgun1, &a::kSlotShotgun2, &a::kSlotShotgun3,
-                                            &a::kSlotShotgun4};
-            return kArt[r];
-        }
-        case game::ItemType::Smg: {
-            static const a::Rect* kArt[] = {&a::kSlotSmg0, &a::kSlotSmg1, &a::kSlotSmg2, &a::kSlotSmg3, &a::kSlotSmg4};
-            return kArt[r];
-        }
-        case game::ItemType::Sniper: {
-            static const a::Rect* kArt[] = {&a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper2, &a::kSlotSniper3,
-                                            &a::kSlotSniper4};
-            return kArt[r];
-        }
-        case game::ItemType::Bandage: return &assets::ui::kSlotVendas;
-        case game::ItemType::Medkit: return &assets::ui::kSlotBotiquin;
-        case game::ItemType::SmallShield: return &assets::ui::kSlotMinipocion;
-        case game::ItemType::ShieldPotion: return &assets::ui::kSlotPocionEscudo;
+        case game::ItemType::AssaultRifle: return kAR[r];
+        case game::ItemType::Shotgun: return kShotgun[r];
+        case game::ItemType::Smg: return kSmg[r];
+        case game::ItemType::Sniper: return kSniper[r];
+        case game::ItemType::BurstRifle: return kBurst[r];
+        case game::ItemType::ScopedRifle: return kScoped[r];
+        case game::ItemType::SubmachineGun: return kSmg2[r];
+        case game::ItemType::TacticalShotgun: return kTactical[r];
+        case game::ItemType::Pistol: return kPistol[r];
+        case game::ItemType::Revolver: return kRevolver[r];
+        case game::ItemType::SemiAutoSniper: return kSemi[r];
+        case game::ItemType::RocketLauncher: return kRocket[r];
+        case game::ItemType::GrenadeLauncher: return kLauncher[r];
+        case game::ItemType::Grenade: return &a::kSlotGrenade0;
+        case game::ItemType::Bandage: return &a::kSlotVendas;
+        case game::ItemType::Medkit: return &a::kSlotBotiquin;
+        case game::ItemType::SmallShield: return &a::kSlotMinipocion;
+        case game::ItemType::ShieldPotion: return &a::kSlotPocionEscudo;
         case game::ItemType::None:
         case game::ItemType::Count: break;
     }
@@ -844,7 +860,10 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     }
     // Nombre de lo que se lleva en la mano, sobre la fila de objetos.
     if (!m_buildMode && m_match.alive(0)) {
-        const char* name = inv.pickaxe() ? "Pico" : game::itemDef(inv.activeType()).name;
+        const game::InventorySlot& held = inv.slot(inv.selected());
+        const char* name = inv.pickaxe() ? "Pico"
+                           : game::isWeapon(held.type) ? held.weapon.config().name
+                                                        : game::itemDef(held.type).name;
         if (name[0]) gfx::text::printShadow(static_cast<int>(kWeaponSlotX), static_cast<int>(kWeaponRowY) - 12, kWhite,
                                             "%s", name);
     }

@@ -133,64 +133,6 @@ void buildGlider(SceneBuilder& b) {
     b.box(dark, dark, {-0.04f, -0.9f, -0.04f}, {0.04f, 0.15f, 0.04f});  // mastil
 }
 
-// Armas tumbadas a lo largo de X (como en el suelo de Fortnite).
-void buildWeapon(SceneBuilder& b, int type) {
-    const Material tan = flat(rgba(204, 172, 108));
-    const Material dark = flat(rgba(44, 44, 42));
-    const Material wood = flat(rgba(120, 70, 36));
-    switch (type) {
-        case 0:  // fusil de asalto / SCAR
-            b.box(tan, tan, {-0.30f, 0.05f, -0.04f}, {0.22f, 0.15f, 0.04f});
-            b.box(dark, dark, {0.22f, 0.08f, -0.02f}, {0.45f, 0.12f, 0.02f});
-            b.box(dark, dark, {-0.04f, -0.05f, -0.03f}, {0.04f, 0.05f, 0.03f});
-            b.box(dark, dark, {-0.10f, 0.15f, -0.025f}, {0.08f, 0.19f, 0.025f});
-            break;
-        case 1:  // escopeta de corredera
-            b.box(wood, wood, {-0.40f, 0.04f, -0.035f}, {-0.05f, 0.13f, 0.035f});
-            b.box(dark, dark, {-0.05f, 0.07f, -0.03f}, {0.42f, 0.13f, 0.03f});
-            b.box(wood, wood, {0.12f, 0.03f, -0.04f}, {0.28f, 0.08f, 0.04f});
-            break;
-        case 2:  // subfusil con silenciador
-            b.box(dark, dark, {-0.22f, 0.05f, -0.035f}, {0.12f, 0.15f, 0.035f});
-            b.box(flat(rgba(70, 70, 68)), dark, {0.12f, 0.08f, -0.03f}, {0.36f, 0.13f, 0.03f});
-            b.box(dark, dark, {-0.02f, -0.06f, -0.025f}, {0.04f, 0.05f, 0.025f});
-            break;
-        default:  // francotirador de cerrojo
-            b.box(tan, tan, {-0.48f, 0.04f, -0.035f}, {0.18f, 0.13f, 0.035f});
-            b.box(dark, dark, {0.18f, 0.08f, -0.018f}, {0.62f, 0.11f, 0.018f});
-            b.box(dark, dark, {-0.14f, 0.15f, -0.03f}, {0.12f, 0.21f, 0.03f});
-            break;
-    }
-}
-
-void buildConsumable(SceneBuilder& b, int type) {
-    switch (type) {
-        case 0: {  // vendas: dos rollos blancos con banda roja
-            const Material white = flat(rgba(236, 232, 222));
-            b.cylinder(white, white, {-0.08f, 0.0f, 0.0f}, 0.07f, 0.16f, 8, true);
-            b.cylinder(white, white, {0.09f, 0.0f, 0.02f}, 0.07f, 0.14f, 8, true);
-            b.cylinder(flat(rgba(196, 50, 40)), white, {-0.08f, 0.06f, 0.0f}, 0.072f, 0.04f, 8, false);
-            break;
-        }
-        case 1: {  // botiquin blanco con cruz roja
-            const Material white = flat(rgba(240, 240, 240));
-            const Material red = flat(rgba(214, 40, 40));
-            b.box(white, white, {-0.18f, 0.0f, -0.12f}, {0.18f, 0.24f, 0.12f});
-            b.box(red, red, {-0.04f, 0.04f, -0.13f}, {0.04f, 0.20f, -0.12f});
-            b.box(red, red, {-0.10f, 0.08f, -0.13f}, {0.10f, 0.16f, -0.12f});
-            break;
-        }
-        case 2:  // minipocion: frasco pequeno azul
-            b.cylinder(flat(rgba(70, 150, 235)), flat(rgba(120, 190, 250)), {0.0f, 0.0f, 0.0f}, 0.07f, 0.13f, 8, true);
-            b.cylinder(flat(rgba(214, 214, 214)), flat(rgba(214, 214, 214)), {0.0f, 0.13f, 0.0f}, 0.03f, 0.05f, 6, true);
-            break;
-        default:  // pocion de escudo: tarro azul con tapa
-            b.cylinder(flat(rgba(60, 130, 230)), flat(rgba(110, 180, 250)), {0.0f, 0.0f, 0.0f}, 0.12f, 0.22f, 8, true);
-            b.cylinder(flat(rgba(150, 150, 150)), flat(rgba(150, 150, 150)), {0.0f, 0.22f, 0.0f}, 0.07f, 0.05f, 8, true);
-            break;
-    }
-}
-
 void buildAmmo(SceneBuilder& b, u32 color) {
     const Material m = flat(color);
     b.box(m, m, {-0.13f, 0.0f, -0.09f}, {0.13f, 0.12f, 0.09f});
@@ -202,6 +144,67 @@ void buildBeam(SceneBuilder& b, u32 color) {
     const Material m = flat(color);
     b.quad(m, {-0.08f, 0.0f, 0.0f}, {0.08f, 0.0f, 0.0f}, {0.08f, 1.7f, 0.0f}, {-0.08f, 1.7f, 0.0f});
     b.quad(m, {0.0f, 0.0f, -0.08f}, {0.0f, 0.0f, 0.08f}, {0.0f, 1.7f, 0.08f}, {0.0f, 1.7f, -0.08f});
+}
+
+void buildMaterialPile(SceneBuilder& b, int resource) {
+    // Montones de materiales (como los iconos de Recursos/HUD: tablones, ladrillos, chapas).
+    switch (resource) {
+        case 0: {  // madera: tres tablones cruzados
+            const Material wood = textured(world::kTexWood, rgba(196, 140, 86), 0.8f);
+            b.box(wood, wood, {-0.22f, 0.0f, -0.07f}, {0.22f, 0.06f, 0.0f});
+            b.box(wood, wood, {-0.20f, 0.0f, 0.02f}, {0.24f, 0.06f, 0.09f});
+            b.setTransform(Mat4::rotationY(0.7f));
+            b.box(wood, wood, {-0.2f, 0.06f, -0.04f}, {0.2f, 0.12f, 0.04f});
+            b.resetTransform();
+            break;
+        }
+        case 1: {  // piedra: ladrillos
+            const Material brick = flat(rgba(170, 96, 70));
+            b.box(brick, brick, {-0.18f, 0.0f, -0.08f}, {0.0f, 0.08f, 0.08f});
+            b.box(brick, brick, {0.02f, 0.0f, -0.08f}, {0.20f, 0.08f, 0.08f});
+            b.box(brick, brick, {-0.08f, 0.08f, -0.08f}, {0.10f, 0.16f, 0.08f});
+            break;
+        }
+        default: {  // metal: chapas onduladas
+            const Material metal = flat(rgba(150, 156, 166));
+            b.box(metal, metal, {-0.2f, 0.0f, -0.14f}, {0.2f, 0.03f, 0.14f});
+            b.box(flat(rgba(120, 126, 136)), metal, {-0.16f, 0.03f, -0.10f}, {0.18f, 0.06f, 0.12f});
+            break;
+        }
+    }
+}
+
+void buildLlama(SceneBuilder& b) {
+    // Llama de suministros (Referencias/Supply_Llama): pinata morada con franjas azules y
+    // rosas, cuello largo, orejas, y la bolsa con la caja en el costado. Mira hacia -Z.
+    const Material purple = flat(rgba(150, 84, 206));
+    const Material blue = flat(rgba(76, 128, 232));
+    const Material pink = flat(rgba(232, 112, 196));
+    const Material teal = flat(rgba(90, 200, 210));
+    const Material dark = flat(rgba(40, 34, 50));
+    const Material brown = flat(rgba(120, 86, 56));
+    // Patas.
+    for (float x : {-0.17f, 0.11f}) {
+        for (float z : {-0.30f, 0.24f}) b.box(blue, blue, {x, 0.0f, z}, {x + 0.07f, 0.55f, z + 0.07f});
+    }
+    // Cuerpo en franjas (de abajo arriba).
+    b.box(pink, pink, {-0.24f, 0.52f, -0.42f}, {0.24f, 0.66f, 0.42f}, true);
+    b.box(blue, blue, {-0.25f, 0.66f, -0.44f}, {0.25f, 0.80f, 0.44f});
+    b.box(purple, purple, {-0.24f, 0.80f, -0.42f}, {0.24f, 0.98f, 0.42f});
+    b.box(teal, teal, {-0.06f, 0.88f, 0.42f}, {0.06f, 1.0f, 0.52f});  // cola
+    // Cuello y cabeza.
+    b.box(purple, purple, {-0.11f, 0.90f, -0.46f}, {0.11f, 1.38f, -0.24f});
+    b.box(pink, pink, {-0.115f, 1.05f, -0.47f}, {0.115f, 1.14f, -0.23f});
+    b.box(purple, purple, {-0.14f, 1.36f, -0.56f}, {0.14f, 1.58f, -0.22f});
+    b.box(blue, blue, {-0.09f, 1.36f, -0.70f}, {0.09f, 1.50f, -0.54f});  // hocico
+    b.box(dark, dark, {-0.145f, 1.47f, -0.48f}, {-0.135f, 1.52f, -0.42f});  // ojos
+    b.box(dark, dark, {0.135f, 1.47f, -0.48f}, {0.145f, 1.52f, -0.42f});
+    b.box(purple, pink, {-0.12f, 1.58f, -0.34f}, {-0.05f, 1.75f, -0.28f});  // orejas
+    b.box(purple, pink, {0.05f, 1.58f, -0.34f}, {0.12f, 1.75f, -0.28f});
+    // Bolsa en el costado derecho con la caja de suministros (azul claro, con dibujo).
+    b.box(brown, brown, {0.25f, 0.62f, -0.18f}, {0.32f, 0.96f, 0.22f});
+    b.box(flat(rgba(214, 222, 236)), flat(rgba(214, 222, 236)), {0.32f, 0.68f, -0.12f}, {0.36f, 0.92f, 0.16f});
+    b.box(dark, dark, {0.36f, 0.74f, -0.04f}, {0.365f, 0.86f, 0.08f});
 }
 
 const u32 kRarityBeam[5] = {rgba(200, 200, 200, 70), rgba(90, 220, 60, 80), rgba(70, 160, 255, 90),
@@ -226,20 +229,28 @@ bool PropVisuals::build() {
     finish(kBus);
     buildGlider(b);
     finish(kGlider);
-    for (int i = 0; i < 4; ++i) {
-        buildWeapon(b, i);
-        finish(static_cast<Mesh>(kRifle + i));
-        buildConsumable(b, i);
-        finish(static_cast<Mesh>(kBandage + i));
-    }
-    const u32 ammoColors[4] = {rgba(120, 140, 170), rgba(70, 130, 60), rgba(150, 40, 36), rgba(214, 90, 40)};
-    for (int i = 0; i < 4; ++i) {
+    buildLlama(b);
+    finish(kLlama);
+    // Municion: ligera, media, pesada, cartuchos y cohetes (verde con franja).
+    const u32 ammoColors[5] = {rgba(120, 140, 170), rgba(70, 130, 60), rgba(150, 40, 36), rgba(214, 90, 40),
+                               rgba(84, 102, 62)};
+    for (int i = 0; i < 5; ++i) {
         buildAmmo(b, ammoColors[i]);
         finish(static_cast<Mesh>(kAmmoLight + i));
+    }
+    for (int i = 0; i < 3; ++i) {
+        buildMaterialPile(b, i);
+        finish(static_cast<Mesh>(kMatWood + i));
     }
     for (int i = 0; i < 5; ++i) {
         buildBeam(b, kRarityBeam[i]);
         finish(static_cast<Mesh>(kBeam0 + i));
+    }
+    // Explosion: bola naranja con nucleo amarillo, en tres transparencias (se apaga).
+    const u32 alphas[3] = {190, 120, 60};
+    for (int i = 0; i < 3; ++i) {
+        sphere(b, flat(rgba(255, 140, 40, alphas[i])), flat(rgba(255, 210, 90, alphas[i])), {0.0f, 0.0f, 0.0f}, 1.0f, 5, 8);
+        finish(static_cast<Mesh>(kBlast0 + i));
     }
     m_triangles = 0;
     for (const Batches& list : m_meshes) {
@@ -263,22 +274,9 @@ void PropVisuals::draw(Mesh mesh, const Mat4& model, const world::TextureLibrary
     }
 }
 
-PropVisuals::Mesh PropVisuals::pickupMesh(const game::Pickup& p) {
-    if (p.kind == game::PickupKind::Ammo) return static_cast<Mesh>(kAmmoLight + static_cast<int>(p.ammo));
-    switch (p.item) {
-        case game::ItemType::AssaultRifle: return kRifle;
-        case game::ItemType::Shotgun: return kShotgun;
-        case game::ItemType::Smg: return kSmg;
-        case game::ItemType::Sniper: return kSniper;
-        case game::ItemType::Bandage: return kBandage;
-        case game::ItemType::Medkit: return kMedkit;
-        case game::ItemType::SmallShield: return kSmallShield;
-        default: return kShieldPotion;
-    }
-}
-
 void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frustum, const Vec3& eye,
-                           float maxDistance, float time, const world::TextureLibrary& textures) const {
+                           float maxDistance, float time, const world::TextureLibrary& textures,
+                           const game::ItemModels& items) const {
     const float containerRange = fminf(maxDistance, kContainerDrawDistance);
     for (const game::Container& c : match.containers()) {
         // Abierto: se ve un instante con la tapa levantada y desaparece (como en Fortnite).
@@ -293,6 +291,12 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
                 draw(kAirdrop, model, &textures);
                 if (!c.landed) draw(kBalloon, model, &textures);
                 break;
+            case game::ContainerKind::Llama: {
+                // Se balancea un poco (como la de Fortnite) y salta al recibir un golpe.
+                const float sway = 0.04f * sinf(time * 2.2f);
+                draw(kLlama, model * Mat4::rotationZ(sway), &textures);
+                break;
+            }
         }
     }
     const float lootRange = fminf(maxDistance, kLootDrawDistance);
@@ -304,8 +308,52 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
         // Gira y sube y baja un poco (desfasado por objeto).
         const float phase = static_cast<float>(i) * 1.7f;
         const Vec3 at = p.position + Vec3{0.0f, 0.25f + 0.06f * sinf(time * 2.0f + phase), 0.0f};
-        draw(pickupMesh(p), Mat4::translation(at) * Mat4::rotationY(time * 1.3f + phase), &textures);
+        const Mat4 spin = Mat4::translation(at) * Mat4::rotationY(time * 1.3f + phase);
+        if (p.kind == game::PickupKind::Ammo) {
+            draw(static_cast<Mesh>(kAmmoLight + static_cast<int>(p.ammo)), spin, &textures);
+        } else if (p.kind == game::PickupKind::Materials) {
+            draw(static_cast<Mesh>(kMatWood + static_cast<int>(p.resource)), spin, &textures);
+        } else {
+            // Armas y consumibles: su modelo, girando sobre su centro.
+            const game::ItemModel model = game::itemModelFor(p.item, p.rarity);
+            items.draw(model, spin * Mat4::translation(items.info(model).center * -1.0f));
+        }
     }
+    gfx::setModelMatrix(Mat4::identity());
+}
+
+void PropVisuals::drawProjectiles(const game::Match& match, const math3d::Frustum& frustum,
+                                  const game::ItemModels& items) const {
+    // Orientados segun su velocidad (el modelo mira hacia -Z).
+    for (int i = 0; i < game::Match::kMaxProjectiles; ++i) {
+        const game::Projectile& p = match.projectiles()[i];
+        if (!p.active || !frustum.sphereVisible(p.position, 0.5f)) continue;
+        const Vec3& v = p.velocity;
+        const float flat = sqrtf(v.x * v.x + v.z * v.z);
+        const float yaw = atan2f(-v.x, -v.z), pitch = atan2f(v.y, flat);
+        const game::ItemModel model = p.kind == game::ProjectileKind::Rocket            ? game::ItemModel::Rocket
+                                      : p.kind == game::ProjectileKind::LauncherGrenade ? game::ItemModel::LauncherGrenade
+                                                                                         : game::ItemModel::Grenade;
+        // La granada de mano da vueltas en el aire.
+        const Mat4 spin = p.kind == game::ProjectileKind::HandGrenade ? Mat4::rotationX(p.age * 12.0f) : Mat4::identity();
+        items.draw(model, Mat4::translation(p.position) * Mat4::rotationY(yaw) * Mat4::rotationX(pitch) * spin);
+    }
+    gfx::setModelMatrix(Mat4::identity());
+}
+
+void PropVisuals::drawExplosions(const game::Match& match, const math3d::Frustum& frustum) const {
+    // Bola de fuego que crece hasta el radio de la explosion en 0.35 s y se apaga.
+    constexpr float kLife = 0.45f;
+    gfx::setBlend(true);
+    for (int i = 0; i < game::Match::kMaxExplosions; ++i) {
+        const game::Explosion& e = match.explosions()[i];
+        if (e.age >= kLife || !frustum.sphereVisible(e.position, e.radius)) continue;
+        const float t = e.age / kLife;
+        const float r = e.radius * (0.35f + 0.65f * fminf(1.0f, e.age / 0.3f));
+        const Mesh mesh = t < 0.4f ? kBlast0 : (t < 0.75f ? kBlast1 : kBlast2);
+        draw(mesh, Mat4::translation(e.position) * Mat4::scale({r, r * 0.8f, r}), nullptr);
+    }
+    gfx::setBlend(false);
     gfx::setModelMatrix(Mat4::identity());
 }
 

@@ -19,6 +19,7 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/camera/third_person_camera.cpp" \
     "$ROOT/src/game/character.cpp" \
     "$ROOT/src/game/character_model.cpp" \
+    "$ROOT/src/game/item_models.cpp" \
     "$ROOT/tools/host/host_assets.S" \
     "$ROOT/tools/host/soft_gfx.cpp" \
     "$ROOT/src/gfx/mesh.cpp" \

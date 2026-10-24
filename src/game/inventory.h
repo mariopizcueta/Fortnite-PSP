@@ -4,9 +4,14 @@
 // Cada ranura de arma guarda su propio Weapon (cargador y recarga); la reserva es la
 // municion comun del inventario (ligera, media, pesada, cartuchos), como en Fortnite.
 // Cada objeto tiene su rareza: en las armas cambia el dano, la recarga y el nombre (el
-// fusil de asalto epico o legendario es la SCAR). Los consumibles siguen los valores de
-// Fortnite: vendas (+15 de vida hasta 75), botiquin (vida al maximo), minipocion (+25 de
-// escudo hasta 50) y pocion de escudo (+50 hasta 100).
+// fusil de asalto gris, verde o azul es el fusil generico; el epico o legendario, la SCAR).
+// Los consumibles siguen los valores de Fortnite: vendas (+15 de vida hasta 75), botiquin
+// (vida al maximo), minipocion (+25 de escudo hasta 50) y pocion de escudo (+50 hasta 100).
+// La granada es un arrojadizo: ocupa una ranura como un consumible y R la lanza.
+//
+// Parche (fase 8): armas de Recursos/Weapons (fusil de rafagas, fusil con mira, subfusil,
+// escopeta tactica, pistola, revolver, francotirador semiautomatico, lanzacohetes,
+// lanzagranadas y granada). Ver docs/BOTIN.md.
 #pragma once
 
 #include <psptypes.h>
@@ -17,12 +22,19 @@
 namespace game {
 
 enum class ItemType : u8 {
-    None, AssaultRifle, Shotgun, Smg, Sniper, Bandage, Medkit, SmallShield, ShieldPotion, Count
+    None, AssaultRifle, Shotgun, Smg, Sniper, Bandage, Medkit, SmallShield, ShieldPotion,
+    // Parche (fase 8).
+    BurstRifle, ScopedRifle, SubmachineGun, TacticalShotgun, Pistol, Revolver, SemiAutoSniper,
+    RocketLauncher, GrenadeLauncher, Grenade,
+    Count
 };
-enum class ItemKind : u8 { Empty, Weapon, Consumable };
+enum class ItemKind : u8 { Empty, Weapon, Consumable, Throwable };
 // Rareza (color del fondo de la ranura y del haz de luz del botin).
 enum class Rarity : u8 { Common, Uncommon, Rare, Epic, Legendary, Count };
-enum class AmmoType : u8 { Light, Medium, Heavy, Shells, Count };
+// Municion comun por tipo (Rockets: lanzacohetes y lanzagranadas).
+enum class AmmoType : u8 { Light, Medium, Heavy, Shells, Rockets, Count };
+// Familia de un arma: sonido, postura y preferencias de los bots.
+enum class WeaponClass : u8 { None, Rifle, Shotgun, Smg, Sniper, Pistol, Launcher };
 
 struct ItemDef {
     const char* name;
@@ -40,8 +52,13 @@ const ItemDef& itemDef(ItemType type);
 const char* rarityName(Rarity rarity);
 const char* ammoName(AmmoType type);
 bool isWeapon(ItemType type);
+WeaponClass weaponClass(ItemType type);
+// Armas con mirilla (L mira por ella): francotiradores y fusil con mira.
+bool hasScope(ItemType type);
 // Estadisticas de un arma segun su rareza (dano, recarga, nombre). Ver docs/BOTIN.md.
 WeaponConfig weaponConfig(ItemType type, Rarity rarity);
+// La granada de mano: explota como las del lanzagranadas (dano, radio, espoleta).
+WeaponConfig grenadeConfig();
 // Rarezas en las que existe cada arma (p. ej. el francotirador de cerrojo, de rara arriba).
 bool weaponHasRarity(ItemType type, Rarity rarity);
 // Municion que trae un arma o una caja (por recogida).
@@ -118,7 +135,7 @@ public:
 
 private:
     InventorySlot m_slots[kSlots];
-    int m_ammo[static_cast<int>(AmmoType::Count)] = {0, 0, 0, 0};
+    int m_ammo[static_cast<int>(AmmoType::Count)] = {};
     int m_selected = 0;
     bool m_pickaxe = false;
 };

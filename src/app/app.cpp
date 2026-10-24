@@ -134,6 +134,10 @@ void App::init() {
     for (int i = 0; i < kModelCount; ++i) m_modelsReady &= m_models[i].build(*palettes[i]);
     platform::log::write("modelos de personaje: %s, %d triangulos (%d el de lejos)",
                          m_modelsReady ? "ok" : "ERROR", m_models[0].triangles(), m_models[0].lowDetailTriangles());
+    if (!m_items.build()) platform::log::write("ERROR: modelos de armas y objetos");
+    platform::log::write("modelos de objetos: SCAR %d triangulos (%d el de lejos), lanzacohetes %d",
+                         m_items.triangles(game::ItemModel::Scar), m_items.triangles(game::ItemModel::Scar, true),
+                         m_items.triangles(game::ItemModel::RocketLauncher));
     m_buildVisualsReady = m_buildVisuals.build(m_matchConfig.build);
     m_propsReady = m_props.build();
     platform::log::write("botin, autobus y ala delta: %s, %d triangulos en total", m_propsReady ? "ok" : "ERROR",
@@ -181,6 +185,7 @@ void App::startMatch() {
     m_matchConfig.botCount = m_botCount;
     // Semilla distinta en cada partida (el reloj del sistema).
     m_matchConfig.seed = static_cast<u32>(core::nowMicros()) ^ (0x9E3779B9u * ++m_matchesPlayed);
+    m_matchConfig.forceLlama = m_testForceLlama;
     m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(),
                   kPlayerSpawn, kPlayerSpawnYaw);
     m_match.setPlayerName(m_profile.name);
@@ -247,6 +252,7 @@ void App::shutdown() {
     m_propsReady = false;
     for (game::CharacterModel& m : m_models) m.destroy();
     m_modelsReady = false;
+    m_items.destroy();
     m_world.destroy();
     m_worldReady = false;
     gfx::destroyTexture(m_minimap);
@@ -601,6 +607,23 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     m_followCamera.update(cam, followed.position, followed.yaw, dt, recenter, lock, &m_world.collision());
 }
 
+audio::Sfx App::shotSound(int weaponType) {
+    const game::ItemType type = static_cast<game::ItemType>(weaponType);
+    switch (type) {
+        case game::ItemType::Sniper: return audio::Sfx::SniperShot;
+        case game::ItemType::RocketLauncher: return audio::Sfx::RocketLaunch;
+        case game::ItemType::GrenadeLauncher: return audio::Sfx::GrenadeLaunch;
+        default: break;
+    }
+    switch (game::weaponClass(type)) {
+        case game::WeaponClass::Shotgun: return audio::Sfx::ShotgunShot;
+        case game::WeaponClass::Smg: return audio::Sfx::SmgShot;
+        case game::WeaponClass::Sniper: return audio::Sfx::SniperShot;  // semiautomatico
+        case game::WeaponClass::Pistol: return audio::Sfx::PistolShot;
+        default: return audio::Sfx::Shot;  // fusiles (y bots con las reglas clasicas)
+    }
+}
+
 void App::playSfx(audio::Sfx sfx, float volume, float pan) const {
     if (m_audioReady) audio::mixer().play(sfx, volume, pan);
 }
@@ -697,11 +720,8 @@ void App::processEvents() {
         const game::GameEvent& e = m_match.event(m_eventCursor);
         switch (e.type) {
             case game::GameEventType::Shot: {
-                // Cada arma con su sonido (other = tipo de arma).
-                const audio::Sfx shot = e.other == static_cast<int>(game::ItemType::Shotgun) ? audio::Sfx::ShotgunShot
-                                        : e.other == static_cast<int>(game::ItemType::Smg) ? audio::Sfx::SmgShot
-                                        : e.other == static_cast<int>(game::ItemType::Sniper) ? audio::Sfx::SniperShot
-                                                                                               : audio::Sfx::Shot;
+                // Cada familia de armas con su sonido (other = tipo de arma).
+                const audio::Sfx shot = shotSound(e.other);
                 if (e.entity == 0) {
                     playSfx(shot, 0.85f);
                     m_playerAnim.onShot();
@@ -747,7 +767,15 @@ void App::processEvents() {
                 break;
             case game::GameEventType::ContainerOpened:
                 if (e.entity == 0 && m_audioReady) audio::mixer().stop(audio::Sfx::ChestHum);
-                if (e.entity == 0) playSfx(audio::Sfx::ChestOpen, 0.9f);
+                // Cada contenedor con su sonido: la caja de municion ya no usa el del cofre.
+                if (e.entity == 0 || e.other == static_cast<int>(game::ContainerKind::Llama)) {
+                    switch (static_cast<game::ContainerKind>(e.other)) {
+                        case game::ContainerKind::Chest:
+                        case game::ContainerKind::Airdrop: playSfx(audio::Sfx::ChestOpen, 0.9f); break;
+                        case game::ContainerKind::AmmoBox: playSfx(audio::Sfx::AmmoBoxOpen, 0.9f); break;
+                        case game::ContainerKind::Llama: playSpatial(audio::Sfx::LlamaOpen, e.position, 1.0f); break;
+                    }
+                }
                 break;
             case game::GameEventType::PickedUp:
                 if (e.entity == 0) playSfx(audio::Sfx::Pickup, 0.8f);
@@ -756,6 +784,16 @@ void App::processEvents() {
                 m_airdropMessage = 5.0f;
                 break;
             case game::GameEventType::AirdropLanded:
+            case game::GameEventType::LlamaSpawned:
+                break;
+            case game::GameEventType::Explosion:
+                playSpatial(audio::Sfx::Explosion, e.position, 1.0f);
+                break;
+            case game::GameEventType::Thrown:
+                if (e.entity == 0) {
+                    playSfx(audio::Sfx::GrenadeThrow, 0.8f);
+                    m_playerAnim.onSwing();
+                }
                 break;
             case game::GameEventType::WallRemoved:
                 playSfx(audio::Sfx::WallBuild, 0.5f);
@@ -887,13 +925,18 @@ void App::updateScopeTransition() {
 }
 
 bool App::sniperScoped() const {
-    // L con el francotirador en la mano, a pie: vista por la mirilla.
+    // L con un arma con mirilla en la mano (francotiradores, fusil con mira), a pie.
     if (!m_aimHeld || m_buildMode || m_freeCameraActive || !m_match.alive(0) ||
         m_match.airState(0) != game::AirState::Ground || m_results != Results::None) {
         return false;
     }
     const game::Inventory& inv = m_match.inventory();
-    return !inv.pickaxe() && inv.slot(inv.selected()).type == game::ItemType::Sniper;
+    return !inv.pickaxe() && game::hasScope(inv.slot(inv.selected()).type);
+}
+
+float App::scopeFov() const {
+    const game::Weapon* w = m_match.inventory().activeWeapon();
+    return w && w->config().scopeFov > 0.0f ? w->config().scopeFov : kScopeFovDegrees;
 }
 
 Vec3 App::scopeEye() const {
@@ -958,7 +1001,7 @@ void App::renderGame(const FrameInfo& frame) {
         // Con la mirilla: primera persona y el campo de vision cerrado (zoom x4 aprox.).
         camera::Projection lens = m_projection;
         const bool scoped = sniperScoped();
-        if (scoped) lens.fovYDegrees = m_projection.fovYDegrees + (kScopeFovDegrees - m_projection.fovYDegrees) * m_scopeZoom;
+        if (scoped) lens.fovYDegrees = m_projection.fovYDegrees + (scopeFov() - m_projection.fovYDegrees) * m_scopeZoom;
         const math3d::Mat4 projection = lens.matrix();
         const Vec3 scopeFrom = scopeEye();
         const math3d::Mat4 view =
@@ -983,8 +1026,10 @@ void App::renderGame(const FrameInfo& frame) {
         if (m_propsReady) {
             // El autobus (si alguien sigue dentro o se ve desde abajo) y el botin cercano.
             m_props.drawBus(m_match.busPosition(), m_world.textures());
-            m_props.drawLoot(m_match, frustum, cameraEye(), drawDistance, m_match.elapsed(), m_world.textures());
+            m_props.drawLoot(m_match, frustum, cameraEye(), drawDistance, m_match.elapsed(), m_world.textures(), m_items);
+            m_props.drawProjectiles(m_match, frustum, m_items);
             m_props.drawBeams(m_match, frustum, cameraEye(), m_match.elapsed());
+            m_props.drawExplosions(m_match, frustum);
         }
         m_world.drawStormWall(frustum, cameraEye(), drawDistance);
         // La que se cierra, mientras no abarque ya todo el mapa.
@@ -1037,10 +1082,11 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
     if (m_match.airState(0) != game::AirState::Bus && !sniperScoped() && visible(player.position)) {
         // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
         const game::Inventory& inv = m_match.inventory();
-        const game::HeldItem held = m_dancing        ? game::HeldItem::Empty
-                                    : inv.pickaxe() ? game::HeldItem::Pickaxe
-                                                    : game::heldItemFor(inv.activeType());
-        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0));
+        const game::InventorySlot& slot = inv.slot(inv.selected());
+        const game::ItemModel held = m_dancing        ? game::ItemModel::None
+                                     : inv.pickaxe() ? game::ItemModel::Pickaxe
+                                                     : game::itemModelFor(slot.type, slot.rarity);
+        m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0), &m_items);
         if (m_propsReady && m_match.airState(0) == game::AirState::Glide) m_props.drawGlider(player.position, player.yaw);
         triangles += m_models[0].triangles();
     }
@@ -1056,10 +1102,10 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         const bool far = math3d::length(s.position - eye) > kCharacterLodDistance;
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
         // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
-        const game::HeldItem held = !b.armed ? game::HeldItem::Pickaxe
-                                    : b.weaponType == game::ItemType::None ? game::HeldItem::Rifle
-                                                                           : game::heldItemFor(b.weaponType);
-        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id));
+        const game::ItemModel held = !b.armed ? game::ItemModel::Pickaxe
+                                     : b.weaponType == game::ItemType::None ? game::ItemModel::AssaultRifle
+                                                                            : game::itemModelFor(b.weaponType, b.weaponRarity);
+        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id), &m_items);
         if (m_propsReady && m_match.airState(id) == game::AirState::Glide) m_props.drawGlider(s.position, s.yaw);
         triangles += far ? model.lowDetailTriangles() : model.triangles();
     }

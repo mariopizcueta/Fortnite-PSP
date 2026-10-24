@@ -19,6 +19,7 @@
 
 #include "game/character.h"
 #include "game/inventory.h"
+#include "game/item_models.h"
 #include "gfx/mesh.h"
 #include "gfx/texture.h"
 #include "world/scene_builder.h"
@@ -67,23 +68,9 @@ struct CharacterAnim {
     void onSwing() { swing = 1.0f; }
 };
 
-// Lo que lleva en la mano derecha.
-// Lo que se lleva en la mano derecha: Rifle = fusil de asalto (SCAR).
-enum class HeldItem : u8 { Rifle, Pickaxe, Empty, Shotgun, Smg, Sniper };
-// Postura del cuerpo: normal, caida libre (tumbado boca abajo, brazos y piernas abiertos)
-// o colgado del ala delta (brazos arriba).
-// Modelo en la mano para cada tipo de arma (los consumibles no se ven en la mano).
-inline HeldItem heldItemFor(ItemType type) {
-    switch (type) {
-        case ItemType::AssaultRifle: return HeldItem::Rifle;
-        case ItemType::Shotgun: return HeldItem::Shotgun;
-        case ItemType::Smg: return HeldItem::Smg;
-        case ItemType::Sniper: return HeldItem::Sniper;
-        default: return HeldItem::Empty;
-    }
-}
-
-// Agachado (CRUCETA abajo) y bailando (CRUCETA arriba) solo los usa el jugador.
+// Postura del cuerpo: normal, caida libre (tumbado boca abajo, brazos y piernas abiertos),
+// colgado del ala delta (brazos arriba), agachado (CRUCETA abajo) o bailando (CRUCETA
+// arriba). Lo que se lleva en la mano es un game::ItemModel (item_models.h).
 enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance };
 
 class CharacterModel {
@@ -94,21 +81,18 @@ public:
     // Dibuja sombra + personaje. `eliminated`: cae y queda tumbado boca arriba (si la
     // animacion no ha contado la caida, aparece ya tumbado). `lowDetail`: version de
     // pocos poligonos para personajes lejanos. Requiere gfx::begin3D().
+    // `held`: lo que lleva en la mano derecha (de `items`; None o sin `items`: nada).
     void draw(const CharacterState& state, const CharacterAnim& anim,
               const world::TextureLibrary& textures, bool eliminated,
-              HeldItem held = HeldItem::Rifle, bool lowDetail = false,
-              BodyPose pose = BodyPose::Normal) const;
+              ItemModel held = ItemModel::None, bool lowDetail = false,
+              BodyPose pose = BodyPose::Normal, const ItemModels* items = nullptr) const;
 
-    // Triangulos del nivel de detalle alto / bajo (con el rifle).
+    // Triangulos del nivel de detalle alto / bajo (sin lo que lleva en la mano).
     int triangles() const { return m_triangles[0]; }
     int lowDetailTriangles() const { return m_triangles[1]; }
 
 private:
-    enum PartId {
-        kBody, kUpperArmL, kUpperArmR, kForearmL, kForearmRifle, kForearmPickaxe, kForearmEmpty,
-        kForearmShotgun, kForearmSmg, kForearmSniper,
-        kThighL, kThighR, kShinL, kShinR, kPartCount
-    };
+    enum PartId { kBody, kUpperArmL, kUpperArmR, kForearmL, kForearmR, kThighL, kThighR, kShinL, kShinR, kPartCount };
     struct Lod {
         gfx::Mesh parts[kPartCount];
     };

@@ -151,26 +151,70 @@ BUTTONS = {
 RARITY_COLORS = [((150, 156, 162), (92, 98, 104)), ((104, 196, 62), (40, 120, 22)),
                  ((70, 170, 240), (26, 92, 186)), ((186, 96, 236), (104, 40, 166)),
                  ((246, 172, 54), (192, 104, 20))]
-# Rarezas en las que existe cada arma (mismo criterio que game::weaponHasRarity).
+# Rarezas en las que existe cada arma (mismo criterio que game::weaponHasRarity) y su icono:
+# las siluetas de Recursos/HUD/Armas o las imagenes de Recursos/Weapons (parche, fase 8).
 WEAPON_SLOTS = {
-    "AR": ("fusil.png", [0, 1, 2, 3]),        # la legendaria es Recursos/Weapons/AssaultRiffleLegendary.png
-    "Shotgun": ("escopeta.png", [1, 2, 3, 4]),
-    "Smg": ("subfusil.png", [0, 1, 2, 3, 4]),
-    "Sniper": ("francotirador.png", [2, 3, 4]),
+    # Fusil de asalto: gris, verde y azul con el fusil generico (Assault_rifle_icon.png); el
+    # morado con la silueta de la SCAR; el dorado es Recursos/Weapons/AssaultRiffleLegendary.png.
+    "AR": ("Weapons/Assault_rifle_icon.png", [0, 1, 2]),
+    "Scar": ("HUD/Armas/fusil.png", [3]),
+    "Shotgun": ("HUD/Armas/escopeta.png", [1, 2, 3, 4]),
+    "Smg": ("HUD/Armas/subfusil.png", [0, 1, 2, 3, 4]),
+    "Sniper": ("HUD/Armas/francotirador.png", [2, 3, 4]),
+    "Burst": ("Weapons/Burst_Assault_Rifle_-_Weapon_-_Fortnite.webp", [0, 1, 2, 3, 4]),
+    "Scoped": ("Weapons/Scoped_Assault_Rifle_-_Weapon_-_Fortnite.webp", [2, 3]),
+    "Smg2": ("Weapons/Submachine_Gun_%28v1.6%29_-_Weapon_-_Fortnite.webp", [0, 1, 2]),
+    "Tactical": ("Weapons/Tactical_Shotgun.webp", [0, 1, 2, 3, 4]),
+    "Pistol": ("Weapons/pistola.png", [0, 1, 2]),
+    "Revolver": ("Weapons/revolver.jpeg", [0, 1, 2]),
+    "SemiSniper": ("Weapons/Icon_Weapons_SK_Sniper_02_L.webp", [1, 2]),
+    "Rocket": ("Weapons/Bazooka_-_Schematic_-_Save_the_World.webp", [2, 3, 4]),
+    "Launcher": ("Weapons/Icon_Weapons_SK_Grenade_Launcher_L.webp", [2, 3, 4]),
+    "Grenade": ("Weapons/Granada.png", [0]),
 }
 
 
-def weapon_slot(icon_name, rarity, size=32):
-    """Ranura de arma: degradado de la rareza y la silueta (Recursos/HUD/Armas) encima."""
+def remove_white_background(img, tolerance=24):
+    """Quita el fondo blanco de una imagen sin transparencia (Recursos/Weapons/revolver.jpeg):
+    relleno desde los bordes de los pixeles casi blancos. El fichero original no se toca."""
+    img = img.convert("RGBA")
+    px = img.load()
+    w, h = img.size
+    near_white = lambda c: c[0] > 255 - tolerance and c[1] > 255 - tolerance and c[2] > 255 - tolerance
+    seen = set()
+    stack = [(x, y) for x in range(w) for y in (0, h - 1)] + [(x, y) for y in range(h) for x in (0, w - 1)]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in seen or not (0 <= x < w and 0 <= y < h):
+            continue
+        seen.add((x, y))
+        if not near_white(px[x, y]):
+            continue
+        px[x, y] = (255, 255, 255, 0)
+        stack.extend(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
+    return img
+
+
+def weapon_icon(path):
+    img = Image.open(RES / path)
+    if img.mode != "RGBA":
+        img = remove_white_background(img)
+    return alpha_crop(img.convert("RGBA"), 8)
+
+
+def weapon_slot(icon_path, rarity, size=32):
+    """Ranura de arma: degradado de la rareza y el icono del arma encima (sin deformarlo,
+    centrado en 30x30)."""
     top, bottom = RARITY_COLORS[rarity]
     slot = Image.new("RGBA", (size, size))
     draw = ImageDraw.Draw(slot)
     for y in range(size):
         t = y / (size - 1)
         draw.line((0, y, size, y), fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,))
-    icon = Image.open(RES / "HUD" / "Armas" / icon_name).convert("RGBA").resize((size - 2, size - 2), Image.LANCZOS)
+    icon = weapon_icon(icon_path)
+    icon.thumbnail((size - 2, size - 2), Image.LANCZOS)
     icon.putalpha(icon.getchannel("A").point(lambda v: 255 if v > 100 else 0))
-    slot.alpha_composite(icon, (1, 1))
+    slot.alpha_composite(icon, ((size - icon.width) // 2, (size - icon.height) // 2))
     return slot
 
 

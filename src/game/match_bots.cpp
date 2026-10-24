@@ -626,10 +626,12 @@ void Match::botShoot(int index) {
 
 float Match::botAttackRange(const Bot& b) const {
     if (!b.armed) return 1.8f;
-    switch (b.weaponType) {
-        case ItemType::Shotgun: return 7.0f;
-        case ItemType::Smg: return 15.0f;
-        case ItemType::Sniper: return 38.0f;
+    switch (weaponClass(b.weaponType)) {
+        case WeaponClass::Shotgun: return 7.0f;
+        case WeaponClass::Smg: return 15.0f;
+        case WeaponClass::Pistol: return 14.0f;
+        case WeaponClass::Sniper: return 38.0f;
+        case WeaponClass::Launcher: return 24.0f;  // y nunca a menos de 8 m (botEquip)
         default: return m_config.attackRange;
     }
 }
@@ -646,11 +648,13 @@ bool Match::findLoot(int index, float maxDistance) {
         const Container& c = m_containers[i];
         if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox) continue;
         if (c.claimedBy >= 0 && c.claimedBy != self) continue;
-        if (b.armed && c.kind != ContainerKind::Airdrop && b.bag.full()) continue;
+        // El airdrop y la llama merecen la pena aunque ya vaya armado.
+        const bool special = c.kind == ContainerKind::Airdrop || c.kind == ContainerKind::Llama;
+        if (b.armed && !special && b.bag.full()) continue;
         const float d = distXZ(c.position, pos);
-        const float limit = c.kind == ContainerKind::Airdrop ? maxDistance * 3.0f : maxDistance;
+        const float limit = special ? maxDistance * 3.0f : maxDistance;
         if (d > limit || stormDepthAt(c.position.x, c.position.z) > -4.0f) continue;
-        const float score = c.kind == ContainerKind::Airdrop ? d * 0.4f : d;
+        const float score = special ? d * 0.4f : d;
         if (score < best) {
             best = score;
             container = static_cast<int>(i);

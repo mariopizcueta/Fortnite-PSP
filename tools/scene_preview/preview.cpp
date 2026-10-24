@@ -19,6 +19,7 @@
 #include "core/config.h"
 #include "game/character.h"
 #include "game/character_model.h"
+#include "game/item_models.h"
 #include "game/nav_grid.h"
 #include "game/structures.h"
 #include "input/input.h"
@@ -126,6 +127,11 @@ int main(int argc, char** argv) {
         }
     }
     printf("modelo de personaje: %d triangulos\n", models[0].triangles());
+    game::ItemModels items;
+    if (!items.build()) {
+        fprintf(stderr, "ERROR construyendo los modelos de armas\n");
+        return 1;
+    }
 
     struct Actor {
         int model;
@@ -246,8 +252,8 @@ int main(int argc, char** argv) {
             w.draw(math3d::Frustum::fromMatrix(proj * view), c.eye, config::kFogEnd);
             // Jugador apuntando con el fusil, escopeta corriendo, subfusil agachado y
             // francotirador bailando (el baile no lleva nada en la mano).
-            const game::HeldItem held[4] = {game::HeldItem::Rifle, game::HeldItem::Shotgun, game::HeldItem::Smg,
-                                            game::HeldItem::Empty};
+            const game::ItemModel held[4] = {game::ItemModel::Scar, game::ItemModel::PumpShotgun,
+                                             game::ItemModel::SuppressedSmg, game::ItemModel::None};
             const game::BodyPose poses[4] = {game::BodyPose::Normal, game::BodyPose::Normal, game::BodyPose::Crouch,
                                              game::BodyPose::Dance};
             for (int i = 0; i < c.count; ++i) {
@@ -258,7 +264,7 @@ int main(int argc, char** argv) {
                 game::CharacterAnim anim;
                 for (int k = 0; k < 40; ++k) anim.update(s, i == 0 && c.count > 1, true, 1.0f / 60.0f);
                 models[i].draw(s, anim, w.textures(), false, held[i], false,
-                               c.count == 1 ? game::BodyPose::Normal : poses[i]);
+                               c.count == 1 ? game::BodyPose::Normal : poses[i], &items);
             }
             char path[512];
             snprintf(path, sizeof(path), "%s/%s.png", outDir, c.name);
@@ -314,6 +320,75 @@ int main(int argc, char** argv) {
         structures.reset(w.mutableCollision(), noNav, build);
     }
 
+    // --- Parche (fase 8): galeria de armas y objetos, y cada arma en la mano ----------------
+    {
+        const Mat4 proj = Mat4::perspective(math3d::toRadians(40.0f), 480.0f / 272.0f, 0.1f, 50.0f);
+        const game::ItemModel gallery[] = {
+            game::ItemModel::AssaultRifle, game::ItemModel::Scar,          game::ItemModel::BurstRifle,
+            game::ItemModel::ScopedRifle,  game::ItemModel::SuppressedSmg, game::ItemModel::Smg,
+            game::ItemModel::PumpShotgun,  game::ItemModel::TacticalShotgun, game::ItemModel::Pistol,
+            game::ItemModel::Revolver,     game::ItemModel::BoltSniper,    game::ItemModel::SemiAutoSniper,
+            game::ItemModel::RocketLauncher, game::ItemModel::GrenadeLauncher, game::ItemModel::Grenade,
+            game::ItemModel::Pickaxe,      game::ItemModel::Bandage,       game::ItemModel::Medkit,
+            game::ItemModel::SmallShield,  game::ItemModel::ShieldPotion,  game::ItemModel::Rocket,
+        };
+        const int n = sizeof(gallery) / sizeof(gallery[0]);
+        // Paginas de 6 (3 x 2), de perfil y algo girados, para verlos de cerca.
+        int tris = 0;
+        char path[512];
+        for (int page = 0; page * 6 < n; ++page) {
+            clear(gfx::rgba(40, 60, 110));
+            const Mat4 view = Mat4::lookAt({0.0f, 0.0f, 2.6f}, {0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f});
+            gfx::FogSettings none;
+            none.enabled = false;
+            gfx::begin3D(proj, view, none);
+            for (int k = 0; k < 6 && page * 6 + k < n; ++k) {
+                const game::ItemModel model = gallery[page * 6 + k];
+                const float x = -0.75f + 0.75f * (k % 3), y = 0.32f - 0.62f * (k / 3);
+                const Mat4 m = Mat4::translation({x, y, 0.0f}) * Mat4::rotationY(-0.5f * pi + 0.45f) *
+                               Mat4::rotationX(0.2f) * Mat4::scale({0.85f, 0.85f, 0.85f}) *
+                               Mat4::translation(items.info(model).center * -1.0f);
+                items.draw(model, m);
+                tris += items.triangles(model);
+            }
+            snprintf(path, sizeof(path), "%s/20_armas_%d.png", outDir, page + 1);
+            savePng(path, true);
+        }
+        printf("20_armas_N         %d modelos, %d triangulos en total\n", n, tris);
+
+        // Cada arma en la mano del personaje (apuntando y corriendo).
+        const game::ItemModel held[] = {game::ItemModel::AssaultRifle, game::ItemModel::BurstRifle,
+                                        game::ItemModel::Smg,          game::ItemModel::TacticalShotgun,
+                                        game::ItemModel::Pistol,       game::ItemModel::SemiAutoSniper,
+                                        game::ItemModel::RocketLauncher, game::ItemModel::GrenadeLauncher};
+        const Mat4 proj2 = Mat4::perspective(math3d::toRadians(config::kFovYDegrees), 480.0f / 272.0f, 0.2f, 140.0f);
+        for (int pass = 0; pass < 2; ++pass) {
+            clear(config::kColorSky);
+            const Vec3 eye{pass == 0 ? 2.6f : -2.6f, 1.6f, 34.4f}, target{0.0f, 1.0f, 30.0f};
+            const Mat4 v = Mat4::lookAt(eye, target, {0.0f, 1.0f, 0.0f});
+            gfx::FogSettings fog;
+            fog.enabled = true;
+            fog.start = config::kFogStart;
+            fog.end = config::kFogEnd;
+            fog.color = config::kColorSky;
+            gfx::begin3D(proj2, v, fog);
+            w.draw(math3d::Frustum::fromMatrix(proj2 * v), eye, config::kFogEnd);
+            for (int i = 0; i < 8; ++i) {
+                game::CharacterState s;
+                s.position = {-3.5f + 1.0f * i, 0.0f, 30.0f - 0.4f * (i % 2)};
+                s.yaw = pi * 0.85f;
+                s.velocity = pass == 1 ? game::forwardFromYaw(s.yaw) * 5.5f : Vec3{0, 0, 0};
+                game::CharacterAnim anim;
+                for (int k = 0; k < 40; ++k) anim.update(s, pass == 0, true, 1.0f / 60.0f);
+                models[i % 4].draw(s, anim, w.textures(), false, held[i], false, game::BodyPose::Normal, &items);
+            }
+            snprintf(path, sizeof(path), "%s/21_armas_en_mano_%s.png", outDir, pass == 0 ? "apuntando" : "corriendo");
+            savePng(path, true);
+            printf("21_armas_en_mano_%s\n", pass == 0 ? "apuntando" : "corriendo");
+        }
+    }
+
+    items.destroy();
     for (game::CharacterModel& m : models) m.destroy();
     w.destroy();
     return 0;

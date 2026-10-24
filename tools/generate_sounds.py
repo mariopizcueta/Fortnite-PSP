@@ -193,12 +193,98 @@ def recoger():
     return normalize(arpeggio([880.0, 1318.5], 0.05, 0.05, 0.16), 0.4)
 
 
+# --- Parche (fase 8): sonidos que no hay en Recursos/Sonidos -----------------------------------
+
+def pistola():
+    # Pistola / revolver: chasquido seco y agudo con cola corta.
+    tt = t(0.22)
+    crack = lowpass(rng.uniform(-1, 1, len(tt)), 0.55) * env(len(tt), 0.0005, 0.02)
+    body = np.sin(2 * math.pi * (180 - 60 * tt / 0.22) * tt) * env(len(tt), 0.001, 0.04)
+    return normalize(crack + body * 0.6, 0.8)
+
+
+def cohete():
+    # Lanzacohetes: golpe grave y el silbido del motor que se aleja.
+    tt = t(0.7)
+    thump = np.sin(2 * math.pi * (60 - 20 * tt / 0.7) * tt) * env(len(tt), 0.002, 0.10)
+    hiss = lowpass(rng.uniform(-1, 1, len(tt)), 0.6) * env(len(tt), 0.02, 0.30)
+    return normalize(thump + hiss * 0.6, 0.8)
+
+
+def lanzagranadas():
+    # Lanzagranadas: "plop" hueco.
+    tt = t(0.25)
+    plop = np.sin(2 * math.pi * (240 - 160 * tt / 0.25) * tt) * env(len(tt), 0.001, 0.06)
+    air = lowpass(rng.uniform(-1, 1, len(tt)), 0.3) * env(len(tt), 0.001, 0.03)
+    return normalize(plop + air * 0.5, 0.75)
+
+
+def granada_lanzar():
+    # Lanzar una granada: el seguro (clic) y el silbido del brazo.
+    out = np.zeros(int(0.35 * RATE))
+    ct = t(0.04)
+    out[:len(ct)] += (square(1500, ct) * 0.5 + rng.uniform(-1, 1, len(ct))) * env(len(ct), 0.0005, 0.008)
+    tt = t(0.25)
+    whoosh = lowpass(rng.uniform(-1, 1, len(tt)), 0.15) * np.sin(math.pi * np.arange(len(tt)) / len(tt))
+    i = int(0.08 * RATE)
+    out[i:i + len(whoosh)] += whoosh * 0.8
+    return normalize(out, 0.55)
+
+
+def explosion():
+    # Explosion: estallido grave con ruido largo y crepitar.
+    tt = t(1.2)
+    boom = lowpass(rng.uniform(-1, 1, len(tt)), 0.12) * env(len(tt), 0.002, 0.30)
+    sub = np.sin(2 * math.pi * (55 - 25 * tt / 1.2) * tt) * env(len(tt), 0.002, 0.35)
+    crackle = (rng.uniform(0, 1, len(tt)) > 0.985) * rng.uniform(-1, 1, len(tt)) * env(len(tt), 0.05, 0.4)
+    return normalize(boom * 1.2 + sub + crackle * 0.6, 0.95)
+
+
+def caja_municion():
+    # Caja de municion: el cierre metalico que salta y la tapa con las balas que suenan.
+    out = np.zeros(int(0.5 * RATE))
+    for start, freq, dur, gain in ((0.0, 1900, 0.025, 0.7), (0.05, 1300, 0.03, 0.6), (0.16, 420, 0.08, 0.9)):
+        tt = t(dur * 4)
+        hit = (np.sin(2 * math.pi * freq * tt) + 0.4 * rng.uniform(-1, 1, len(tt))) * env(len(tt), 0.0005, dur)
+        i = int(start * RATE)
+        out[i:i + len(hit)] += hit[: len(out) - i] * gain
+    for k in range(5):  # tintineo de los cartuchos
+        tt = t(0.05)
+        ting = np.sin(2 * math.pi * (2600 + 300 * k) * tt) * env(len(tt), 0.0005, 0.012)
+        i = int((0.24 + 0.035 * k) * RATE)
+        out[i:i + len(ting)] += ting * 0.25
+    return normalize(out, 0.6)
+
+
+def llama():
+    # Llama de suministros: carton que se rompe y una campanilla brillante.
+    out = np.zeros(int(1.0 * RATE))
+    tt = t(0.3)
+    out[:len(tt)] += lowpass(rng.uniform(-1, 1, len(tt)), 0.5) * env(len(tt), 0.001, 0.07)
+    chime = arpeggio([1046.5, 1318.5, 1568.0, 2093.0], 0.06, 0.2, 0.75)
+    i = int(0.2 * RATE)
+    out[i:i + len(chime)] += chime[: len(out) - i] * 0.6
+    return normalize(out, 0.6)
+
+
+def trampa():
+    # Trampa de pinchos: muelle metalico que salta ("shhank").
+    tt = t(0.4)
+    ring = (np.sin(2 * math.pi * 1250 * tt) + 0.6 * np.sin(2 * math.pi * 1870 * tt)) * env(len(tt), 0.001, 0.08)
+    scrape = lowpass(rng.uniform(-1, 1, len(tt)), 0.7) * env(len(tt), 0.0005, 0.03)
+    clunk = np.sin(2 * math.pi * 140 * tt) * env(len(tt), 0.001, 0.05)
+    return normalize(ring * 0.6 + scrape + clunk * 0.7, 0.75)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
     "menu_aceptar": menu_aceptar, "victoria": victoria, "derrota": derrota,
     "pico": pico, "curacion": curacion,  # al final: los anteriores salen identicos
     "escopeta": escopeta, "subfusil": subfusil, "recoger": recoger,
+    # Parche (fase 8): al final, para que los anteriores sigan saliendo identicos.
+    "pistola": pistola, "cohete": cohete, "lanzagranadas": lanzagranadas, "granada_lanzar": granada_lanzar,
+    "explosion": explosion, "caja_municion": caja_municion, "llama": llama, "trampa": trampa,
 }
 
 

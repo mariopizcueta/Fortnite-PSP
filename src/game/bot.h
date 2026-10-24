@@ -97,6 +97,7 @@ struct Bot {
 
     // Marcador y aspecto.
     int kills = 0;
+    bool lootDropped = false;  // su botin ya ha caido al suelo (una sola vez por eliminacion)
     float eliminatedAt = 0.0f;
     int palette = 0;
     bool aiming = false;  // pose de apuntar (para el dibujo)
