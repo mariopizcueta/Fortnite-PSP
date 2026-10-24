@@ -108,6 +108,9 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
             w.ammoType = static_cast<int>(AmmoType::Medium);
             w.hipSpread = 2.4f;
             w.aimSpread = 0.7f;
+            w.recoil = 0.55f;
+            w.maxRecoil = 3.0f;
+            w.crouchSpreadScale = 0.6f;
             break;
         case ItemType::Shotgun:
             w.name = "Escopeta";
@@ -121,6 +124,10 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
             w.falloffStart = 8.0f;
             w.falloffEnd = 25.0f;
             w.falloffMin = 0.35f;
+            w.recoil = 1.2f;
+            w.maxRecoil = 1.2f;
+            w.recoilRecovery = 2.0f;
+            w.crouchSpreadScale = 0.85f;  // el cono de perdigones solo se cierra un poco
             break;
         case ItemType::Smg:
             w.name = "Subfusil";
@@ -133,6 +140,10 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
             w.falloffStart = 20.0f;
             w.falloffEnd = 45.0f;
             w.falloffMin = 0.6f;
+            w.recoil = 0.3f;
+            w.maxRecoil = 3.5f;
+            w.recoilRecovery = 9.0f;
+            w.crouchSpreadScale = 0.7f;
             break;
         case ItemType::Sniper:
             w.name = "Francotirador";
@@ -142,6 +153,10 @@ WeaponConfig weaponConfig(ItemType type, Rarity rarity) {
             w.ammoType = static_cast<int>(AmmoType::Heavy);
             w.hipSpread = 7.0f;
             w.aimSpread = 0.0f;
+            w.recoil = 2.5f;
+            w.maxRecoil = 2.5f;
+            w.recoilRecovery = 2.5f;
+            w.crouchSpreadScale = 0.5f;
             break;
         default:
             break;
@@ -170,7 +185,7 @@ void Inventory::clear() {
     m_pickaxe = false;
 }
 
-int Inventory::add(ItemType type, Rarity rarity, int count) {
+int Inventory::add(ItemType type, Rarity rarity, int count, int loaded) {
     const ItemDef& def = itemDef(type);
     if (def.kind == ItemKind::Empty || count <= 0) return count;
     // Primero se apila en las ranuras del mismo tipo.
@@ -190,6 +205,7 @@ int Inventory::add(ItemType type, Rarity rarity, int count) {
         if (def.kind == ItemKind::Weapon) {
             s.count = 1;
             s.weapon.reset(weaponConfig(type, rarity));
+            if (loaded >= 0) s.weapon.setLoaded(loaded);
             --count;
         } else {
             s.count = count < def.maxStack ? count : def.maxStack;
@@ -200,15 +216,30 @@ int Inventory::add(ItemType type, Rarity rarity, int count) {
     return count;
 }
 
-void Inventory::replaceSelected(ItemType type, Rarity rarity, int count, InventorySlot* dropped) {
-    *dropped = take(m_selected);
-    m_pickaxe = false;
-    InventorySlot& s = m_slots[m_selected];
+int Inventory::room(ItemType type) const {
+    const ItemDef& def = itemDef(type);
+    if (def.kind == ItemKind::Empty) return 0;
+    int n = 0;
+    for (const InventorySlot& s : m_slots) {
+        if (s.type == ItemType::None) n += def.kind == ItemKind::Weapon ? 1 : def.maxStack;
+        else if (def.kind != ItemKind::Weapon && s.type == type && s.count < def.maxStack) n += def.maxStack - s.count;
+    }
+    return n;
+}
+
+int Inventory::place(int index, ItemType type, Rarity rarity, int count, int loaded, InventorySlot* dropped) {
+    if (index < 0 || index >= kSlots) index = m_selected;
+    *dropped = take(index);
+    InventorySlot& s = m_slots[index];
     const ItemDef& def = itemDef(type);
     s.type = type;
     s.rarity = def.kind == ItemKind::Weapon ? rarity : def.rarity;
     s.count = def.kind == ItemKind::Weapon ? 1 : (count < def.maxStack ? count : def.maxStack);
-    if (def.kind == ItemKind::Weapon) s.weapon.reset(weaponConfig(type, rarity));
+    if (def.kind == ItemKind::Weapon) {
+        s.weapon.reset(weaponConfig(type, rarity));
+        if (loaded >= 0) s.weapon.setLoaded(loaded);
+    }
+    return s.count;
 }
 
 InventorySlot Inventory::take(int index) {

@@ -72,11 +72,19 @@ public:
 
     void clear();
     // Anade `count` unidades (apila consumibles del mismo tipo y luego usa huecos libres;
-    // cada arma ocupa una ranura con su cargador lleno). Devuelve lo que no cupo.
-    int add(ItemType type, Rarity rarity, int count);
-    // Coloca un objeto en la ranura seleccionada sustituyendo lo que hubiera; deja en
-    // `dropped` lo que se ha soltado (para dejarlo en el suelo).
-    void replaceSelected(ItemType type, Rarity rarity, int count, InventorySlot* dropped);
+    // cada arma ocupa una ranura). `loaded`: balas en el cargador de un arma (-1: lleno; un
+    // arma soltada conserva las suyas y no se duplica municion). Devuelve lo que no cupo.
+    int add(ItemType type, Rarity rarity, int count, int loaded = -1);
+    // Cuantas unidades cabrian sin sustituir nada (apilando o en huecos libres).
+    int room(ItemType type) const;
+    // Coloca un objeto en la ranura `index` sustituyendo lo que hubiera; deja en `dropped`
+    // lo que se ha soltado (para dejarlo en el suelo). Devuelve las unidades que caben
+    // (un arma: 1; un consumible: hasta su pila maxima).
+    int place(int index, ItemType type, Rarity rarity, int count, int loaded, InventorySlot* dropped);
+    // Igual, en la ranura seleccionada.
+    int replaceSelected(ItemType type, Rarity rarity, int count, InventorySlot* dropped, int loaded = -1) {
+        return place(m_selected, type, rarity, count, loaded, dropped);
+    }
     // Quita y devuelve el contenido de una ranura.
     InventorySlot take(int index);
 

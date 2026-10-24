@@ -43,6 +43,15 @@ public:
                 float dt, bool recenter, const math3d::Vec3* lockTarget,
                 const world::CollisionWorld* world);
 
+    // Orienta la camara al instante (sin suavizado). `look` se limita a su rango.
+    void setAim(float yaw, float look);
+    // Orienta la camara para que su rayo (desde su propio ojo, que depende de la
+    // orientacion) pase por `point`. Sirve para que la mira siga en el mismo sitio al
+    // quitar la mirilla.
+    void aimAt(const math3d::Vec3& point, const world::CollisionWorld* world);
+    // Retroceso: la mira sube `radians` y vuelve sola en unas decimas.
+    void kick(float radians) { m_kick += radians; }
+
     math3d::Vec3 eye() const { return m_eye; }
     math3d::Vec3 focus() const { return m_pivot; }
     math3d::Vec3 lookDirection() const;
@@ -61,6 +70,7 @@ private:
     float m_yaw = 0.0f, m_targetYaw = 0.0f;
     float m_look = 0.0f, m_targetLook = 0.0f;
     float m_distance = 5.0f;
+    float m_kick = 0.0f;  // inclinacion extra del retroceso (rad), decae sola
 };
 
 }  // namespace camera

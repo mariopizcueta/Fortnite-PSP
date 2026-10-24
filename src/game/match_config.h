@@ -37,12 +37,18 @@ struct MatchConfig {
     float botSpreadDegrees = 2.0f;        // dispersion base de los bots
     float botSpreadPerMeter = 0.07f;      // + por metro de distancia
     float aimAssistDegrees = 1.0f;        // ayuda de punteria del jugador (0 = ninguna)
-    // Con el francotirador y L (mirilla), mas ayuda: compensa el tiempo de apuntar.
-    float sniperAssistDegrees = 4.0f;
+    // Con el francotirador y L (mirilla), algo mas de ayuda que con el resto. Era de 4 grados:
+    // con el zoom (15 grados de campo) eso desviaba el disparo un cuarto de pantalla del
+    // centro de la mira; con 2, el impacto queda cerca de la reticula.
+    float sniperAssistDegrees = 2.0f;
     float headshotMultiplier = 2.0f;      // impacto en la cabeza (el ultimo 0.33 m del cuerpo)
     float botHeadshotChance = 0.25f;      // de los bots al jugador solo cuenta 1 de cada 4 (poco probable)
     float crouchSpeed = 0.55f;            // agachado: fraccion de la velocidad normal
     float crouchedSpreadPenalty = 1.5f;   // grados extra de los bots contra el jugador agachado
+    // Precision del jugador agachado: la dispersion propia del arma se multiplica por su
+    // WeaponConfig::crouchSpreadScale (0 = sin bonificacion, 1 = la de cada arma). El
+    // retroceso acumulado no se reduce.
+    float crouchAccuracyBonus = 1.0f;
     bool weaponSpread = true;             // dispersion de las armas del jugador (ver docs/BOTIN.md)
 
     // Construccion (paredes de madera). Los bots levantan una pared cuando les disparan.
@@ -77,6 +83,12 @@ struct MatchConfig {
     int ammoBoxCount = 16;
     float airdropTimes[2] = {75.0f, 165.0f};  // s de partida en que cae un airdrop
     float airdropFallSpeed = 3.5f;
+
+    // Consumibles: segundos de uso de cada uno (0 = el de ItemDef: vendas 3.5, botiquin 10,
+    // minipocion 2, pocion de escudo 5). Mientras se usa no se puede mover ni saltar.
+    float useSeconds[static_cast<int>(ItemType::Count)] = {};
+    // Recibir dano interrumpe el consumible (sin gastarlo). En Fortnite no: false.
+    bool interruptUseOnDamage = false;
 
     // Pico (TRIANGULO): golpe cada swingInterval s mientras se mantiene R.
     float pickaxeInterval = 0.5f;

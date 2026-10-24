@@ -73,6 +73,11 @@ public:
     const Profile& testProfile() const { return m_profile; }
     bool testMapOpen() const { return m_mapOpen; }
     bool testDancing() const { return m_dancing; }
+    bool testSwapOpen() const { return m_swapOpen; }
+    int testSwapCursor() const { return m_swapCursor; }
+    const camera::ThirdPersonCamera& testFollowCamera() const { return m_followCamera; }
+    void testSetCameraAim(float yaw, float look) { m_followCamera.setAim(yaw, look); }
+    math3d::Vec3 testAimPoint() const { return aimPointFrom(cameraEye(), m_followCamera.lookDirection()); }
     u32 testFootsteps() const { return m_playerSteps; }
     float testFogEnd() const { return m_fogEnd; }
 #endif
@@ -95,6 +100,11 @@ private:
     void startLoading();
     void updateGame(const input::Input& in, float dt);
     void updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld);
+    // Al poner o quitar la mirilla, la camara se orienta para que siga apuntando al mismo
+    // punto que la mira (sin recolocarse detras del jugador).
+    void updateScopeTransition();
+    // Punto al que apunta la mira desde `eye` en `dir` (mundo, paredes y personajes).
+    math3d::Vec3 aimPointFrom(const math3d::Vec3& eye, const math3d::Vec3& dir) const;
     void processEvents();
     void playFootsteps();
     void updateDanceSound(float dt);
@@ -155,6 +165,7 @@ private:
     void renderMinimap() const;
     void renderVitals() const;
     void renderSlots() const;
+    void renderSwapChooser() const;
     void renderDamageNumbers() const;
     void overlayGame(const FrameInfo& frame) const;
     void overlayGameHud(const FrameInfo& frame) const;
@@ -213,6 +224,12 @@ private:
     float m_chestHumTimer = 0.0f;
     bool m_chestHumOn = false;
     bool m_mapOpen = false;          // SELECT: mapa a pantalla completa
+    // Selector de que soltar (inventario lleno al recoger): la cruceta elige la ranura,
+    // CUADRADO cambia y CIRCULO cancela.
+    bool m_swapOpen = false;
+    int m_swapPickup = -1;
+    int m_swapCursor = 0;
+    bool m_wasScoped = false;        // la mirilla estaba puesta el frame anterior
     bool m_dancing = false;          // cruceta arriba: baile (hasta moverse o actuar)
     bool m_danceSoundOn = false;
     float m_danceSoundTimer = 0.0f;

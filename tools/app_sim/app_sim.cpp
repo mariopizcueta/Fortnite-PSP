@@ -373,6 +373,147 @@ void testAudio(const char* outDir) {
     check(mixer.droppedCommands() == 70 - 63, "con la cola llena se descartan ordenes en vez de bloquear");
 }
 
+
+// Parche A: la mirilla apunta a donde apuntaba la mira en tercera persona (antes L
+// recolocaba la camara detras del jugador y el disparo salia hacia donde miraba el cuerpo).
+struct ShotLog {
+    int count = 0;
+    Vec3 origin, end;
+};
+void logShot(void* context, const game::ShotRecord& shot) {
+    if (shot.shooter != 0) return;
+    ShotLog* log = static_cast<ShotLog*>(context);
+    ++log->count;
+    log->origin = shot.origin;
+    log->end = shot.end;
+}
+
+void testScopeAim(Sim& sim) {
+    printf("\n5c) Parche A: la mirilla del francotirador apunta donde apuntaba la mira\n");
+    game::Match& match = sim.app().testMatch();
+    // Lejos de los bots (la ayuda de punteria no debe intervenir) y con la camara girada
+    // respecto al cuerpo: el caso en que antes fallaba.
+    for (int i = 1; i < match.entityCount(); ++i) {
+        if (match.alive(i)) match.teleport(i, {-80.0f + i * 2.0f, 0.0f, 80.0f}, 0.0f);
+    }
+    match.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+    match.giveAmmo(game::AmmoType::Heavy, 20);
+    ShotLog log;
+    match.setShotObserver(logShot, &log);
+    struct Case {
+        const char* name;
+        float yawOffset, look;
+        bool wall;
+    };
+    const Case cases[] = {{"horizontal, camara girada 50 grados", 0.87f, -0.06f, false},
+                          {"hacia arriba", -0.5f, 0.35f, false},
+                          {"hacia abajo", 0.3f, -0.40f, false},
+                          {"pared a corta distancia", 0.0f, -0.05f, true}};
+    bool aimOk = true, shotOk = true, backOk = true;
+    for (const Case& c : cases) {
+        // Junto a una pared: 3.5 m por delante (la pared va a la rejilla de 4 m). A menos de
+        // ~1 m la mirilla, que sale de la cabeza, no puede apuntar al mismo punto que la camara.
+        match.teleport(0, {70.0f, 0.0f, c.wall ? 27.5f : 25.0f}, 0.0f);
+        sim.wait(2.8f);  // el francotirador de cerrojo vuelve a estar listo
+        const float yaw = c.yawOffset;
+        if (c.wall) {
+            match.giveMaterials(world::Resource::Wood, 20);
+            match.buildWall(yaw);  // a la rejilla, 1-4 m por delante
+        }
+        sim.app().testSetCameraAim(yaw, c.look);
+        sim.frame(0);
+        const Vec3 before = sim.app().testAimPoint();
+        const float range = math3d::length(before - match.body(0).state().position);
+        sim.hold(PSP_CTRL_LTRIGGER, 0.4f);
+        const bool scoped = sim.app().testScoped();
+        const Vec3 inScope = sim.app().testAimPoint();
+        const int shots = log.count;
+        sim.hold(PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER, 0.1f);
+        sim.hold(PSP_CTRL_LTRIGGER, 0.1f);
+        const bool fired = log.count > shots;
+        const float shotError = fired ? math3d::length(log.end - inScope) : 99.0f;
+        sim.wait(0.2f);
+        const Vec3 after = sim.app().testAimPoint();
+        const float scopeError = math3d::length(inScope - before), backError = math3d::length(after - inScope);
+        printf("  %-38s a %5.1f m: mira->mirilla %.2f m, disparo->mirilla %.2f m, mirilla->mira %.2f m\n", c.name,
+               static_cast<double>(range), static_cast<double>(scopeError), static_cast<double>(shotError),
+               static_cast<double>(backError));
+        const float tolerance = 0.25f + 0.01f * range;  // el retroceso de la camara mueve algo la mira
+        aimOk &= scoped && scopeError < tolerance;
+        shotOk &= fired && shotError < tolerance;
+        backOk &= backError < tolerance + 0.3f;
+        if (c.wall) sim.shot("26e_mirilla_pared_cerca", PSP_CTRL_LTRIGGER);
+    }
+    match.setShotObserver(nullptr, nullptr);
+    check(aimOk, "al pulsar L la mirilla queda sobre el punto que senalaba la mira (arriba, abajo, cerca y lejos)");
+    check(shotOk, "el disparo con la mirilla impacta en el centro de la reticula");
+    check(backOk, "al soltar L la mira de tercera persona sigue en ese punto");
+}
+
+// Parche A: con un curativo en la mano CUADRADO tambien recoge y, con el inventario lleno,
+// abre el selector de que soltar. Curandose no se anda.
+void testSwapAndHeal(Sim& sim) {
+    printf("\n5d) Parche A: elegir que soltar y curarse sin moverse\n");
+    game::Match& match = sim.app().testMatch();
+    const game::Inventory& inv = match.inventory();
+    for (int k = 0; k < 5; ++k) match.giveItem(game::ItemType::Bandage, 15);
+    match.giveItem(game::ItemType::Medkit, 1);
+    printf("  inventario: ");
+    for (int i = 0; i < game::Inventory::kSlots; ++i) printf("%s x%d  ", game::itemDef(inv.slot(i).type).name, inv.slot(i).count);
+    printf("\n");
+    // Con las vendas en la mano.
+    for (int k = 0; k < 7 && (inv.pickaxe() || inv.activeType() != game::ItemType::Bandage); ++k) sim.press(PSP_CTRL_RIGHT);
+    const int handSlot = inv.selected();
+    game::Pickup smg;
+    smg.kind = game::PickupKind::Item;
+    smg.item = game::ItemType::Smg;
+    smg.rarity = game::Rarity::Epic;
+    smg.count = 1;
+    smg.position = match.body(0).state().position + game::forwardFromYaw(sim.app().testCameraYaw()) * 0.8f;
+    match.dropPickup(smg);
+    sim.wait(0.2f);
+    sim.shot("30a_cambiar_por", 0);
+    sim.press(PSP_CTRL_SQUARE);
+    const bool opened = sim.app().testSwapOpen() && sim.app().testSwapCursor() == handSlot;
+    sim.press(PSP_CTRL_RIGHT);
+    const int chosen = sim.app().testSwapCursor();
+    sim.wait(0.1f);
+    sim.shot("30b_selector_cambio");
+    const game::ItemType replaced = inv.slot(chosen).type;
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.1f);
+    int onFloor = 0;
+    for (const game::Pickup& p : match.pickups()) onFloor += p.active && p.item == replaced ? 1 : 0;
+    printf("  selector: abierto %s en la ranura %d, elegida %d (%s) -> %s\n", opened ? "si" : "no", handSlot + 1, chosen + 1,
+           game::itemDef(replaced).name, game::itemDef(inv.slot(chosen).type).name);
+    check(opened, "CUADRADO con un curativo en la mano y el inventario lleno abre el selector de que soltar");
+    check(inv.slot(chosen).type == game::ItemType::Smg && onFloor >= 1 && !sim.app().testSwapOpen(),
+          "la cruceta elige la ranura y CUADRADO la cambia (lo soltado queda en el suelo)");
+    // CIRCULO cancela sin cambiar nada.
+    smg.position = match.body(0).state().position + game::forwardFromYaw(sim.app().testCameraYaw()) * 0.8f;
+    match.dropPickup(smg);
+    sim.wait(0.1f);
+    sim.press(PSP_CTRL_SQUARE);
+    const bool reopened = sim.app().testSwapOpen();
+    sim.press(PSP_CTRL_CIRCLE);
+    check(reopened && !sim.app().testSwapOpen() && !match.buildMode(), "CIRCULO cancela el selector (sin entrar en construccion)");
+
+    // Curarse: con el stick adelante el jugador no se mueve hasta terminar.
+    match.applyDamage(0, 90.0f, -1);  // (el escudo absorbe lo primero)
+    const float hurt = match.body(0).state().health;
+    for (int k = 0; k < 7 && (inv.pickaxe() || inv.activeType() != game::ItemType::Bandage); ++k) sim.press(PSP_CTRL_RIGHT);
+    const Vec3 at = match.body(0).state().position;
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.hold(PSP_CTRL_CROSS, 1.0f, 0.0f, -1.0f);
+    sim.shot("30c_curandose_quieto", PSP_CTRL_CROSS);
+    const float moved = math3d::length(match.body(0).state().position - at);
+    sim.hold(0, 3.0f, 0.0f, -1.0f);
+    const float health = match.body(0).state().health;
+    printf("  vendas con el stick adelante y X: se mueve %.2f m mientras se cura; vida %.0f\n", static_cast<double>(moved),
+           static_cast<double>(health));
+    check(moved < 0.05f && health > hurt, "curandose el jugador no se mueve ni salta; al terminar sigue andando");
+}
+
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
 void testNewControls(Sim& sim) {
     printf("\n5b) Inventario, consumibles, pico y camara con el mando\n");
@@ -523,6 +664,8 @@ void testNewControls(Sim& sim) {
     check(sim.app().testScoped() && eyeToHead < 0.5f, "L con el francotirador: vista por la mirilla desde la cabeza");
     sim.wait(0.2f);
     check(!sim.app().testScoped(), "al soltar L se vuelve a la tercera persona");
+    testScopeAim(sim);
+    testSwapAndHeal(sim);
     select(game::ItemType::AssaultRifle);
 }
 

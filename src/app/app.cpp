@@ -202,6 +202,8 @@ void App::startMatch() {
     m_lockTarget = -1;
     m_matchRecorded = false;
     m_mapOpen = false;
+    m_swapOpen = false;
+    m_wasScoped = false;
     m_dancing = false;
     m_chestHumTimer = 0.0f;
     m_airdropMessage = 0.0f;
@@ -346,13 +348,33 @@ void App::updateGame(const input::Input& in, float dt) {
     const bool act = control && onGround;
     if (!onGround) m_buildMode = false;
     game::PlayerCommands commands;
+    const bool usingItem = m_match.useProgress() >= 0.0f;
+    // Selector de que soltar (inventario lleno): mientras esta abierto, la cruceta elige la
+    // ranura, CUADRADO cambia y CIRCULO cancela. Se cierra si el objeto deja de estar al alcance.
+    if (m_swapOpen && (!act || m_buildMode || !m_match.pickupInReach(m_swapPickup))) m_swapOpen = false;
+    const bool swapInput = m_swapOpen;
+    if (m_swapOpen) {
+        const int step = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+        if (step != 0) {
+            m_swapCursor = (m_swapCursor + game::Inventory::kSlots + step) % game::Inventory::kSlots;
+            playSfx(audio::Sfx::MenuMove, 0.5f);
+        }
+        if (in.pressed(PSP_CTRL_SQUARE)) {
+            commands.swapPickup = m_swapPickup;
+            commands.swapSlot = m_swapCursor;
+            m_swapOpen = false;
+        } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+            m_swapOpen = false;
+            playSfx(audio::Sfx::MenuMove, 0.5f);
+        }
+    }
     // CIRCULO: modo construccion. Se desactiva solo si el jugador cae.
-    if (act && in.pressed(PSP_CTRL_CIRCLE)) {
+    if (act && !swapInput && in.pressed(PSP_CTRL_CIRCLE)) {
         m_buildMode = !m_buildMode;
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
     // TRIANGULO: sacar / guardar el pico (desde construccion, vuelve al combate con el pico).
-    if (act && !freeCameraToggle && in.pressed(PSP_CTRL_TRIANGLE)) {
+    if (act && !freeCameraToggle && !swapInput && in.pressed(PSP_CTRL_TRIANGLE)) {
         if (m_buildMode) {
             m_buildMode = false;
             if (!m_match.inventory().pickaxe()) commands.togglePickaxe = true;
@@ -362,7 +384,7 @@ void App::updateGame(const input::Input& in, float dt) {
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
     // Cruceta izquierda / derecha: ranura del inventario o pieza de construccion.
-    const int dpad = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    const int dpad = swapInput ? 0 : (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
     if (act && dpad != 0) {
         if (m_buildMode) m_buildPiece = (m_buildPiece + kBuildPieces + dpad) % kBuildPieces;
         else commands.cycleSlot = dpad;
@@ -374,7 +396,7 @@ void App::updateGame(const input::Input& in, float dt) {
         commands.toggleCrouch = true;
         m_dancing = false;
     }
-    if (act && !m_buildMode && in.pressed(PSP_CTRL_UP)) {
+    if (act && !m_buildMode && !usingItem && in.pressed(PSP_CTRL_UP)) {
         m_dancing = !m_dancing;
         m_danceSoundTimer = 0.0f;
         if (m_dancing && m_match.playerCrouched()) commands.toggleCrouch = true;  // se levanta para bailar
@@ -389,6 +411,7 @@ void App::updateGame(const input::Input& in, float dt) {
     // stick gira la camara y sube o baja la mira en lugar de andar.
     const bool aimHeld = act && in.held(PSP_CTRL_LTRIGGER);
     m_aimHeld = aimHeld;
+    updateScopeTransition();
     const bool stickAims = aimHeld && !(m_lockTarget > 0);
 
     // 1) Entrada del jugador.
@@ -409,11 +432,26 @@ void App::updateGame(const input::Input& in, float dt) {
             commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);  // una pieza por pulsacion
             commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
             commands.cycleMaterial = in.pressed(PSP_CTRL_SQUARE);  // madera -> piedra -> metal
-        } else if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
-            aim.fire = in.held(PSP_CTRL_RTRIGGER);  // disparar, o golpes seguidos con el pico
-            commands.reload = in.pressed(PSP_CTRL_SQUARE);
         } else {
-            commands.useItem = in.pressed(PSP_CTRL_RTRIGGER);  // consumible: R lo usa
+            if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
+                // Disparar, o golpes seguidos con el pico (no mientras se elige que soltar).
+                aim.fire = !swapInput && in.held(PSP_CTRL_RTRIGGER);
+            } else {
+                commands.useItem = !swapInput && in.pressed(PSP_CTRL_RTRIGGER);  // consumible: R lo usa
+            }
+            // CUADRADO: abrir o recoger (lleve lo que lleve en la mano, tambien un curativo) y,
+            // si no hay nada al alcance, recargar. Si el objeto no cabe, se elige que soltar.
+            if (!swapInput && in.pressed(PSP_CTRL_SQUARE)) {
+                const game::Interactable it = m_match.playerInteractable();
+                if (it.kind == game::Interactable::Kind::Pickup && m_match.pickupRoom(it.index) <= 0 && !usingItem) {
+                    m_swapOpen = true;
+                    m_swapPickup = it.index;
+                    m_swapCursor = m_match.inventory().selected();
+                    playSfx(audio::Sfx::MenuMove, 0.6f);
+                } else {
+                    commands.reload = true;
+                }
+            }
         }
     }
     playerInput.cameraYaw = m_followCamera.yaw();
@@ -509,7 +547,9 @@ void App::updateGameCameras(const input::Input& in, float dt, bool control, bool
     } else {
         m_lockTarget = -1;
     }
-    const bool recenter = control && in.pressed(PSP_CTRL_LTRIGGER) && !lock;
+    // L sin objetivo recoloca la camara detras del jugador, salvo con la mirilla: entonces
+    // se sigue apuntando a donde estaba la mira (updateScopeTransition).
+    const bool recenter = control && in.pressed(PSP_CTRL_LTRIGGER) && !lock && !scoped;
     if (m_freeCameraActive) {
         m_freeCamera.update(in, dt);
         return;
@@ -665,6 +705,8 @@ void App::processEvents() {
                 if (e.entity == 0) {
                     playSfx(shot, 0.85f);
                     m_playerAnim.onShot();
+                    // Retroceso: la mira sube un poco y vuelve (la dispersion la lleva la partida).
+                    m_followCamera.kick(math3d::toRadians(0.35f * m_match.playerWeapon().config().recoil));
                 } else if (e.entity > 0) {
                     playSpatial(shot, e.position, 0.7f);
                     m_botAnims[e.entity - 1].onShot();
@@ -816,6 +858,32 @@ math3d::Vec3 App::cameraEye() const {
     if (m_freeCameraActive) return m_freeCamera.eye();
     if (sniperScoped()) return scopeEye();
     return m_followCamera.eye();
+}
+
+Vec3 App::aimPointFrom(const Vec3& eye, const Vec3& dir) const {
+    const game::Weapon* w = m_match.inventory().activeWeapon();
+    return m_match.aimPoint(eye, dir, w ? w->config().range : 200.0f);
+}
+
+void App::updateScopeTransition() {
+    const bool scoped = sniperScoped();
+    if (scoped == m_wasScoped) return;
+    m_wasScoped = scoped;
+    if (scoped) {
+        // Lo que estaba bajo la mira en tercera persona queda en el centro de la mirilla:
+        // desde la cabeza se apunta a ese mismo punto (el ojo de la mirilla esta 0.35 m
+        // delante de la cara, segun la direccion: dos iteraciones).
+        const Vec3 target = aimPointFrom(m_followCamera.eye(), m_followCamera.lookDirection());
+        for (int k = 0; k < 2; ++k) {
+            const Vec3 d = target - scopeEye();
+            const float flat = sqrtf(d.x * d.x + d.z * d.z);
+            if (flat < 1.0f) break;
+            m_followCamera.setAim(atan2f(-d.x, -d.z), atan2f(d.y, flat));
+        }
+    } else {
+        // Al quitarla, la mira de tercera persona vuelve a senalar lo que se veia.
+        m_followCamera.aimAt(aimPointFrom(scopeEye(), m_followCamera.lookDirection()), &m_world.collision());
+    }
 }
 
 bool App::sniperScoped() const {

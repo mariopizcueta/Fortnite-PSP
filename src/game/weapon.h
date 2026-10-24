@@ -25,6 +25,13 @@ struct WeaponConfig {
     int pellets = 1;                   // escopeta: perdigones que se reparten el dano
     float hipSpread = 0.0f;            // grados de dispersion sin apuntar
     float aimSpread = 0.0f;            // grados apuntando (L)
+    // Retroceso: cada disparo abre la dispersion `recoil` grados (hasta maxRecoil) y se
+    // recupera a recoilRecovery grados por segundo; la camara sube un poco con cada disparo.
+    float recoil = 0.0f;
+    float maxRecoil = 0.0f;
+    float recoilRecovery = 8.0f;
+    // Agachado: fraccion de la dispersion que queda (segun el tipo de arma).
+    float crouchSpreadScale = 1.0f;
     float falloffStart = 1000.0f;      // m: a partir de aqui el dano baja...
     float falloffEnd = 1000.0f;        // ...hasta falloffMin de su valor
     float falloffMin = 1.0f;
@@ -46,6 +53,9 @@ public:
     void setReserve(int reserve) { m_reserve = reserve; }
     // Segundos desde el ultimo disparo (precision del primer disparo).
     float sinceShot() const { return m_sinceShot; }
+
+    // Balas en el cargador (un arma recogida del suelo trae las que tenia al soltarla).
+    void setLoaded(int rounds) { m_ammo = rounds < 0 ? 0 : (rounds > m_config.magazineSize ? m_config.magazineSize : rounds); }
 
     // Interrumpe la recarga (al cambiar de objeto en la mano); las balas no cambian.
     void cancelReload() { m_reloadTimer = 0.0f; }

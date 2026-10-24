@@ -72,6 +72,7 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
     m_targetYaw = game::wrapAngle(m_targetYaw);
     m_targetLook = math3d::clampf(m_targetLook, kMinLook, kMaxLook);
 
+    m_kick *= 1.0f - smoothFactor(9.0f, dt);
     const float angleT = smoothFactor(kAngleRate, dt);
     m_yaw = game::wrapAngle(m_yaw + game::wrapAngle(m_targetYaw - m_yaw) * angleT);
     m_look += (m_targetLook - m_look) * angleT;
@@ -106,9 +107,28 @@ void ThirdPersonCamera::computeEye(const world::CollisionWorld* world) {
     if (m_eye.y < minY) m_eye.y = minY;
 }
 
+void ThirdPersonCamera::setAim(float yaw, float look) {
+    m_yaw = m_targetYaw = game::wrapAngle(yaw);
+    m_look = m_targetLook = math3d::clampf(look, kMinLook, kMaxLook);
+}
+
+void ThirdPersonCamera::aimAt(const Vec3& point, const world::CollisionWorld* world) {
+    // El ojo orbita alrededor del pivote segun el yaw: unas pocas iteraciones bastan para
+    // que el rayo del ojo nuevo pase por el punto.
+    for (int k = 0; k < 4; ++k) {
+        computeEye(world);
+        const Vec3 d = point - m_eye;
+        const float flat = sqrtf(d.x * d.x + d.z * d.z);
+        if (flat < 1.0f) return;  // demasiado cerca: se deja como estaba
+        setAim(atan2f(-d.x, -d.z), atan2f(d.y, flat));
+    }
+    computeEye(world);
+}
+
 Vec3 ThirdPersonCamera::lookDirection() const {
-    const float c = cosf(m_look);
-    return {-sinf(m_yaw) * c, sinf(m_look), -cosf(m_yaw) * c};
+    const float look = m_look + m_kick;
+    const float c = cosf(look);
+    return {-sinf(m_yaw) * c, sinf(look), -cosf(m_yaw) * c};
 }
 
 math3d::Mat4 ThirdPersonCamera::viewMatrix() const {

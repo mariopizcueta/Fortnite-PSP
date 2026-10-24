@@ -308,7 +308,7 @@ void App::renderGameHud() const {
     } else {
         renderCrosshair();
         int n = 0;
-        if (const ui::Hint* hint = interactionHint(&n)) {
+        if (const ui::Hint* hint = m_swapOpen ? nullptr : interactionHint(&n)) {
             gfx::fillRect(0, kPromptY - 4, gfx::kScreenWidth, 16, rgba(0, 0, 0, 90));
             ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, hint, n);
         }
@@ -316,7 +316,24 @@ void App::renderGameHud() const {
     renderMinimap();
     renderVitals();
     renderSlots();
+    if (m_swapOpen) renderSwapChooser();
     renderDamageNumbers();
+}
+
+// Selector de que soltar: la ranura elegida parpadea en amarillo sobre la fila de objetos
+// y encima va lo que se recoge y los botones.
+const ui::Hint kSwapHints[] = {{B::Left, ""}, {B::Right, "elegir"}, {B::Square, "cambiar"}, {B::Circle, "cancelar"}};
+constexpr float kSwapPanelY = 154.0f;
+
+void App::renderSwapChooser() const {
+    const float x = kWeaponSlotX + (m_swapCursor + 1) * kWeaponSlotStep;
+    const u32 alpha = static_cast<u32>(200.0f + 55.0f * sinf(m_blinkTime * 8.0f));
+    ui::frame(x - 3, kWeaponRowY - 6, kWeaponSlotSize + 6, kWeaponSlotSize + 6, 3, rgba(250, 216, 40, alpha));
+    gfx::fillRect(x + kWeaponSlotSize * 0.5f - 4, kWeaponRowY - 13, 8, 5, kYellow);
+    gfx::fillRect(110, kSwapPanelY, 260, 34, rgba(8, 18, 48, 210));
+    ui::frame(110, kSwapPanelY, 260, 34, 1, kYellow);
+    ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(kSwapHints, 4)) / 2, static_cast<int>(kSwapPanelY) + 22,
+                      kSwapHints, 4);
 }
 
 const ui::Hint* App::interactionHint(int* count) const {
@@ -333,10 +350,9 @@ const ui::Hint* App::interactionHint(int* count) const {
                                                                                  : "Abrir suministro");
     } else {
         const game::Pickup& p = m_match.pickups()[it.index];
-        const game::Inventory& inv = m_match.inventory();
-        const bool swap = inv.full() && inv.count(p.item) == 0;
+        const bool swap = m_match.pickupRoom(it.index) <= 0;
         const char* name = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemDef(p.item).name;
-        if (swap && inv.slot(inv.selected()).type != game::ItemType::None) {
+        if (swap) {
             snprintf(text, sizeof(text), "Cambiar por %s (%s)", name, game::rarityName(p.rarity));
         } else if (p.count > 1) {
             snprintf(text, sizeof(text), "Recoger %s x%d", name, p.count);
@@ -391,11 +407,17 @@ void App::renderCrosshair() const {
     const u32 c = m_match.playerAssistTarget() >= 0 || m_lockTarget > 0 ? kCrosshairLocked : kCrosshair;
     const game::Inventory& inv = m_match.inventory();
     const game::ItemType held = inv.pickaxe() ? game::ItemType::None : inv.slot(inv.selected()).type;
+    // La mira se abre con la dispersion real del siguiente disparo (la misma que usa la
+    // partida): moverse, saltar y el retroceso la abren; apuntar y agacharse la cierran.
+    // Radio en pixeles del cono: tan(dispersion) * distancia focal (FOV vertical de 60).
+    const float focal = 0.5f * gfx::kScreenHeight / tanf(math3d::toRadians(0.5f * config::kFovYDegrees));
+    const float spreadPx = focal * tanf(math3d::toRadians(fminf(m_match.playerSpreadNow(), 30.0f)));
     if (held == game::ItemType::Shotgun) {
-        gfx::fillRect(228, 124, 24, 2, c);
-        gfx::fillRect(228, 146, 24, 2, c);
-        gfx::fillRect(228, 126, 2, 20, c);
-        gfx::fillRect(250, 126, 2, 20, c);
+        const float h = fmaxf(8.0f, floorf(spreadPx));
+        gfx::fillRect(240 - h, 136 - h, 2 * h, 2, c);
+        gfx::fillRect(240 - h, 134 + h, 2 * h, 2, c);
+        gfx::fillRect(240 - h, 136 - h, 2, 2 * h - 2, c);
+        gfx::fillRect(238 + h, 136 - h, 2, 2 * h - 2, c);
         gfx::fillRect(239, 135, 2, 2, c);
     } else if (held != game::ItemType::None && !game::isWeapon(held)) {
         for (int i = 0; i < 28; ++i) {
@@ -404,10 +426,11 @@ void App::renderCrosshair() const {
         }
         gfx::fillRect(239, 135, 2, 2, c);
     } else {
-        gfx::fillRect(229, 135, 7, 2, c);
-        gfx::fillRect(244, 135, 7, 2, c);
-        gfx::fillRect(239, 125, 2, 7, c);
-        gfx::fillRect(239, 140, 2, 7, c);
+        const float gap = 3.0f + floorf(fminf(spreadPx, 60.0f));
+        gfx::fillRect(236 - gap, 135, 7, 2, c);
+        gfx::fillRect(241 + gap, 135, 7, 2, c);
+        gfx::fillRect(239, 132 - gap, 2, 7, c);
+        gfx::fillRect(239, 137 + gap, 2, 7, c);
         gfx::fillRect(239, 135, 2, 2, c);
     }
     if (m_match.sincePlayerHit() < 0.15f) {
@@ -695,6 +718,18 @@ void App::overlayGameHud(const FrameInfo& frame) const {
             snprintf(line, sizeof(line), "Altura %.0f m", m_match.heightAboveGround(0));
             printCenteredShadow(air == game::AirState::Glide ? 153 : 168, kLightGrey, line);
         }
+    } else if (m_swapOpen) {
+        const game::Pickup& p = m_match.pickups()[m_swapPickup];
+        const game::InventorySlot& out = m_match.inventory().slot(m_swapCursor);
+        const char* in = game::isWeapon(p.item) ? game::weaponConfig(p.item, p.rarity).name : game::itemDef(p.item).name;
+        const char* drop = out.type == game::ItemType::None ? "(vacia)"
+                           : game::isWeapon(out.type) ? out.weapon.config().name
+                                                       : game::itemDef(out.type).name;
+        char line[64];
+        snprintf(line, sizeof(line), "Recoger %s y soltar %s", in, drop);
+        printCenteredShadow(static_cast<int>(kSwapPanelY) + 6, kWhite, line);
+        ui::printHints((gfx::kScreenWidth - ui::hintsWidth(kSwapHints, 4)) / 2, static_cast<int>(kSwapPanelY) + 22, kLightGrey,
+                       kSwapHints, 4);
     } else {
         int n = 0;
         if (const ui::Hint* hint = interactionHint(&n)) {
@@ -818,7 +853,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     if (use >= 0.0f) {
         const game::ItemDef& def = game::itemDef(m_match.usingItem());
         char line[48];
-        snprintf(line, sizeof(line), "Usando %s  %.1f s", def.name, (1.0f - use) * def.useSeconds);
+        snprintf(line, sizeof(line), "Usando %s  %.1f s", def.name, (1.0f - use) * m_match.useDuration());
         printCenteredShadow(154, kWhite, line);
     } else if (m_match.sinceUseError() < 1.5f) {
         printCenteredShadow(154, kErrorRed, game::useErrorName(m_match.lastUseError()));

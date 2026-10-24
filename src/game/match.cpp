@@ -69,6 +69,8 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_pendingJump = m_pendingPlace = m_pendingRemove = m_pendingReload = false;
     m_pendingPickaxe = m_pendingUse = false;
     m_pendingCycle = 0;
+    m_pendingSwapPickup = m_pendingSwapSlot = -1;
+    m_recoilBloom = 0.0f;
     m_buildMode = false;
     m_buildMaterial = world::Resource::Wood;
     m_playerCrouched = false;
@@ -253,7 +255,14 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (input.jumpPressed) m_pendingJump = true;
     if (commands.placeWall) m_pendingPlace = true;
     m_buildPiece = commands.buildPiece;
-    if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0)) m_playerCrouched = !m_playerCrouched;
+    // Curandose no se puede agachar ni levantar (la animacion de uso no lo permite).
+    if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0) && m_useSlot < 0) {
+        m_playerCrouched = !m_playerCrouched;
+    }
+    if (commands.swapPickup >= 0 && commands.swapSlot >= 0) {
+        m_pendingSwapPickup = commands.swapPickup;
+        m_pendingSwapSlot = commands.swapSlot;
+    }
     if (commands.cycleMaterial) {
         m_buildMaterial = static_cast<world::Resource>((static_cast<int>(m_buildMaterial) + 1) %
                                                        static_cast<int>(world::Resource::Count));
@@ -292,10 +301,21 @@ void Match::updatePlayer(float dt) {
     const bool place = m_pendingPlace, remove = m_pendingRemove, reload = m_pendingReload;
     const bool togglePickaxe = m_pendingPickaxe;
     const int cycle = m_pendingCycle;
+    const int swapIndex = m_pendingSwapPickup, swapTo = m_pendingSwapSlot;
     m_pendingPlace = m_pendingRemove = m_pendingReload = m_pendingPickaxe = false;
     m_pendingCycle = 0;
+    m_pendingSwapPickup = m_pendingSwapSlot = -1;
     m_sinceUseError += dt;
     if (m_swingCooldown > 0.0f) m_swingCooldown -= dt;
+    // El retroceso acumulado se recupera al dejar de disparar (0.25 s despues del ultimo
+    // disparo, al ritmo del arma en la mano): disparando seguido se va acumulando.
+    {
+        const Weapon* held = m_inventory.activeWeapon();
+        if (!held || held->sinceShot() > 0.25f) {
+            const float recovery = held ? held->config().recoilRecovery : 8.0f;
+            m_recoilBloom = fmaxf(0.0f, m_recoilBloom - recovery * dt);
+        }
+    }
     if (Weapon* w = m_inventory.activeWeapon()) {
         // La reserva es la municion comun del inventario (la recarga la gasta).
         const AmmoType ammo = static_cast<AmmoType>(w->config().ammoType);
@@ -352,6 +372,13 @@ void Match::updatePlayer(float dt) {
     m_playerAiming = in.aiming || (!m_buildMode && ((m_aim.fire && m_inventory.activeWeapon()) || swinging));
     in.aiming = m_playerAiming;
 
+    // Usando un consumible: quieto y sin saltar (la camara puede girar). Recibir dano no lo
+    // interrumpe salvo con MatchConfig::interruptUseOnDamage.
+    if (m_useSlot >= 0) {
+        in.moveX = in.moveY = 0.0f;
+        in.jumpPressed = false;
+        in.jumpHeld = false;
+    }
     // Saltar levanta; agachado se anda mas despacio.
     if (in.jumpPressed) m_playerCrouched = false;
     MoveIntent intent = playerIntent(in);
@@ -373,13 +400,16 @@ void Match::updatePlayer(float dt) {
         if (remove) removeWallAt(m_aim);
         return;
     }
+    if (swapIndex >= 0 && m_useSlot < 0) swapPickup(swapIndex, swapTo);
     updatePlayerItems(dt, reload);
 }
 
 void Match::updatePlayerItems(float dt, bool reload) {
     const bool use = m_pendingUse;
     m_pendingUse = false;
-    // CUADRADO: abrir / recoger lo que haya al alcance; si no hay nada, recargar.
+    // CUADRADO: abrir / recoger lo que haya al alcance; si no hay nada, recargar. Mientras
+    // se usa un consumible no se recoge nada.
+    if (reload && m_useSlot >= 0) reload = false;
     if (reload) {
         const Interactable target = interactableFor(0);
         if (target.kind != Interactable::Kind::None) {
@@ -412,6 +442,7 @@ void Match::updatePlayerItems(float dt, bool reload) {
             const float spread = playerSpread(weapon->config());  // antes de tryFire (primer disparo)
             if (weapon->tryFire()) {
                 const WeaponConfig& w = weapon->config();
+                m_recoilBloom = fminf(m_recoilBloom + w.recoil, fmaxf(w.maxRecoil, m_recoilBloom));
                 const int type = static_cast<int>(m_inventory.activeType());
                 for (int pellet = 0; pellet < w.pellets; ++pellet) {
                     playerShot(m_aim, w.damage / static_cast<float>(w.pellets), range, spread, &w, pellet == 0, type);
@@ -463,7 +494,7 @@ bool Match::startUse() {
     }
     m_useSlot = slot;
     m_useTimer = 0.0f;
-    m_useDuration = def.useSeconds > 0.05f ? def.useSeconds : 0.05f;
+    m_useDuration = useSecondsFor(m_inventory.slot(slot).type);
     pushEvent(GameEventType::UseStarted, 0, static_cast<int>(m_inventory.slot(slot).type), chestOf(0));
     return true;
 }
@@ -474,21 +505,40 @@ void Match::cancelUse() {
     m_useSlot = -1;
 }
 
+float Match::useSecondsFor(ItemType type) const {
+    const int i = static_cast<int>(type);
+    const float configured = i >= 0 && i < static_cast<int>(ItemType::Count) ? m_config.useSeconds[i] : 0.0f;
+    const float seconds = configured > 0.0f ? configured : itemDef(type).useSeconds;
+    return seconds > 0.05f ? seconds : 0.05f;
+}
+
 float Match::playerSpread(const WeaponConfig& w) const {
     // Dispersion (grados): apuntando con L, la de apuntar; si no, la de cadera. Moverse y
-    // saltar la aumentan. Quieto, apuntando y sin haber disparado en 0.35 s, el primer
-    // disparo va exacto (como en Fortnite). La escopeta siempre abre su cono.
+    // saltar la aumentan. Agachado en el suelo se reduce segun el arma (crouchSpreadScale).
+    // El retroceso de los ultimos disparos se suma despues: agacharse no lo quita.
+    // Quieto, apuntando y sin retroceso pendiente, el primer disparo va exacto (como en
+    // Fortnite). La escopeta siempre abre su cono.
     if (!m_config.weaponSpread) return 0.0f;
     const CharacterState& s = m_player.state();
     const bool aiming = m_input.aiming;
     float spread = aiming ? w.aimSpread : w.hipSpread;
     if (s.horizontalSpeed() > 1.0f) spread += 1.0f;
     if (!s.grounded()) spread += 3.0f;
-    const Weapon* weapon = m_inventory.activeWeapon();
-    if (w.pellets == 1 && aiming && s.horizontalSpeed() < 0.5f && s.grounded() && weapon && weapon->sinceShot() > 0.35f) {
-        spread = 0.0f;
+    if (m_playerCrouched && s.grounded()) {
+        const float bonus = math3d::clampf(m_config.crouchAccuracyBonus, 0.0f, 1.0f);
+        spread *= 1.0f + (w.crouchSpreadScale - 1.0f) * bonus;
     }
-    return spread;
+    const Weapon* weapon = m_inventory.activeWeapon();
+    if (w.pellets == 1 && aiming && s.horizontalSpeed() < 0.5f && s.grounded() && weapon && weapon->sinceShot() > 0.35f &&
+        m_recoilBloom < 0.05f) {
+        return 0.0f;
+    }
+    return spread + m_recoilBloom;
+}
+
+float Match::playerSpreadNow() const {
+    const Weapon* w = m_inventory.activeWeapon();
+    return w ? playerSpread(w->config()) : 0.0f;
 }
 
 int Match::playerReserve() const {
@@ -641,29 +691,32 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, fl
     // Dispersion del arma (despues de la ayuda de punteria: la ayuda no la anula).
     if (spreadDegrees > 0.0f) dir = perturb(dir, math3d::toRadians(spreadDegrees), m_rng);
 
-    // 1) Rayo desde la camara por el centro de la mira. Empieza a la altura del jugador:
-    //    lo que haya entre la camara y el jugador no cuenta.
-    const float t0 = fmaxf(0.0f, math3d::dot(chest - aim.eye, dir));
-    const Vec3 start = aim.eye + dir * t0;
+    // 1) Rayo desde la camara por el centro de la mira (ver aimPoint).
+    const Vec3 target = aimPoint(aim.eye, dir, range);
+
+    // 2) La bala sale del arma: si entre el pecho del jugador y ese punto hay un solido
+    //    (p. ej. un muro que la camara ve por encima), el disparo termina en el solido.
+    Vec3 toTarget = target - chest;
+    const float len = math3d::length(toTarget);
+    if (len < 0.05f) return resolveShot(0, chest, chest + dir * range, damage, weapon, emitShot, weaponType);
+    toTarget = toTarget * (1.0f / len);
+    return resolveShot(0, chest, target + toTarget * 0.1f, damage, weapon, emitShot, weaponType);
+}
+
+Vec3 Match::aimPoint(const Vec3& eye, const Vec3& dir, float range) const {
+    // Empieza a la altura del jugador: lo que haya entre la camara y el jugador no cuenta.
+    const float t0 = fmaxf(0.0f, math3d::dot(chestOf(0) - eye, dir));
+    const Vec3 start = eye + dir * t0;
     const Vec3 end = start + dir * range;
     world::RayHit wallHit;
     float best = m_world->raycast(start, end, world::kBlocksShots, &wallHit) ? wallHit.t : 1.0f;
     const Vec3 seg = end - start;
     for (int id = 1; id < entityCount(); ++id) {
         if (!alive(id) || m_air[id] == AirState::Bus) continue;
-        const world::Aabb box = hitBox(id);
         float t;
-        if (world::segmentVsAabb(start, seg, box, &t) && t < best) best = t;
+        if (world::segmentVsAabb(start, seg, hitBox(id), &t) && t < best) best = t;
     }
-    const Vec3 aimPoint = start + seg * best;
-
-    // 2) La bala sale del arma: si entre el pecho del jugador y ese punto hay un solido
-    //    (p. ej. un muro que la camara ve por encima), el disparo termina en el solido.
-    Vec3 toTarget = aimPoint - chest;
-    const float len = math3d::length(toTarget);
-    if (len < 0.05f) return resolveShot(0, chest, chest + dir * range, damage, weapon, emitShot, weaponType);
-    toTarget = toTarget * (1.0f / len);
-    return resolveShot(0, chest, aimPoint + toTarget * 0.1f, damage, weapon, emitShot, weaponType);
+    return start + seg * best;
 }
 
 void Match::fireWeapon(int shooter, const Vec3& origin, const Vec3& direction, const WeaponConfig& weapon,
@@ -876,6 +929,7 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
     if (victim == 0) {
         m_sincePlayerDamaged = 0.0f;
         pushEvent(GameEventType::PlayerHurt, 0, attacker, chestOf(0));
+        if (m_config.interruptUseOnDamage) cancelUse();
     } else if (attacker >= 0 && attacker != victim && alive(attacker)) {
         // Un bot que recibe un disparo se cubre con una pared (a veces, en su siguiente
         // paso: no a mitad del disparo) y se gira hacia quien le ha dado.

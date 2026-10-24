@@ -212,7 +212,7 @@ void Match::botUpdateHealing(int index, float dt) {
     }
     if (best < 0) return;
     b.healSlot = best;
-    b.healTimer = fmaxf(itemDef(b.bag.slot(best).type).useSeconds, 0.05f);
+    b.healTimer = useSecondsFor(b.bag.slot(best).type);
 }
 
 bool Match::botNeedsSafety(const Vec3& pos, int self) const {

@@ -303,17 +303,9 @@ bool Match::pickUp(int id, int index) {
         }
         const Pickup taken = p;
         const int vacate = isWeapon(taken.item) ? botReplacedSlot(b, taken) : -1;
-        if (vacate >= 0) {
-            // Un arma mejor del mismo tipo, o lleno: suelta la que sustituye.
-            const InventorySlot dropped = b.bag.take(vacate);
-            Pickup out;
-            out.kind = PickupKind::Item;
-            out.item = dropped.type;
-            out.rarity = dropped.rarity;
-            out.count = dropped.count;
-            dropAround(b.body.state().position, out, 0, 1);
-        }
-        const int left = b.bag.add(taken.item, taken.rarity, taken.count);
+        // Un arma mejor del mismo tipo, o lleno: suelta la que sustituye (con sus balas).
+        if (vacate >= 0) dropSlot(b.bag.take(vacate), b.body.state().position);
+        const int left = b.bag.add(taken.item, taken.rarity, taken.count, taken.loaded);
         Pickup& now = m_pickups[index];  // dropAround puede haber movido el vector
         now.count = left;
         if (left <= 0) now.active = false;
@@ -332,43 +324,69 @@ bool Match::pickUp(int id, int index) {
         pushEvent(GameEventType::PickedUp, 0, -1, p.position);
         return true;
     }
+    // Inventario lleno (no cabe ni una unidad): se cambia por lo de la ranura seleccionada.
+    // El jugador elige antes la ranura en el selector del HUD (PlayerCommands::swapSlot).
+    if (m_inventory.room(p.item) <= 0) return swapPickup(index, m_inventory.selected());
     const bool handsFree = m_inventory.activeType() == ItemType::None;
-    const int before = p.count;
-    int left = m_inventory.add(p.item, p.rarity, p.count);
-    if (left == before) {
-        // Inventario lleno: se cambia por lo que hay en la ranura seleccionada (que cae al suelo).
-        InventorySlot dropped;
-        cancelUse();
-        m_inventory.replaceSelected(p.item, p.rarity, p.count, &dropped);
-        left = p.count - (isWeapon(p.item) ? 1 : (p.count < itemDef(p.item).maxStack ? p.count : itemDef(p.item).maxStack));
-        if (dropped.type != ItemType::None) {
-            Pickup out;
-            out.kind = PickupKind::Item;
-            out.item = dropped.type;
-            out.rarity = dropped.rarity;
-            out.count = dropped.count;
-            out.position = body(0).state().position + forwardFromYaw(m_input.cameraYaw) * 0.6f;
-            out.position.y = body(0).state().position.y;
-            // El objeto recogido deja libre su hueco; lo soltado va ahi despues.
-            p.count = left;
-            if (p.count <= 0) p.active = false;
-            dropPickup(out);
-        } else {
-            p.count = left;
-            if (p.count <= 0) p.active = false;
-        }
-    } else {
-        p.count = left;
-        if (p.count <= 0) p.active = false;
-        // Con las manos libres (pico o ranura vacia) se coge lo recogido.
-        if (handsFree) {
-            for (int i = 0; i < Inventory::kSlots; ++i) {
-                if (m_inventory.slot(i).type == p.item) m_inventory.select(i);
-            }
+    p.count = m_inventory.add(p.item, p.rarity, p.count, p.loaded);
+    if (p.count <= 0) p.active = false;
+    // Con las manos libres (pico o ranura vacia) se coge lo recogido.
+    if (handsFree) {
+        for (int i = 0; i < Inventory::kSlots; ++i) {
+            if (m_inventory.slot(i).type == p.item) m_inventory.select(i);
         }
     }
     pushEvent(GameEventType::PickedUp, 0, static_cast<int>(p.item), p.position);
     return true;
+}
+
+int Match::pickupRoom(int index) const {
+    if (index < 0 || index >= static_cast<int>(m_pickups.size())) return 0;
+    const Pickup& p = m_pickups[index];
+    if (!p.active) return 0;
+    if (p.kind == PickupKind::Ammo) return p.count;
+    return m_inventory.room(p.item);
+}
+
+bool Match::pickupInReach(int index) const {
+    if (index < 0 || index >= static_cast<int>(m_pickups.size()) || !alive(0) || m_air[0] != AirState::Ground) return false;
+    const Pickup& p = m_pickups[index];
+    const Vec3 pos = body(0).state().position;
+    return p.active && p.kind == PickupKind::Item && distXZ(p.position, pos) <= kPickupReach + 0.5f &&
+           fabsf(p.position.y - pos.y) <= 1.6f;
+}
+
+bool Match::swapPickup(int index, int slot) {
+    if (index < 0 || index >= static_cast<int>(m_pickups.size()) || slot < 0 || slot >= Inventory::kSlots) return false;
+    if (!pickupInReach(index)) return false;
+    const Pickup taken = m_pickups[index];
+    const Vec3 pos = body(0).state().position;
+    cancelUse();
+    if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
+    InventorySlot dropped;
+    const int placed = m_inventory.place(slot, taken.item, taken.rarity, taken.count, taken.loaded, &dropped);
+    m_inventory.select(slot);
+    Pickup& now = m_pickups[index];
+    now.count -= placed;
+    if (now.count <= 0) now.active = false;
+    // Lo soltado cae donde estaba lo recogido (o, si queda parte del monton, delante).
+    const Vec3 where = now.active ? pos + forwardFromYaw(m_input.cameraYaw) * 0.6f : taken.position;
+    dropSlot(dropped, where);
+    pushEvent(GameEventType::PickedUp, 0, static_cast<int>(taken.item), taken.position);
+    return true;
+}
+
+void Match::dropSlot(const InventorySlot& slot, const Vec3& where) {
+    if (slot.type == ItemType::None || slot.count <= 0) return;
+    Pickup out;
+    out.kind = PickupKind::Item;
+    out.item = slot.type;
+    out.rarity = slot.rarity;
+    out.count = slot.count;
+    out.loaded = isWeapon(slot.type) ? slot.weapon.ammo() : -1;
+    out.position = where;
+    out.position.y = m_world->supportHeight(where.x, where.z, 0.2f, where.y + 0.5f);
+    dropPickup(out);
 }
 
 void Match::autoPickupAmmo(int id) {
@@ -433,6 +451,7 @@ void Match::dropBotWeapon(int index) {
         w.item = s.type;
         w.rarity = s.rarity;
         w.count = s.count;
+        w.loaded = isWeapon(s.type) ? s.weapon.ammo() : -1;
         dropAround(pos, w, slot++, total);
         if (isWeapon(s.type)) {
             dropAround(pos, ammoPickup(static_cast<AmmoType>(weaponConfig(s.type, s.rarity).ammoType)), slot++, total);

@@ -46,6 +46,10 @@ struct PlayerCommands {
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
     bool toggleCrouch = false;   // cruceta abajo: agacharse / levantarse
     bool useItem = false;    // R pulsado con un consumible en la mano
+    // Inventario lleno: cambiar el objeto del suelo `swapPickup` por la ranura `swapSlot`
+    // (el jugador la elige en el selector del HUD). -1: nada.
+    int swapPickup = -1;
+    int swapSlot = -1;
 };
 
 // Por que no se ha podido usar un consumible.
@@ -96,6 +100,7 @@ struct Pickup {
     Rarity rarity = Rarity::Common;
     AmmoType ammo = AmmoType::Medium;
     int count = 0;
+    int loaded = -1;  // arma: balas en el cargador (-1: lleno). Al soltarla conserva las suyas.
     math3d::Vec3 position;
     int claimedBy = -1;  // bot que va a por el
 };
@@ -240,7 +245,11 @@ public:
     const Inventory& inventory() const { return m_inventory; }
     const Materials& materials() const { return m_materials; }
     // Consumible en uso: progreso 0..1 (o -1 si no se esta usando nada) y que objeto es.
+    // Mientras se usa, el jugador no se mueve, no salta ni se agacha (la camara si gira).
     float useProgress() const { return m_useSlot >= 0 ? m_useTimer / m_useDuration : -1.0f; }
+    float useDuration() const { return m_useDuration; }
+    // Tiempo de uso de un consumible (MatchConfig::useSeconds o, si es 0, el de ItemDef).
+    float useSecondsFor(ItemType type) const;
     ItemType usingItem() const { return m_useSlot >= 0 ? m_inventory.slot(m_useSlot).type : ItemType::None; }
     UseError lastUseError() const { return m_useError; }
     float sinceUseError() const { return m_sinceUseError; }
@@ -268,8 +277,17 @@ public:
     // Lo que el jugador abriria / recogeria ahora con CUADRADO.
     Interactable playerInteractable() const { return interactableFor(0); }
     Interactable interactableFor(int id) const;
-    // Abre o recoge (pruebas y bots; el jugador lo hace con CUADRADO).
+    // Abre o recoge (pruebas y bots; el jugador lo hace con CUADRADO). Si al jugador no le
+    // cabe el objeto, lo cambia por el de la ranura seleccionada.
     bool interact(int id, const Interactable& target);
+    // Cuantas unidades de un objeto del suelo caben en el inventario del jugador sin
+    // sustituir nada (0: hay que elegir que soltar).
+    int pickupRoom(int pickup) const;
+    // El objeto del suelo sigue ahi y al alcance del jugador (para el selector de cambio).
+    bool pickupInReach(int pickup) const;
+    // Cambia el objeto del suelo por el de la ranura `slot`, que cae al suelo con su
+    // cargador (si es un arma) y se puede volver a recoger. false si no esta al alcance.
+    bool swapPickup(int pickup, int slot);
     // Da un objeto al jugador (pruebas; en partida, el botin).
     int giveItem(ItemType type, int count, Rarity rarity = Rarity::Common) {
         return m_inventory.add(type, rarity, count);
@@ -286,6 +304,10 @@ public:
     // Caja de impacto de un personaje (mas baja si el jugador esta agachado).
     world::Aabb hitBox(int id) const;
     int playerHeadshots() const { return m_playerHeadshots; }
+    // Dispersion actual del arma en la mano (grados): la que tendria el siguiente disparo
+    // (la mira del HUD se abre con ella). Incluye el retroceso acumulado.
+    float playerSpreadNow() const;
+    float recoilBloom() const { return m_recoilBloom; }
     // Material elegido para construir (CUADRADO en construccion lo cambia).
     world::Resource buildMaterial() const { return m_buildMaterial; }
     // Donde iria una pieza ahora mismo (para dibujar la pieza fantasma).
@@ -318,6 +340,9 @@ public:
     // `spreadDegrees`: dispersion aplicada tras la ayuda de punteria; `weapon`: caida del
     // dano con la distancia y tipo para el sonido (nullptr: sin caida). `emitShot`: false
     // en los perdigones 2..N de la escopeta (un solo sonido).
+    // Punto donde acaba el rayo de la mira (desde la altura del jugador): la primera pared,
+    // objeto o personaje en `range` metros. Es el mismo calculo del disparo del jugador.
+    math3d::Vec3 aimPoint(const math3d::Vec3& eye, const math3d::Vec3& direction, float range) const;
     ShotResult playerShot(const PlayerAim& aim, float damage, float range, float spreadDegrees = 0.0f,
                           const WeaponConfig* weapon = nullptr, bool emitShot = true, int weaponType = -1);
     // `ignoreShield`: el dano va directo a la vida (la tormenta, como en Fortnite).
@@ -369,6 +394,8 @@ private:
     Pickup randomConsumablePickup();
     Rarity randomRarity(bool chest);
     void dropBotWeapon(int bot);  // al caer: todo su inventario queda en el suelo
+    // Deja en el suelo lo que se ha sacado de una ranura (arma con sus balas, consumibles).
+    void dropSlot(const InventorySlot& slot, const math3d::Vec3& where);
     // Bots con inventario: que les interesa recoger, que arma sacar y cuando curarse.
     bool botWants(const Bot& bot, const Pickup& pickup) const;
     int botReplacedSlot(const Bot& bot, const Pickup& pickup) const;
@@ -430,6 +457,8 @@ private:
     bool m_pendingPickaxe = false;
     bool m_pendingUse = false;
     int m_pendingCycle = 0;
+    int m_pendingSwapPickup = -1, m_pendingSwapSlot = -1;
+    float m_recoilBloom = 0.0f;  // grados de dispersion por el retroceso de los ultimos disparos
     bool m_buildMode = false;
     Inventory m_inventory;
     Materials m_materials;

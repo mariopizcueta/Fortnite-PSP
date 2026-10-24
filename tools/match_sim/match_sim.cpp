@@ -1458,7 +1458,7 @@ void testHeadshotsAndCrouch(world::World& world, game::NavGrid& nav) {
     game::PlayerAim off;
     off.eye = s.eyeOf(0);
     const Vec3 to = math3d::normalize(s.chestOf(1) - off.eye);
-    off.direction = game::detail::rotateY(to, math3d::toRadians(2.5f));
+    off.direction = math3d::normalize(game::detail::rotateY(to, math3d::toRadians(1.2f)));  // ~1.8 grados con la altura
     auto assistWith = [&](bool aiming, const game::PlayerCommands& cmd) {
         game::PlayerInput in;
         in.aiming = aiming;
@@ -1468,7 +1468,7 @@ void testHeadshotsAndCrouch(world::World& world, game::NavGrid& nav) {
     };
     const int hip = assistWith(false, put);
     const int scoped = assistWith(true, game::PlayerCommands{});
-    printf("  francotirador a 2.5 grados del bot: sin L ayuda a %d, con L ayuda a %d\n", hip, scoped);
+    printf("  francotirador a ~1.8 grados del bot: sin L ayuda a %d, con L ayuda a %d\n", hip, scoped);
     check(s.inventory().activeType() == game::ItemType::Sniper && hip < 0 && scoped == 1,
           "con el francotirador y L la ayuda de punteria es mayor");
 }
@@ -1768,6 +1768,246 @@ void testRealMatches(world::World& world, game::NavGrid& nav) {
     check(stuckOk, "ningun bot se queda atascado mas de 8 s seguidos");
 }
 
+
+// --- Parche (fase 8), bloque A ------------------------------------------------------------------
+
+void stepWith(Match& m, const game::PlayerInput& in, const game::PlayerAim& aim,
+              const game::PlayerCommands& cmd = game::PlayerCommands{}) {
+    m.setPlayerInput(in, aim, cmd);
+    m.step(game::FixedTimestep::kStep);
+}
+
+// Ranuras + objetos del suelo de cada tipo (para comprobar que nada se pierde ni se duplica).
+int totalOf(const Match& m, game::ItemType type) {
+    int n = m.inventory().count(type);
+    for (const game::Pickup& p : m.pickups()) {
+        if (p.active && p.kind == game::PickupKind::Item && p.item == type) n += p.count;
+    }
+    return n;
+}
+
+int selectSlotOf(Match& m, game::ItemType type) {
+    game::PlayerInput in;
+    for (int k = 0; k < 6; ++k) {
+        if (!m.inventory().pickaxe() && m.inventory().activeType() == type) return m.inventory().selected();
+        game::PlayerCommands c;
+        if (m.inventory().pickaxe()) c.togglePickaxe = true;
+        else c.cycleSlot = 1;
+        stepWith(m, in, game::PlayerAim{}, c);
+    }
+    return -1;
+}
+
+void testPatchA(world::World& world, game::NavGrid& nav) {
+    printf("\n16) Parche A: cambiar objetos (tambien curativos), curarse quieto, agacharse y retroceso\n");
+    world.mutableCollision().clearDynamic();
+    using game::ItemType;
+    using game::Rarity;
+    MatchConfig cfg;
+    cfg.botCount = 1;
+    cfg.startInBus = false;
+    cfg.loot = false;
+    cfg.stormCloses = false;
+    cfg.useSeconds[static_cast<int>(ItemType::Bandage)] = 1.2f;  // tiempo de uso configurable
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 spot{70.0f, 0.0f, 25.0f};
+    m.teleport(0, spot, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    m.giveItem(ItemType::AssaultRifle, 1, Rarity::Rare);
+    m.giveItem(ItemType::Bandage, 5);
+    m.giveItem(ItemType::SmallShield, 3, Rarity::Uncommon);
+    m.giveItem(ItemType::Medkit, 1, Rarity::Uncommon);
+    m.giveItem(ItemType::ShieldPotion, 1, Rarity::Rare);
+    m.giveAmmo(game::AmmoType::Medium, 60);
+    game::PlayerInput still;
+    // El fusil dispara hasta quedarse con 7 balas en el cargador.
+    selectSlotOf(m, ItemType::AssaultRifle);
+    game::PlayerAim sky;
+    sky.eye = m.eyeOf(0);
+    sky.direction = math3d::normalize(Vec3{0.0f, 1.0f, -1.0f});
+    sky.fire = true;
+    for (int i = 0; i < 60 * 8 && m.inventory().slot(0).weapon.ammo() > 7; ++i) stepWith(m, still, sky);
+    stepWith(m, still, game::PlayerAim{});
+    const int loaded = m.inventory().slot(0).weapon.ammo();
+    const int reserve = m.inventory().ammo(game::AmmoType::Medium);
+
+    // Con las vendas en la mano, CUADRADO sobre un arma: el inventario esta lleno y hay que
+    // elegir que soltar (el selector de la aplicacion manda la ranura elegida).
+    const int bandSlot = selectSlotOf(m, ItemType::Bandage);
+    game::Pickup sniper;
+    sniper.kind = game::PickupKind::Item;
+    sniper.item = ItemType::Sniper;
+    sniper.rarity = Rarity::Legendary;
+    sniper.count = 1;
+    sniper.position = spot + Vec3{0.0f, 0.0f, -0.8f};
+    const int sniperIndex = m.dropPickup(sniper);
+    const int bandagesBefore = totalOf(m, ItemType::Bandage), snipersBefore = totalOf(m, ItemType::Sniper);
+    const bool full = m.inventory().full() && m.pickupRoom(sniperIndex) == 0;
+    game::PlayerCommands swap;
+    swap.swapPickup = sniperIndex;
+    swap.swapSlot = bandSlot;
+    stepWith(m, still, game::PlayerAim{}, swap);
+    int snipersOnFloor = 0;
+    for (const game::Pickup& p : m.pickups()) snipersOnFloor += p.active && p.item == ItemType::Sniper ? 1 : 0;
+    check(full && m.inventory().slot(bandSlot).type == ItemType::Sniper && totalOf(m, ItemType::Bandage) == bandagesBefore &&
+              totalOf(m, ItemType::Sniper) == snipersBefore && snipersOnFloor == 0,
+          "inventario lleno con un curativo en la mano: se cambia por la ranura elegida y las vendas quedan en el suelo");
+    // Las vendas soltadas se recogen de nuevo eligiendo la ranura del fusil (con 7 balas).
+    int bandIndex = -1;
+    for (size_t i = 0; i < m.pickups().size(); ++i) {
+        const game::Pickup& p = m.pickups()[i];
+        if (p.active && p.item == ItemType::Bandage) bandIndex = static_cast<int>(i);
+    }
+    swap.swapPickup = bandIndex;
+    swap.swapSlot = 0;
+    stepWith(m, still, game::PlayerAim{}, swap);
+    int rifleIndex = -1;
+    for (size_t i = 0; i < m.pickups().size(); ++i) {
+        const game::Pickup& p = m.pickups()[i];
+        if (p.active && p.item == ItemType::AssaultRifle) rifleIndex = static_cast<int>(i);
+    }
+    check(bandIndex >= 0 && m.inventory().slot(0).type == ItemType::Bandage && rifleIndex >= 0 &&
+              m.pickups()[rifleIndex].loaded == loaded,
+          "el objeto sustituido aparece en el suelo y se puede recoger (el fusil cae con sus balas)");
+    swap.swapPickup = rifleIndex;
+    swap.swapSlot = 3;
+    stepWith(m, still, game::PlayerAim{}, swap);
+    printf("  fusil con %d balas en el cargador: soltado y recogido -> %d; reserva %d -> %d\n", loaded,
+           m.inventory().slot(3).weapon.ammo(), reserve, m.inventory().ammo(game::AmmoType::Medium));
+    check(m.inventory().slot(3).type == ItemType::AssaultRifle && m.inventory().slot(3).weapon.ammo() == loaded &&
+              m.inventory().ammo(game::AmmoType::Medium) == reserve,
+          "al recoger un arma soltada no se duplica municion (conserva su cargador)");
+    // Fuera de alcance no se cambia nada.
+    swap.swapPickup = bandIndex >= 0 ? rifleIndex : -1;
+    m.teleport(0, spot + Vec3{6.0f, 0.0f, 0.0f}, 0.0f);
+    for (size_t i = 0; i < m.pickups().size(); ++i) {
+        if (m.pickups()[i].active) swap.swapPickup = static_cast<int>(i);
+    }
+    const ItemType inSlot = m.inventory().slot(3).type;
+    stepWith(m, still, game::PlayerAim{}, swap);
+    check(m.inventory().slot(3).type == inSlot, "sin el objeto al alcance no se cambia nada");
+    m.teleport(0, spot, 0.0f);
+
+    // Curarse: quieto y sin saltar mientras dura (la camara puede girar); tiempo configurable.
+    m.applyDamage(0, 60.0f, -1);
+    const int bandSlotNow = selectSlotOf(m, ItemType::Bandage);
+    game::PlayerCommands use;
+    use.useItem = true;
+    stepWith(m, still, game::PlayerAim{}, use);
+    const Vec3 at = m.body(0).state().position;
+    game::PlayerInput push;
+    push.moveY = -1.0f;
+    push.jumpPressed = true;
+    push.jumpHeld = true;
+    push.cameraYaw = 1.2f;  // la camara gira
+    bool grounded = true;
+    for (int i = 0; i < 60; ++i) {
+        stepWith(m, push, game::PlayerAim{});
+        grounded &= m.body(0).state().grounded();
+    }
+    const float moved = distXZ(m.body(0).state().position, at);
+    const bool usingAfter1s = m.useProgress() >= 0.0f;
+    for (int i = 0; i < 20; ++i) stepWith(m, still, game::PlayerAim{});
+    printf("  vendas (1.2 s configurado): con el stick y X se mueve %.2f m; vida %.0f -> %.0f\n", static_cast<double>(moved),
+           40.0, static_cast<double>(m.body(0).state().health));
+    check(bandSlotNow >= 0 && usingAfter1s && moved < 0.01f && grounded, "curandose no se mueve ni salta");
+    check(m.body(0).state().health == 55.0f && m.useProgress() < 0.0f, "la cura termina en su tiempo configurado (1.2 s)");
+    // Interrumpida (cambiar de ranura): no se gasta.
+    const int count = m.inventory().slot(bandSlotNow).count;
+    stepWith(m, still, game::PlayerAim{}, use);
+    for (int i = 0; i < 30; ++i) stepWith(m, still, game::PlayerAim{});
+    game::PlayerCommands next;
+    next.cycleSlot = 1;
+    stepWith(m, still, game::PlayerAim{}, next);
+    for (int i = 0; i < 90; ++i) stepWith(m, still, game::PlayerAim{});
+    check(m.inventory().slot(bandSlotNow).count == count && m.body(0).state().health == 55.0f,
+          "si la cura se interrumpe el objeto no se gasta");
+    // Y tras curarse se vuelve a andar.
+    const Vec3 before = m.body(0).state().position;
+    game::PlayerInput walkIn;
+    walkIn.moveY = -1.0f;
+    for (int i = 0; i < 30; ++i) stepWith(m, walkIn, game::PlayerAim{});
+    check(distXZ(m.body(0).state().position, before) > 1.0f, "sin curarse se anda con normalidad");
+
+    // Agacharse: menos dispersion segun el arma, pero sin quitar el retroceso.
+    struct Case {
+        ItemType type;
+        Rarity rarity;
+    };
+    const Case cases[] = {{ItemType::AssaultRifle, Rarity::Rare},
+                          {ItemType::Shotgun, Rarity::Rare},
+                          {ItemType::Smg, Rarity::Rare},
+                          {ItemType::Sniper, Rarity::Rare}};
+    bool lower = true, notPerfect = true;
+    for (const Case& c : cases) {
+        Match w;
+        MatchConfig wc = cfg;
+        wc.startItems[0] = {c.type, 1, c.rarity};
+        w.start(wc, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        w.teleport(0, spot, 0.0f);
+        stepWith(w, still, game::PlayerAim{});
+        const float standing = w.playerSpreadNow();
+        game::PlayerCommands crouch;
+        crouch.toggleCrouch = true;
+        stepWith(w, still, game::PlayerAim{}, crouch);
+        const float crouched = w.playerSpreadNow();
+        printf("  %-14s cadera: de pie %.2f grados, agachado %.2f\n", game::weaponConfig(c.type, c.rarity).name,
+               static_cast<double>(standing), static_cast<double>(crouched));
+        lower &= crouched < standing;
+        notPerfect &= crouched >= standing * 0.45f && crouched > 0.5f;
+    }
+    check(lower, "agachado la dispersion de cada arma es menor");
+    check(notPerfect, "pero ninguna arma pasa a ser perfectamente precisa (cada una conserva su caracter)");
+
+    // Retroceso: rafaga del fusil de pie, se agacha: la parte del retroceso se mantiene.
+    Match r;
+    MatchConfig rc = cfg;
+    rc.startItems[0] = {ItemType::AssaultRifle, 1, Rarity::Rare};
+    rc.startAmmo[static_cast<int>(game::AmmoType::Medium)] = 90;
+    r.start(rc, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    r.teleport(0, spot, 0.0f);
+    r.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    stepWith(r, still, game::PlayerAim{});
+    const float base = r.playerSpreadNow();
+    sky.eye = r.eyeOf(0);
+    for (int i = 0; i < 60; ++i) stepWith(r, still, sky);  // ~5 disparos
+    const float bloom = r.recoilBloom(), burst = r.playerSpreadNow();
+    game::PlayerCommands crouch;
+    crouch.toggleCrouch = true;
+    r.setPlayerInput(still, game::PlayerAim{}, crouch);
+    const float crouchedBurst = r.playerSpreadNow();
+    printf("  fusil: dispersion %.2f -> %.2f tras 1 s disparando (retroceso %.2f); agachado %.2f\n",
+           static_cast<double>(base), static_cast<double>(burst), static_cast<double>(bloom),
+           static_cast<double>(crouchedBurst));
+    check(bloom > 1.0f && burst > base + 1.0f, "cada disparo abre la dispersion (retroceso acumulado)");
+    check(fabsf(crouchedBurst - (base * 0.6f + bloom)) < 0.05f, "agacharse reduce la dispersion del arma pero no el retroceso");
+    for (int i = 0; i < 90; ++i) stepWith(r, still, game::PlayerAim{});
+    check(r.recoilBloom() < 0.01f, "el retroceso se recupera al dejar de disparar");
+
+    // Efecto real en los disparos: a 30 m sin apuntar, agachado se acierta mas.
+    int hits[2] = {0, 0};
+    for (int crouched = 0; crouched < 2; ++crouched) {
+        Match h;
+        MatchConfig hc = cfg;
+        hc.aimAssistDegrees = 0.0f;
+        hc.seed = 99;
+        hc.startItems[0] = {ItemType::AssaultRifle, 1, Rarity::Rare};
+        h.start(hc, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        h.teleport(0, spot, 0.0f);
+        h.teleport(1, spot + Vec3{0.0f, 0.0f, -30.0f}, 0.0f);
+        game::PlayerCommands c0;
+        c0.toggleCrouch = crouched == 1;
+        stepWith(h, still, game::PlayerAim{}, c0);
+        game::PlayerAim aim;
+        aim.eye = h.eyeOf(0) + Vec3{0.0f, 0.5f, 3.0f};
+        aim.direction = math3d::normalize(h.chestOf(1) - aim.eye);
+        for (int k = 0; k < 400; ++k) hits[crouched] += h.playerShot(aim, 0.001f, 80.0f, h.playerSpreadNow()).hitEntity ? 1 : 0;
+    }
+    printf("  400 disparos a 30 m sin apuntar: de pie %d impactos, agachado %d\n", hits[0], hits[1]);
+    check(hits[1] > hits[0] + 20 && hits[1] < 400, "agachado se acierta mas (sin acertar siempre)");
+}
+
 }  // namespace
 
 int main() {
@@ -1798,6 +2038,7 @@ int main() {
     testLoot(world, nav);
     testBotInventory(world, nav);
     testHeadshotsAndCrouch(world, nav);
+    testPatchA(world, nav);
     testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
