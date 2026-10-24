@@ -225,7 +225,9 @@ void Match::explode(const Vec3& at, int owner, float damage, float radius, float
             if (id != 0) addDamageNumber(chest, amount, false);
         }
         pushEvent(GameEventType::HitEntity, id, owner, chest);
+        m_damageSource = weaponType;
         applyDamage(id, amount, owner);
+        m_damageSource = -1;
     }
     // Construcciones (todas las piezas dentro del radio).
     for (int i = 0; i < m_structures.capacity(); ++i) {

@@ -32,6 +32,8 @@ OBJS = src/main.o \
        src/app/app.o \
        src/app/app_hud.o \
        src/app/app_menus.o \
+       src/app/achievements.o \
+       src/app/locker.o \
        src/app/build_visuals.o \
        src/app/lobby_scene.o \
        src/app/prop_visuals.o \

@@ -64,7 +64,7 @@ enum class GameEventType : u8 {
     HitEntity,     // entity = alcanzado, other = tirador
     HitStructure,  // other = tirador, position = impacto en la pared construida
     PlayerHurt,    // entity = 0, other = atacante
-    Eliminated,    // entity = victima, other = quien la elimino
+    Eliminated,    // entity = victima, other = quien la elimino, amount = ItemType del golpe + 1 (0: pico/otro)
     WallBuilt,
     WallBroken,
     ObjectDestroyed,  // un objeto del mapa se queda sin vida (other = indice del objeto)
@@ -611,6 +611,7 @@ private:
     int m_nextExplosion = 0;
     float m_throwCooldown = 0.0f;
     int m_llama = -1;
+    int m_damageSource = -1;  // ItemType de lo que esta haciendo dano ahora (-1: pico, tormenta...)
     Trap m_traps[kMaxTraps];
     int m_trapStock = 0;
     bool m_pendingTrap = false;

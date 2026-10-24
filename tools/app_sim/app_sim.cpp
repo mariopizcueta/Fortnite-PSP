@@ -239,6 +239,9 @@ private:
 // de armas, construccion y curas no dependen del botin que haya cerca.
 bool landAndEquip(Sim& sim) {
     game::Match& match = sim.app().testMatch();
+    // Las comprobaciones con guion no deben depender de donde caen los bots: invulnerable
+    // hasta que la prueba quiera que caiga (seccion 4).
+    match.setPlayerInvulnerable(true);
     sim.press(PSP_CTRL_CROSS);
     const bool landed = sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 25.0f);
     match.giveItem(game::ItemType::AssaultRifle, 1, game::Rarity::Legendary);
@@ -502,7 +505,9 @@ void testSwapAndHeal(Sim& sim) {
     check(reopened && !sim.app().testSwapOpen() && !match.buildMode(), "CIRCULO cancela el selector (sin entrar en construccion)");
 
     // Curarse: con el stick adelante el jugador no se mueve hasta terminar.
+    match.setPlayerInvulnerable(false);
     match.applyDamage(0, 90.0f, -1);  // (el escudo absorbe lo primero)
+    match.setPlayerInvulnerable(true);
     const float hurt = match.body(0).state().health;
     for (int k = 0; k < 7 && (inv.pickaxe() || inv.activeType() != game::ItemType::Bandage); ++k) sim.press(PSP_CTRL_RIGHT);
     const Vec3 at = match.body(0).state().position;
@@ -971,7 +976,40 @@ int main(int argc, char** argv) {
     sim.shot("06_controles", PSP_CTRL_LTRIGGER | PSP_CTRL_CROSS);
     sim.press(PSP_CTRL_CIRCLE);
     check(sim.screen() == kLobby, "O vuelve al lobby");
-    sim.press(PSP_CTRL_UP);
+    // Parche E: secciones del lobby con L / R.
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    sim.shot("05b_lobby_logros");
+    const bool achievementsTab = sim.app().testLobbyTab() == 1;
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    sim.wait(0.1f);
+    sim.shot("05c_lobby_logros_bajando");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    sim.shot("05d_lobby_taquilla");
+    const bool lockerTab = sim.app().testLobbyTab() == 2;
+    sim.press(PSP_CTRL_RIGHT);  // mochila (vacia)
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.1f);
+    sim.shot("05e_taquilla_vacia");
+    const bool emptyOpen = sim.app().testLockerChoosing() && sim.app().testLockerSlot() == 1;
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.press(PSP_CTRL_RIGHT);  // pico
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.1f);
+    sim.shot("05f_taquilla_pico");
+    sim.press(PSP_CTRL_CROSS);  // equipar
+    const app::Cosmetic* pick = sim.app().testProfile().equippedIn(app::CosmeticSlot::Pickaxe);
+    check(achievementsTab && lockerTab, "R pasa de JUGAR a LOGROS y a TAQUILLA");
+    check(emptyOpen && !sim.app().testLockerChoosing() && pick && strcmp(pick->key, "pico_defecto") == 0,
+          "en la taquilla se recorren las categorias, una vacia lo indica y se equipa el pico");
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);
+    check(sim.app().testLobbyTab() == 0, "L vuelve a JUGAR");
+    sim.press(PSP_CTRL_UP);  // de CONTROLES a JUGAR
     sim.press(PSP_CTRL_RIGHT);
     check(sim.app().testBotSetting() == 15, "derecha sobre JUGAR sube los bots (15)");
     sim.press(PSP_CTRL_LEFT);
@@ -1098,6 +1136,7 @@ int main(int argc, char** argv) {
     check(!sim.app().testPaused(), "START reanuda");
 
     printf("\n4) Derrota, seguir mirando y fin\n");
+    match.setPlayerInvulnerable(false);
     const bool died = sim.waitUntil([&] { return !match.alive(0); }, 20.0f * 60.0f);
     check(died, "el jugador quieto acaba cayendo (como mucho 20 min de juego)");
     sim.wait(1.0f);
@@ -1135,8 +1174,18 @@ int main(int argc, char** argv) {
     testNewControls(sim);
     testPatchBVisuals(sim);
     sim.takeAudioPeak();
+    const int unlockedBefore = sim.app().testProfile().unlockedCount();
     killAllBots(sim);
     check(sim.takeAudioPeak() > 4000, "las eliminaciones suenan");
+    // Parche E: las bajas desbloquean logros (primera baja, racha...) con su aviso.
+    const app::Profile& prof = sim.app().testProfile();
+    printf("  logros: %d -> %d desbloqueados, %d avisos en cola\n", unlockedBefore, prof.unlockedCount(),
+           sim.app().testToastCount());
+    check(prof.achievements[static_cast<int>(app::AchievementId::FirstKill)].unlocked &&
+              prof.unlockedCount() > unlockedBefore && sim.app().testToastCount() > 0,
+          "eliminar bots desbloquea logros y aparece el aviso");
+    sim.wait(0.1f);
+    sim.shot("19b_logro_desbloqueado");
     printf("  victoria con %d bajas del jugador (el resto, entre bots)\n", match.playerKills());
     check(match.phase() == game::MatchPhase::Finished && match.winner() == 0 && match.playerKills() >= 1,
           "al eliminar a los bots que quedan gana el jugador");
@@ -1343,6 +1392,22 @@ int main(int argc, char** argv) {
     again.init();
     const bool same = strcmp(again.testProfile().name, "MARIO") == 0 && again.testProfile().matches == loaded.matches;
     check(same, "al volver a entrar se cargan el nombre y las estadisticas");
+    // Parche E: logros y taquilla guardados (una sola vez cada logro).
+    const app::Profile& reloaded = again.testProfile();
+    check(reloaded.unlockedCount() == played.unlockedCount() && reloaded.unlockedCount() > 0 &&
+              reloaded.achievements[static_cast<int>(app::AchievementId::FirstKill)].unlocked &&
+              reloaded.achievements[static_cast<int>(app::AchievementId::FirstKill)].date > 20000000,
+          "los logros (con su fecha) se guardan y se cargan");
+    check(reloaded.chestsOpened == played.chestsOpened && reloaded.chestsOpened > 0 && reloaded.piecesBuilt > 0,
+          "los contadores de los logros (cofres, construcciones...) se guardan");
+    {
+        int lines = 0;
+        FILE* f = fopen(profilePath, "r");
+        char buf[128];
+        while (f && fgets(buf, sizeof(buf), f)) lines += strncmp(buf, "logro_primera_baja=", 19) == 0 ? 1 : 0;
+        if (f) fclose(f);
+        check(lines == 1, "cada logro aparece una sola vez en perfil.txt");
+    }
     again.shutdown();
     if (g_logFile) fclose(g_logFile);
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);

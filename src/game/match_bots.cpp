@@ -589,6 +589,7 @@ void Match::botShoot(int index) {
         if (fabsf(wrapAngle(s.yaw - yawTowards(s.position, targetPos))) > 0.6f) return;
         b.meleeTimer = m_config.pickaxeInterval + 0.15f;
         pushEvent(GameEventType::HitEntity, b.target, self, chestOf(b.target));
+        m_damageSource = -1;
         applyDamage(b.target, m_config.pickaxeDamage * m_config.botDamageScale, self);
         return;
     }

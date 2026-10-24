@@ -195,6 +195,8 @@ void App::overlayNickname() const {
 
 void App::recordMatch() {
     // Suma la partida al perfil (una vez por partida: al ver los resultados o al abandonar).
+    // Las bajas, los disparos a la cabeza y el resto de contadores de los logros ya se han
+    // sumado durante la partida (App::processEvents).
     if (m_matchRecorded) return;
     m_matchRecorded = true;
     const bool won = m_match.phase() == game::MatchPhase::Finished && m_match.winner() == 0;
@@ -202,13 +204,73 @@ void App::recordMatch() {
     ++m_profile.matches;
     if (won) ++m_profile.wins;
     if (!m_match.alive(0)) ++m_profile.deaths;
-    m_profile.kills += kills;
-    m_profile.headshots += m_match.playerHeadshots();
     if (kills > m_profile.mostKills) m_profile.mostKills = kills;
     const int place = won ? 1 : m_match.playerPlace();
     if (place > 0 && (m_profile.bestPlace == 0 || place < m_profile.bestPlace)) m_profile.bestPlace = place;
+    if (place > 0 && place <= 5) ++m_profile.top5;
     m_profile.seconds += static_cast<int>(m_match.elapsed());
-    if (!m_profile.save(m_profilePath)) platform::log::write("aviso: no se pudo guardar %s", m_profilePath);
+    checkAchievements();
+    saveProfile();
+}
+
+void App::saveProfile() {
+    if (m_profile.save(m_profilePath)) {
+        m_profileDirty = false;
+    } else {
+        platform::log::write("aviso: no se pudo guardar %s", m_profilePath);
+    }
+}
+
+void App::addStat(Stat stat, int amount) {
+    if (amount <= 0 || !m_profile.hasName()) return;
+    m_profile.mutableStat(stat) += amount;
+    m_profileDirty = true;
+    checkAchievements();
+}
+
+void App::checkAchievements() {
+    AchievementId fresh[kAchievementCount];
+    const int n = m_profile.unlockReached(todayDate(), fresh, kAchievementCount);
+    if (n <= 0) return;
+    for (int i = 0; i < n; ++i) {
+        platform::log::write("logro desbloqueado: %s", achievementDef(fresh[i]).name);
+        if (m_toastCount < kMaxToasts) m_toasts[m_toastCount++] = fresh[i];
+    }
+    playSfx(audio::Sfx::MenuAccept, 1.0f);
+    playSfx(audio::Sfx::Pickup, 0.8f);
+    // Se guarda en el momento: un logro no se pierde aunque se apague la consola.
+    saveProfile();
+}
+
+// Aviso de logro desbloqueado: arriba en el centro, 3 s cada uno.
+constexpr float kToastSeconds = 3.0f;
+constexpr float kToastX = 120.0f, kToastY = 62.0f, kToastW = 240.0f, kToastH = 30.0f;
+
+void App::updateAchievementToasts(float dt) {
+    if (m_toastCount == 0) return;
+    m_toastTime += dt;
+    if (m_toastTime < kToastSeconds) return;
+    m_toastTime = 0.0f;
+    for (int i = 1; i < m_toastCount; ++i) m_toasts[i - 1] = m_toasts[i];
+    --m_toastCount;
+}
+
+void App::renderAchievementToast() const {
+    if (m_toastCount == 0) return;
+    // Entra deslizandose desde arriba.
+    const float in = fminf(1.0f, m_toastTime / 0.2f);
+    const float y = kToastY - (1.0f - in) * 40.0f;
+    gfx::fillRect(kToastX, y, kToastW, kToastH, rgba(8, 18, 48, 235));
+    gfx::fillRect(kToastX, y, 6, kToastH, kYellow);
+    ui::frame(kToastX, y, kToastW, kToastH, 1, kYellow);
+}
+
+void App::overlayAchievementToast() const {
+    if (m_toastCount == 0) return;
+    const float in = fminf(1.0f, m_toastTime / 0.2f);
+    const int y = static_cast<int>(kToastY - (1.0f - in) * 40.0f);
+    printCenteredAt(243, y + 5, kYellow, "LOGRO DESBLOQUEADO");
+    printCenteredAt(243, y + 17, kWhite, achievementDef(m_toasts[0]).name);
 }
 
 // Pantalla de inicio: la imagen de Recursos/loginscreen.png, "Pulsa (X) para iniciar" bajo
@@ -272,6 +334,25 @@ void App::updateLobby(const input::Input& in, float dt) {
         return;
     }
 
+    // L / R: seccion del lobby (jugar, logros, taquilla). En la partida L y R son apuntar
+    // y disparar: no hay conflicto, el lobby solo existe fuera de ella.
+    const int tabs = static_cast<int>(LobbyTab::Count);
+    const int tabStep = (in.pressed(PSP_CTRL_RTRIGGER) ? 1 : 0) - (in.pressed(PSP_CTRL_LTRIGGER) ? 1 : 0);
+    if (tabStep != 0 && !in.held(PSP_CTRL_START)) {
+        m_lobbyTab = static_cast<LobbyTab>((static_cast<int>(m_lobbyTab) + tabs + tabStep) % tabs);
+        m_lockerChoosing = false;
+        playSfx(audio::Sfx::MenuMove);
+        return;
+    }
+    switch (m_lobbyTab) {
+        case LobbyTab::Play: updateLobbyPlay(in); break;
+        case LobbyTab::Achievements: updateAchievementsTab(in); break;
+        case LobbyTab::Locker: updateLockerTab(in); break;
+        case LobbyTab::Count: break;
+    }
+}
+
+void App::updateLobbyPlay(const input::Input& in) {
     const int count = static_cast<int>(LobbyItem::Count);
     int item = static_cast<int>(m_lobbyItem);
     if (in.pressed(PSP_CTRL_UP)) item = (item + count - 1) % count;
@@ -306,42 +387,160 @@ void App::updateLobby(const input::Input& in, float dt) {
     }
 }
 
+// Logros: lista con su progreso (arriba / abajo la recorren).
+constexpr int kAchievementRows = 6;
+constexpr float kListX = 14.0f, kListY = 52.0f, kListW = 452.0f, kRowH = 31.0f;
+
+void App::updateAchievementsTab(const input::Input& in) {
+    const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (step == 0) return;
+    m_achievementCursor = (m_achievementCursor + kAchievementCount + step) % kAchievementCount;
+    playSfx(audio::Sfx::MenuMove, 0.6f);
+}
+
+// Taquilla: rejilla de 3 x 2 categorias (como Referencias/locker.jpg); X entra en una y
+// elige objeto; X equipa; CIRCULO vuelve.
+constexpr int kLockerCols = 3;
+constexpr float kLockerX = 262.0f, kLockerY = 64.0f, kLockerSlot = 60.0f, kLockerGap = 8.0f;
+
+void App::updateLockerTab(const input::Input& in) {
+    const CosmeticSlot slot = static_cast<CosmeticSlot>(m_lockerSlot);
+    int items[16];
+    const int n = cosmeticsIn(slot, items, 16);
+    if (m_lockerChoosing) {
+        const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+        if (step != 0 && n > 0) {
+            m_lockerItem = (m_lockerItem + n + step) % n;
+            playSfx(audio::Sfx::MenuMove, 0.6f);
+        }
+        if (in.pressed(PSP_CTRL_CROSS) && n > 0) {
+            const Cosmetic& item = cosmetic(items[m_lockerItem]);
+            const Cosmetic* before = m_profile.equippedIn(slot);
+            m_profile.equip(item);
+            saveProfile();
+            // Otro traje: el modelo del jugador se rehace con su paleta.
+            if (slot == CosmeticSlot::Outfit && item.palette && before != &item) {
+                m_models[0].destroy();
+                m_modelsReady &= m_models[0].build(*item.palette);
+            }
+            playSfx(audio::Sfx::MenuAccept);
+            m_lockerChoosing = false;
+        } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+            m_lockerChoosing = false;
+            playSfx(audio::Sfx::MenuMove);
+        }
+        return;
+    }
+    const int dx = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    const int dy = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (dx || dy) {
+        int col = m_lockerSlot % kLockerCols, row = m_lockerSlot / kLockerCols;
+        col = (col + kLockerCols + dx) % kLockerCols;
+        row = (row + 2 + dy) % 2;
+        m_lockerSlot = row * kLockerCols + col;
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+    if (in.pressed(PSP_CTRL_CROSS)) {
+        // Dentro de la categoria, empezando por lo equipado.
+        m_lockerChoosing = true;
+        m_lockerItem = 0;
+        const Cosmetic* on = m_profile.equippedIn(slot);
+        for (int i = 0; i < n; ++i) {
+            if (&cosmetic(items[i]) == on) m_lockerItem = i;
+        }
+        playSfx(audio::Sfx::MenuAccept, 0.7f);
+    }
+}
+
+// Pestanas en la barra superior (como PLAY / LOCKER en Fortnite), con L y R a los lados.
+constexpr float kTabsX = 150.0f, kTabGap = 18.0f, kTabY = 8.0f;
+const ui::Hint kTabLeft[] = {{ui::Button::L, ""}};
+const ui::Hint kTabRight[] = {{ui::Button::R, ""}};
+const ui::Hint kAchievementHints[] = {{ui::Button::Up, ""}, {ui::Button::Down, "recorrer"}, {ui::Button::L, ""},
+                                      {ui::Button::R, "secciones"}};
+const ui::Hint kLockerHints[] = {{ui::Button::Dpad, "elegir"}, {ui::Button::Cross, "abrir"}, {ui::Button::L, ""},
+                                 {ui::Button::R, "secciones"}};
+const ui::Hint kLockerChooseHints[] = {{ui::Button::Up, ""}, {ui::Button::Down, "elegir"}, {ui::Button::Cross, "equipar"},
+                                       {ui::Button::Circle, "volver"}};
+
+const assets::ui::Rect& tabLabel(int tab) {
+    switch (tab) {
+        case 1: return atlas::kTabLogros;
+        case 2: return atlas::kTabTaquilla;
+        default: return atlas::kTabJugar;
+    }
+}
+
+// Recorre las pestanas: fn(indice, x, ancho).
+template <typename Fn>
+void forEachTab(Fn&& fn) {
+    float x = kTabsX + ui::hintsWidth(kTabLeft, 1) + 8.0f;
+    for (int i = 0; i < 3; ++i) {
+        const assets::ui::Rect& r = tabLabel(i);
+        fn(i, x, static_cast<float>(r.w));
+        x += r.w + kTabGap;
+    }
+}
+
+void App::renderLobbyTabs() const {
+    gfx::fillRect(0, 0, gfx::kScreenWidth, 30, kNavy);
+    gfx::fillRect(0, 30, gfx::kScreenWidth, 1, rgba(60, 90, 160));
+    if (!m_atlas.ready()) return;
+    m_atlas.draw(atlas::kLogoSmall, 8, 3, 0.7f);
+    float end = 0.0f;
+    forEachTab([&](int i, float x, float w) {
+        const bool on = static_cast<int>(m_lobbyTab) == i;
+        if (on) {
+            gfx::fillRect(x - 5, 4, w + 10, 22, rgba(255, 255, 255, 235));
+            m_atlas.draw(tabLabel(i), x, kTabY, 1.0f, rgba(16, 26, 58));
+        } else {
+            m_atlas.draw(tabLabel(i), x, kTabY, 1.0f, rgba(170, 190, 230));
+        }
+        end = x + w;
+    });
+    ui::drawHintIcons(m_atlas, static_cast<int>(kTabsX), 11, kTabLeft, 1);
+    ui::drawHintIcons(m_atlas, static_cast<int>(end + 10.0f), 11, kTabRight, 1);
+}
+
+void App::overlayLobbyTabs() const {}
+
 void App::renderLobby() {
-    // Composicion de Referencias/Lobby.png: barra superior azul marino con el logotipo y el
-    // mapa, fondo azul con reticula, suelo de arena y el personaje en su plataforma.
+    // Composicion de Referencias/Lobby.png: barra superior azul marino con el logotipo y las
+    // secciones, fondo azul con reticula, suelo de arena y el personaje en su plataforma.
     if (m_lobbyReady) m_lobbyScene.drawBackground(m_lobbyTime);
     if (m_lobbyReady && m_modelsReady) {
         m_lobbyScene.drawScene(m_models[0], m_lobbyAnim, m_world.textures(), m_lobbyYaw, m_lobbyTime,
                                &m_lobbyViewProjection);
         gfx::begin2D();
     }
-    gfx::fillRect(0, 0, gfx::kScreenWidth, 30, kNavy);
-    gfx::fillRect(0, 30, gfx::kScreenWidth, 1, rgba(60, 90, 160));
-    if (m_atlas.ready()) {
-        m_atlas.draw(atlas::kLogoSmall, 8, 3, 0.7f);
-        m_atlas.draw(atlas::kMapa, gfx::kScreenWidth - 8 - atlas::kMapa.w * 0.9f, 5, 0.9f);
-    }
-
-    // Columna de botones: JUGAR (amarillo), selector de bots, CONTROLES y SALIR.
-    for (int i = 0; i < static_cast<int>(LobbyItem::Count); ++i) {
-        const LobbyButton& b = kLobbyButtons[i];
-        const bool selected = static_cast<int>(m_lobbyItem) == i && !m_confirmExit;
-        const u32 fill = i == 0 ? (selected ? kYellow : kYellowDark)
-                                : (selected ? kFortniteBlue : rgba(20, 44, 100, 220));
-        drawButton(kLobbyColumnX, b.y, kLobbyColumnW, b.h, fill, selected, m_lobbyTime);
-    }
-    gfx::fillRect(kLobbyColumnX, kBotsSelectorY, kLobbyColumnW, 22, rgba(0, 0, 0, 120));
-    if (m_atlas.ready()) {
-        const float cx = kLobbyColumnX + kLobbyColumnW * 0.5f;
-        m_atlas.drawCentered(atlas::kJugar, cx, kLobbyButtons[0].y + 6);
-        m_atlas.drawCentered(atlas::kControles, cx, kLobbyButtons[1].y + 3);
-        m_atlas.drawCentered(atlas::kSalir, cx, kLobbyButtons[2].y + 3);
-    }
+    renderLobbyTabs();
     gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
-    ui::drawHintIcons(m_atlas, 8, kHintsY, kLobbyHints, kLobbyHintCount);
-    // Panel de estadisticas del perfil (el texto, en overlayLobby).
-    gfx::fillRect(kStatsX, kStatsY, kStatsW, kStatsH, rgba(8, 18, 48, 200));
-    ui::frame(kStatsX, kStatsY, kStatsW, kStatsH, 1, rgba(90, 160, 255));
+    if (m_lobbyTab == LobbyTab::Achievements) {
+        renderAchievementsTab();
+    } else if (m_lobbyTab == LobbyTab::Locker) {
+        renderLockerTab();
+    } else {
+        if (m_atlas.ready()) m_atlas.draw(atlas::kMapa, kLobbyColumnX + (kLobbyColumnW - atlas::kMapa.w * 0.82f) * 0.5f, 44, 0.82f);
+        // Columna de botones: JUGAR (amarillo), selector de bots, CONTROLES y SALIR.
+        for (int i = 0; i < static_cast<int>(LobbyItem::Count); ++i) {
+            const LobbyButton& b = kLobbyButtons[i];
+            const bool selected = static_cast<int>(m_lobbyItem) == i && !m_confirmExit;
+            const u32 fill = i == 0 ? (selected ? kYellow : kYellowDark)
+                                    : (selected ? kFortniteBlue : rgba(20, 44, 100, 220));
+            drawButton(kLobbyColumnX, b.y, kLobbyColumnW, b.h, fill, selected, m_lobbyTime);
+        }
+        gfx::fillRect(kLobbyColumnX, kBotsSelectorY, kLobbyColumnW, 22, rgba(0, 0, 0, 120));
+        if (m_atlas.ready()) {
+            const float cx = kLobbyColumnX + kLobbyColumnW * 0.5f;
+            m_atlas.drawCentered(atlas::kJugar, cx, kLobbyButtons[0].y + 6);
+            m_atlas.drawCentered(atlas::kControles, cx, kLobbyButtons[1].y + 3);
+            m_atlas.drawCentered(atlas::kSalir, cx, kLobbyButtons[2].y + 3);
+        }
+        ui::drawHintIcons(m_atlas, 8, kHintsY, kLobbyHints, kLobbyHintCount);
+        // Panel de estadisticas del perfil (el texto, en overlayLobby).
+        gfx::fillRect(kStatsX, kStatsY, kStatsW, kStatsH, rgba(8, 18, 48, 200));
+        ui::frame(kStatsX, kStatsY, kStatsW, kStatsH, 1, rgba(90, 160, 255));
+    }
 
     if (m_confirmExit) {
         gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 140));
@@ -352,39 +551,194 @@ void App::renderLobby() {
 }
 
 void App::overlayLobby() const {
-    // Nombre sobre la cabeza del personaje, como en la referencia.
-    float x = 0.0f, y = 0.0f;
-    if (m_modelsReady && projectToScreen(m_lobbyViewProjection, LobbyScene::namePoint(), &x, &y)) {
-        printCenteredAt(static_cast<int>(x), static_cast<int>(y), kWhite, m_profile.name);
+    overlayLobbyTabs();
+    if (m_lobbyTab == LobbyTab::Achievements) {
+        overlayAchievementsTab();
+    } else if (m_lobbyTab == LobbyTab::Locker) {
+        overlayLockerTab();
+    } else {
+        // Nombre sobre la cabeza del personaje, como en la referencia.
+        float x = 0.0f, y = 0.0f;
+        if (m_modelsReady && projectToScreen(m_lobbyViewProjection, LobbyScene::namePoint(), &x, &y)) {
+            printCenteredAt(static_cast<int>(x), static_cast<int>(y), kWhite, m_profile.name);
+        }
+        // Estadisticas del perfil (perfil.txt), en el panel de la izquierda.
+        gfx::text::printShadow(kStatsX + 4, kStatsY + 4, config::kColorGold, "%s", m_profile.name);
+        const struct {
+            const char* label;
+            int value;
+        } stats[] = {{"Victorias", m_profile.wins},   {"Partidas", m_profile.matches},   {"Bajas", m_profile.kills},
+                     {"A la cabeza", m_profile.headshots}, {"Max. bajas", m_profile.mostKills}};
+        for (int k = 0; k < 5; ++k) {
+            gfx::text::print(kStatsX + 4, kStatsY + 16 + 10 * k, kLightGrey, "%s", stats[k].label);
+            gfx::text::print(kStatsX + 86, kStatsY + 16 + 10 * k, kWhite, "%4d", stats[k].value);
+        }
+        gfx::text::print(kStatsX + 4, kStatsY + 66, kLightGrey, "Mejor puesto");
+        if (m_profile.bestPlace > 0) gfx::text::print(kStatsX + 94, kStatsY + 66, kWhite, "#%d", m_profile.bestPlace);
+        else gfx::text::print(kStatsX + 110, kStatsY + 66, kWhite, "-");
+        const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f);
+        char bots[24];
+        snprintf(bots, sizeof(bots), "<  BOTS: %d  >", m_botCount);
+        printCenteredAt(cx, static_cast<int>(kBotsSelectorY) + 7,
+                        m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
+        if (m_botCount > game::kDefaultBots) printCenteredAt(cx, 216, kLightGrey, "(mas de 10: mide FPS)");
+        if (!m_worldReady) printCenteredAt(cx, 232, kErrorRed, "ERROR: sin escenario");
+        ui::printHints(8, kHintsY, kLightGrey, kLobbyHints, kLobbyHintCount);
     }
-    // Estadisticas del perfil (perfil.txt), en el panel de la izquierda.
-    gfx::text::printShadow(kStatsX + 4, kStatsY + 4, config::kColorGold, "%s", m_profile.name);
-    const struct {
-        const char* label;
-        int value;
-    } stats[] = {{"Victorias", m_profile.wins},   {"Partidas", m_profile.matches},   {"Bajas", m_profile.kills},
-                 {"A la cabeza", m_profile.headshots}, {"Max. bajas", m_profile.mostKills}};
-    for (int k = 0; k < 5; ++k) {
-        gfx::text::print(kStatsX + 4, kStatsY + 16 + 10 * k, kLightGrey, "%s", stats[k].label);
-        gfx::text::print(kStatsX + 86, kStatsY + 16 + 10 * k, kWhite, "%4d", stats[k].value);
-    }
-    gfx::text::print(kStatsX + 4, kStatsY + 66, kLightGrey, "Mejor puesto");
-    if (m_profile.bestPlace > 0) gfx::text::print(kStatsX + 94, kStatsY + 66, kWhite, "#%d", m_profile.bestPlace);
-    else gfx::text::print(kStatsX + 110, kStatsY + 66, kWhite, "-");
-    const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f);
-    char bots[24];
-    snprintf(bots, sizeof(bots), "<  BOTS: %d  >", m_botCount);
-    printCenteredAt(cx, static_cast<int>(kBotsSelectorY) + 7,
-                    m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
-    if (m_botCount > game::kDefaultBots) printCenteredAt(cx, 216, kLightGrey, "(mas de 10: mide FPS)");
-    if (!m_worldReady) printCenteredAt(cx, 232, kErrorRed, "ERROR: sin escenario");
-
-    ui::printHints(8, kHintsY, kLightGrey, kLobbyHints, kLobbyHintCount);
     gfx::text::print(400, 258, kDimGrey, "v%s", config::kVersion);
 
     if (m_confirmExit) {
         printCentered(114, kWhite, "Salir de FortnitePSP?");
         ui::printHints(centeredHintsX(kExitHints, kExitHintCount), 140, config::kColorGold, kExitHints, kExitHintCount);
+    }
+}
+
+// --- Logros -------------------------------------------------------------------------------
+
+int achievementScroll(int cursor) {
+    // La lista se desplaza para que el elegido siempre se vea.
+    int top = cursor - kAchievementRows / 2;
+    if (top > kAchievementCount - kAchievementRows) top = kAchievementCount - kAchievementRows;
+    return top < 0 ? 0 : top;
+}
+
+void App::renderAchievementsTab() const {
+    gfx::fillRect(kListX - 4, 36, kListW + 8, 214, rgba(8, 18, 48, 225));
+    ui::frame(kListX - 4, 36, kListW + 8, 214, 1, rgba(90, 160, 255));
+    const int top = achievementScroll(m_achievementCursor);
+    for (int r = 0; r < kAchievementRows; ++r) {
+        const int i = top + r;
+        const AchievementState& st = m_profile.achievements[i];
+        const AchievementDef& def = achievementDef(static_cast<AchievementId>(i));
+        const float y = kListY + r * kRowH;
+        const bool on = i == m_achievementCursor;
+        gfx::fillRect(kListX, y, kListW, kRowH - 3, on ? rgba(36, 92, 196, 230) : rgba(20, 34, 80, 200));
+        if (on) ui::frame(kListX - 1, y - 1, kListW + 2, kRowH - 1, 1, kWhite);
+        // Insignia: dorada si esta desbloqueado.
+        gfx::fillRect(kListX + 4, y + 4, 20, 20, st.unlocked ? kYellow : rgba(70, 80, 100));
+        gfx::fillRect(kListX + 8, y + 8, 12, 12, st.unlocked ? rgba(255, 240, 160) : rgba(40, 46, 60));
+        // Barra de progreso.
+        const int value = m_profile.stat(def.stat);
+        const float progress = st.unlocked ? 1.0f : math3d::clampf(static_cast<float>(value) / def.goal, 0.0f, 1.0f);
+        gfx::fillRect(kListX + 300, y + 17, 140, 6, rgba(0, 0, 0, 160));
+        gfx::fillRect(kListX + 300, y + 17, 140 * progress, 6, st.unlocked ? kYellow : kFortniteBlue);
+    }
+    // Barra de desplazamiento.
+    const float h = 186.0f * kAchievementRows / kAchievementCount;
+    gfx::fillRect(kListX + kListW + 1, kListY + 186.0f * top / kAchievementCount, 2, h, rgba(255, 255, 255, 160));
+    ui::drawHintIcons(m_atlas, 8, kHintsY, kAchievementHints, 4);
+}
+
+void App::overlayAchievementsTab() const {
+    char line[64];
+    snprintf(line, sizeof(line), "LOGROS  %d / %d", m_profile.unlockedCount(), kAchievementCount);
+    gfx::text::printShadow(static_cast<int>(kListX) + 2, 40, config::kColorGold, "%s", line);
+    const int top = achievementScroll(m_achievementCursor);
+    for (int r = 0; r < kAchievementRows; ++r) {
+        const int i = top + r;
+        const AchievementState& st = m_profile.achievements[i];
+        const AchievementDef& def = achievementDef(static_cast<AchievementId>(i));
+        const int y = static_cast<int>(kListY + r * kRowH);
+        gfx::text::printShadow(static_cast<int>(kListX) + 30, y + 5, st.unlocked ? kWhite : kLightGrey, "%s", def.name);
+        gfx::text::print(static_cast<int>(kListX) + 30, y + 16, st.unlocked ? kLightGrey : kDimGrey, "%s", def.description);
+        if (st.unlocked) {
+            if (st.date > 0) {
+                snprintf(line, sizeof(line), "%02d/%02d/%04d", st.date % 100, (st.date / 100) % 100, st.date / 10000);
+            } else {
+                snprintf(line, sizeof(line), "CONSEGUIDO");
+            }
+        } else {
+            const int value = m_profile.stat(def.stat);
+            snprintf(line, sizeof(line), "%d / %d", value < def.goal ? value : def.goal, def.goal);
+        }
+        gfx::text::printShadow(static_cast<int>(kListX) + 440 - gfx::text::width(line), y + 5,
+                               st.unlocked ? kYellow : kWhite, "%s", line);
+    }
+    ui::printHints(8, kHintsY, kLightGrey, kAchievementHints, 4);
+}
+
+// --- Taquilla -----------------------------------------------------------------------------
+
+void App::renderLockerTab() const {
+    // Rejilla de categorias a la derecha (el personaje, a la izquierda, hace de vista previa).
+    gfx::fillRect(kLockerX - 8, 36, 214, 214, rgba(8, 18, 48, 200));
+    gfx::fillRect(kLockerX - 8, 40, 58, 14, rgba(36, 92, 196));
+    for (int i = 0; i < kCosmeticSlotCount; ++i) {
+        const float x = kLockerX + (i % kLockerCols) * (kLockerSlot + kLockerGap);
+        const float y = kLockerY + (i / kLockerCols) * (kLockerSlot + kLockerGap + 10.0f);
+        const Cosmetic* on = m_profile.equippedIn(static_cast<CosmeticSlot>(i));
+        gfx::fillRect(x, y, kLockerSlot, kLockerSlot, on ? rgba(60, 120, 210, 230) : rgba(40, 70, 130, 170));
+        // Vacia: una cruz "+" como las casillas sin objeto de la referencia.
+        if (!on) {
+            gfx::fillRect(x + kLockerSlot - 16, y + kLockerSlot - 10, 10, 2, kWhite);
+            gfx::fillRect(x + kLockerSlot - 12, y + kLockerSlot - 14, 2, 10, kWhite);
+        }
+        if (static_cast<CosmeticSlot>(i) == CosmeticSlot::Pickaxe && m_atlas.ready()) {
+            m_atlas.draw(atlas::kPico, x + 17, y + 14);
+        }
+        if (static_cast<CosmeticSlot>(i) == CosmeticSlot::Outfit && m_atlas.ready()) {
+            m_atlas.draw(atlas::kIconVivos, x + 16, y + 16, 2.0f);
+        }
+        const bool selected = i == m_lockerSlot;
+        ui::frame(x - 1, y - 1, kLockerSlot + 2, kLockerSlot + 2, selected ? 2 : 1,
+                  selected ? kYellow : rgba(255, 255, 255, 120));
+    }
+    // Detalle (como "COMUN | PICO" de la referencia), abajo a la izquierda.
+    gfx::fillRect(8, 196, 230, 50, rgba(160, 170, 190, 200));
+    if (m_lockerChoosing) {
+        // La lista de la categoria tapa la rejilla mientras se elige.
+        int items[16];
+        const int n = cosmeticsIn(static_cast<CosmeticSlot>(m_lockerSlot), items, 16);
+        gfx::fillRect(kLockerX - 4, kLockerY - 4, 206, 144, rgba(10, 20, 50, 245));
+        ui::frame(kLockerX - 4, kLockerY - 4, 206, 144, 1, kYellow);
+        if (n > 0) gfx::fillRect(kLockerX, kLockerY + 14 + m_lockerItem * 14.0f, 198, 12, rgba(36, 92, 196));
+        ui::drawHintIcons(m_atlas, 8, kHintsY, kLockerChooseHints, 4);
+    } else {
+        ui::drawHintIcons(m_atlas, 8, kHintsY, kLockerHints, 4);
+    }
+}
+
+void App::overlayLockerTab() const {
+    gfx::text::printShadow(static_cast<int>(kLockerX) - 4, 43, kWhite, "EQUIPO");
+    for (int i = 0; i < kCosmeticSlotCount && !m_lockerChoosing; ++i) {
+        const int x = static_cast<int>(kLockerX + (i % kLockerCols) * (kLockerSlot + kLockerGap));
+        const int y = static_cast<int>(kLockerY + (i / kLockerCols) * (kLockerSlot + kLockerGap + 10.0f));
+        printCenteredAt(x + static_cast<int>(kLockerSlot) / 2, y + static_cast<int>(kLockerSlot) + 2, kLightGrey,
+                        cosmeticSlotName(static_cast<CosmeticSlot>(i)));
+    }
+    const CosmeticSlot slot = static_cast<CosmeticSlot>(m_lockerSlot);
+    const Cosmetic* on = m_profile.equippedIn(slot);
+    char line[64];
+    if (on) {
+        snprintf(line, sizeof(line), "%s | %s", game::rarityName(on->rarity), cosmeticSlotName(slot));
+        gfx::text::print(14, 202, rgba(40, 40, 50), "%s", line);
+        gfx::text::print(14, 216, rgba(16, 26, 58), "%s", on->name);
+        gfx::text::print(14, 230, rgba(60, 60, 70), "Por defecto");
+    } else {
+        gfx::text::print(14, 202, rgba(40, 40, 50), "%s", cosmeticSlotName(slot));
+        // Categoria sin objetos todavia: mensaje en vez de una lista vacia.
+        gfx::text::print(14, 216, rgba(16, 26, 58), "Aun no hay objetos aqui.");
+        gfx::text::print(14, 230, rgba(60, 60, 70), "Llegaran en una actualizacion.");
+    }
+    if (m_lockerChoosing) {
+        int items[16];
+        const int n = cosmeticsIn(slot, items, 16);
+        const int listY = static_cast<int>(kLockerY);
+        gfx::text::printShadow(static_cast<int>(kLockerX), listY, kYellow, "%s", cosmeticSlotName(slot));
+        if (n == 0) {
+            gfx::text::print(static_cast<int>(kLockerX), listY + 16, kLightGrey, "Vacio: aun no hay objetos.");
+            gfx::text::print(static_cast<int>(kLockerX), listY + 28, kLightGrey, "Llegaran en una");
+            gfx::text::print(static_cast<int>(kLockerX), listY + 40, kLightGrey, "actualizacion.");
+        }
+        for (int i = 0; i < n; ++i) {
+            // Lo equipado, en amarillo y con una marca.
+            const Cosmetic& c = cosmetic(items[i]);
+            gfx::text::print(static_cast<int>(kLockerX) + 4, listY + 16 + i * 14, &c == on ? kYellow : kWhite, "%s%s",
+                             &c == on ? "* " : "  ", c.name);
+        }
+        ui::printHints(8, kHintsY, kLightGrey, kLockerChooseHints, 4);
+    } else {
+        ui::printHints(8, kHintsY, kLightGrey, kLockerHints, 4);
     }
 }
 

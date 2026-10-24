@@ -30,6 +30,8 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/app/app.cpp" \
     "$ROOT/src/app/app_hud.cpp" \
     "$ROOT/src/app/app_menus.cpp" \
+    "$ROOT/src/app/achievements.cpp" \
+    "$ROOT/src/app/locker.cpp" \
     "$ROOT/src/app/build_visuals.cpp" \
     "$ROOT/src/app/lobby_scene.cpp" \
     "$ROOT/src/app/prop_visuals.cpp" \

@@ -258,6 +258,13 @@ def ui_atlas():
         "IniciarSesion": label("INICIAR SESIÓN", 22),
         "Cargando": label("CARGANDO", 18),
         "Construccion": label("MODO CONSTRUCCIÓN", 13, stroke=1),
+        # Pestanas del lobby (parche, fase 8), en espanol e ingles.
+        "TabJugar": label("JUGAR", 15, stroke=1),
+        "TabLogros": label("LOGROS", 15, stroke=1),
+        "TabTaquilla": label("TAQUILLA", 15, stroke=1),
+        "TabPlay": label("PLAY", 15, stroke=1),
+        "TabAchievements": label("ACHIEVEMENTS", 15, stroke=1),
+        "TabLocker": label("LOCKER", 15, stroke=1),
         "Pico": icon("Pico.png", 26),
         "Pared": icon("Pared.png", 26),
         "Rampa": icon("Rampa.png", 26),

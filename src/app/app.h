@@ -9,6 +9,7 @@
 
 #include <psptypes.h>
 
+#include "app/achievements.h"
 #include "app/build_visuals.h"
 #include "app/lobby_scene.h"
 #include "app/profile.h"
@@ -71,6 +72,10 @@ public:
     bool testFreeCamera() const { return m_freeCameraActive; }
     int testBuildPiece() const { return m_buildPiece; }
     const Profile& testProfile() const { return m_profile; }
+    int testLobbyTab() const { return static_cast<int>(m_lobbyTab); }
+    int testToastCount() const { return m_toastCount; }
+    int testLockerSlot() const { return m_lockerSlot; }
+    bool testLockerChoosing() const { return m_lockerChoosing; }
     bool testMapOpen() const { return m_mapOpen; }
     bool testDancing() const { return m_dancing; }
     bool testSwapOpen() const { return m_swapOpen; }
@@ -92,6 +97,8 @@ private:
     // Pantalla de resultados sobre la partida.
     enum class Results { None, Victory, Defeat };
     enum class LobbyItem { Play, Controls, Exit, Count };
+    // Secciones del lobby (L / R): jugar, logros y taquilla.
+    enum class LobbyTab { Play, Achievements, Locker, Count };
     static constexpr int kModelCount = 4;  // jugador + 3 aspectos de bot
 
     // --- app.cpp ----------------------------------------------------------------------
@@ -115,6 +122,13 @@ private:
     void renderNickname() const;
     void overlayNickname() const;
     void recordMatch();             // suma la partida al perfil y lo guarda (una vez)
+    // Logros: suma a un contador del perfil y desbloquea (con aviso y guardado) lo alcanzado.
+    void addStat(Stat stat, int amount);
+    void checkAchievements();
+    void saveProfile();
+    void updateAchievementToasts(float dt);
+    void renderAchievementToast() const;
+    void overlayAchievementToast() const;
     void renderFullMap() const;
     void updateChestHum(float dt);
     void playSfx(audio::Sfx sfx, float volume = 1.0f, float pan = 0.0f) const;
@@ -142,6 +156,15 @@ private:
     // --- app_menus.cpp ----------------------------------------------------------------
     void updateLogin(const input::Input& in, float dt);
     void updateLobby(const input::Input& in, float dt);
+    void updateLobbyPlay(const input::Input& in);
+    void updateAchievementsTab(const input::Input& in);
+    void updateLockerTab(const input::Input& in);
+    void renderLobbyTabs() const;
+    void overlayLobbyTabs() const;
+    void renderAchievementsTab() const;
+    void overlayAchievementsTab() const;
+    void renderLockerTab() const;
+    void overlayLockerTab() const;
     void updateControlsScreen(const input::Input& in);
     void updateLoading(float dt);
     void updatePause(const input::Input& in);
@@ -274,6 +297,17 @@ private:
     bool m_matchRecorded = false;  // las estadisticas de esta partida ya se han sumado
     float m_loginTimer = 0.0f;
     LobbyItem m_lobbyItem = LobbyItem::Play;
+    LobbyTab m_lobbyTab = LobbyTab::Play;
+    int m_achievementCursor = 0;   // logro elegido en la lista
+    int m_lockerSlot = 0;          // categoria elegida en la taquilla
+    bool m_lockerChoosing = false; // dentro de una categoria, eligiendo objeto
+    int m_lockerItem = 0;
+    // Logros desbloqueados pendientes de anunciar (de uno en uno, 3 s cada uno).
+    static constexpr int kMaxToasts = 4;
+    AchievementId m_toasts[kMaxToasts] = {};
+    int m_toastCount = 0;
+    float m_toastTime = 0.0f;
+    bool m_profileDirty = false;   // hay contadores sin guardar
     bool m_confirmExit = false;
     float m_lobbyYaw = 0.0f;       // giro del personaje del lobby (stick)
     float m_lobbyTime = 0.0f;

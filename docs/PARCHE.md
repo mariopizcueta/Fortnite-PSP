@@ -272,3 +272,20 @@ pieza y paleta), pero:
 - Curándose no se ofrece recoger nada (no se puede).
 - Comprobado (host): `make preview`, `make app-sim`, `make match-sim`, `make physics-test`
   con 0 fallos. Las posturas solo se han revisado en capturas del rasterizador de host.
+
+## 6. Bloque E: lobby, logros y taquilla (v0.12.0-e)
+
+- **Secciones del lobby** con **L / R** (JUGAR, LOGROS, TAQUILLA) en la barra superior, con
+  los iconos de L y R a los lados, como las pestañas de Fortnite. En la partida L y R siguen
+  siendo apuntar y disparar: el lobby solo existe fuera de ella. El nombre del mapa pasa a
+  la columna de JUGAR.
+- **Logros**: ver [LOGROS.md](LOGROS.md). 18 logros por sucesos reales; aviso al
+  desbloquear; guardado en el momento (y al salir, y al terminar cada partida).
+- **Taquilla**: ver [TAQUILLA.md](TAQUILLA.md). Estructura completa (categorías, catálogo,
+  equipar, guardado) con solo los objetos por defecto; las categorías vacías lo indican.
+- **Perfil**: guardado seguro (temporal + cambio de nombre), validación al cargar y
+  contadores nuevos; las bajas y los disparos a la cabeza se cuentan durante la partida.
+- Comprobado (host): `make app-sim` (L/R entre secciones, recorrer logros, taquilla con una
+  categoría vacía y equipar el pico, logro "Primera sangre" con aviso al eliminar bots, y
+  al volver a cargar: logros con fecha, contadores y cada logro una sola vez en
+  `perfil.txt`). Capturas `05b`–`05f`, `19b`.

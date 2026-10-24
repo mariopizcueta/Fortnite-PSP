@@ -149,6 +149,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_nextExplosion = 0;
     m_throwCooldown = 0.0f;
     m_llama = -1;
+    m_damageSource = -1;
     for (Trap& t : m_traps) t = Trap{};
     m_trapStock = 0;
     m_pendingTrap = false;
@@ -686,6 +687,7 @@ void Match::swingPickaxe() {
 
     const bool any = victim >= 0 || worldHit || resource >= 0 || llamaHit;
     pushEvent(GameEventType::PickaxeSwing, 0, any ? 1 : 0, point);
+    m_damageSource = -1;  // el pico
     if (llamaHit) {
         m_sincePlayerHit = 0.0f;
         addDamageNumber(point, m_config.pickaxeStructureDamage, true);
@@ -827,6 +829,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         }
         damageContainer(m_llama, damage, shooter, result.end);
     } else if (victim >= 0) {
+        m_damageSource = weaponType;
         // En la cabeza (lo mas alto de la caja de impacto): dano doble.
         const world::Aabb box = hitBox(victim);
         bool headshot = result.end.y >= box.max.y - kHeadSize;
@@ -844,6 +847,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
             addDamageNumber(result.end, damage, false, headshot);
         }
         applyDamage(victim, damage, shooter);
+        m_damageSource = -1;
     } else if (wall) {
         ++m_stats.shotsBlockedByWorld;
         result.blockedByWorld = true;
@@ -1021,6 +1025,7 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
 
 void Match::eliminate(int victim, int killer) {
     pushEvent(GameEventType::Eliminated, victim, killer, body(victim).state().position);
+    m_events[(m_eventCount - 1) % kMaxEvents].amount = m_damageSource + 1;
     if (victim > 0) {
         Bot& b = m_bots[victim - 1];
         // Su inventario (y materiales) quedan en el suelo, una sola vez por eliminacion.
@@ -1067,6 +1072,7 @@ void Match::addTracer(const Vec3& from, const Vec3& to, bool byPlayer, bool hit)
 void Match::updateStorm(float dt) {
     // Tormenta del limite del mapa: al entrar, un golpe; despues, uno cada stormTickSeconds.
     if (m_phase == MatchPhase::Finished) return;
+    m_damageSource = -1;
     for (int id = 0; id < entityCount(); ++id) {
         if (!alive(id) || m_air[id] == AirState::Bus) {
             m_inStorm[id] = false;

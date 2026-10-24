@@ -127,9 +127,11 @@ void App::init() {
     logStage("navegacion", t0);
 
     t0 = core::nowMicros();
+    // El jugador, con el traje equipado en la taquilla (de momento, el de por defecto).
+    const Cosmetic* outfit = m_profile.equippedIn(CosmeticSlot::Outfit);
     const game::CharacterPalette* palettes[kModelCount] = {
-        &game::palettes::kPlayer, &game::palettes::kCommando, &game::palettes::kOrange,
-        &game::palettes::kRanger};
+        outfit && outfit->palette ? outfit->palette : &game::palettes::kPlayer, &game::palettes::kCommando,
+        &game::palettes::kOrange, &game::palettes::kRanger};
     m_modelsReady = true;
     for (int i = 0; i < kModelCount; ++i) m_modelsReady &= m_models[i].build(*palettes[i]);
     platform::log::write("modelos de personaje: %s, %d triangulos (%d el de lejos)",
@@ -242,6 +244,8 @@ void App::goToLobby() {
 }
 
 void App::shutdown() {
+    // Contadores de los logros que aun no se habian guardado (p. ej. al salir con HOME).
+    if (m_profileDirty && m_profile.hasName()) saveProfile();
     if (m_audioReady) audio::shutdown();
     m_audioReady = false;
     m_lobbyScene.destroy();
@@ -266,6 +270,7 @@ void App::shutdown() {
 
 void App::update(const input::Input& in, float dt) {
     m_blinkTime += dt;
+    updateAchievementToasts(dt);
     m_lastFrameMs = dt * 1000.0f;
 
     m_exitProgress = in.comboHeldSeconds() / config::kExitHoldSeconds;
@@ -769,6 +774,7 @@ void App::processEvents() {
             }
             case game::GameEventType::HitEntity:
                 if (e.entity > 0) m_botAnims[e.entity - 1].onHit();
+                if (e.other == 0 && e.entity > 0 && e.amount) addStat(Stat::Headshots, 1);
                 if (e.other == 0) playSfx(audio::Sfx::HitMarker, e.amount ? 1.0f : 0.9f);
                 if (e.other == 0 && e.amount) playSfx(audio::Sfx::HitMarker, 0.7f, 0.0f);  // a la cabeza: doble
                 break;
@@ -785,10 +791,24 @@ void App::processEvents() {
                     playSfx(audio::Sfx::PlayerDeath, 1.0f);
                 }
                 if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
+                if (e.other == 0 && e.entity > 0) {
+                    // Logros: bajas, y con que (amount = tipo de objeto + 1).
+                    const game::ItemType source = static_cast<game::ItemType>(e.amount - 1);
+                    addStat(Stat::Kills, 1);
+                    if (source == game::ItemType::SpikeTrap) addStat(Stat::TrapKills, 1);
+                    if (source == game::ItemType::RocketLauncher || source == game::ItemType::GrenadeLauncher ||
+                        source == game::ItemType::Grenade) {
+                        addStat(Stat::ExplosiveKills, 1);
+                    }
+                    if (m_match.playerKills() > m_profile.mostKills) {
+                        addStat(Stat::MostKills, m_match.playerKills() - m_profile.mostKills);
+                    }
+                }
                 break;
             case game::GameEventType::WallBuilt:
                 // De los demas solo se oyen disparos y pasos.
                 if (e.entity == 0) playSfx(audio::Sfx::WallBuild, 0.8f);
+                if (e.entity == 0) addStat(Stat::PiecesBuilt, 1);
                 break;
             case game::GameEventType::BusJump:
                 if (e.entity == 0) playSfx(audio::Sfx::BusJump, 0.9f);
@@ -801,6 +821,14 @@ void App::processEvents() {
                 break;
             case game::GameEventType::ContainerOpened:
                 if (e.entity == 0 && m_audioReady) audio::mixer().stop(audio::Sfx::ChestHum);
+                if (e.entity == 0) {
+                    switch (static_cast<game::ContainerKind>(e.other)) {
+                        case game::ContainerKind::Chest: addStat(Stat::ChestsOpened, 1); break;
+                        case game::ContainerKind::Airdrop: addStat(Stat::AirdropsOpened, 1); break;
+                        case game::ContainerKind::Llama: addStat(Stat::LlamasOpened, 1); break;
+                        case game::ContainerKind::AmmoBox: break;
+                    }
+                }
                 // Cada contenedor con su sonido: la caja de municion ya no usa el del cofre.
                 if (e.entity == 0 || e.other == static_cast<int>(game::ContainerKind::Llama)) {
                     switch (static_cast<game::ContainerKind>(e.other)) {
@@ -864,8 +892,10 @@ void App::processEvents() {
                 m_harvestResource = e.other;
                 m_harvestAmount = e.amount;
                 m_harvestAge = 0.0f;
+                if (e.amount > 0) addStat(Stat::MaterialsHarvested, e.amount);
                 break;
             case game::GameEventType::ItemUsed:
+                if (e.entity == 0) addStat(Stat::ItemsUsed, 1);
                 // Las pociones de escudo ya suenan mientras se beben (Sonidos Limpios).
                 if (e.other == static_cast<int>(game::ItemType::Bandage) ||
                     e.other == static_cast<int>(game::ItemType::Medkit)) {
@@ -1010,6 +1040,7 @@ void App::render(const FrameInfo& frame) {
             if (m_paused) renderPause();
             break;
     }
+    if (m_screen == Screen::Game || m_screen == Screen::Lobby) renderAchievementToast();
     if (m_exitProgress > 0.0f) renderExitBar(140, 4, 200, 4);
 }
 
@@ -1029,6 +1060,7 @@ void App::renderOverlay(const FrameInfo& frame) const {
             if (m_paused) overlayPause();
             break;
     }
+    if (m_screen == Screen::Game || m_screen == Screen::Lobby) overlayAchievementToast();
 }
 
 void App::renderExitBar(float x, float y, float w, float h) const {

@@ -1,14 +1,24 @@
-// Perfil del jugador: nombre (se pide la primera vez) y estadisticas de todas sus
-// partidas. Se guarda en texto plano ("clave=valor") en perfil.txt, junto al EBOOT
-// (ms0:/PSP/GAME/FortnitePSP/perfil.txt), y se carga al arrancar.
+// Perfil del jugador: nombre (se pide la primera vez), estadisticas de todas sus partidas,
+// logros (parche, fase 8) y lo equipado en la taquilla. Se guarda en texto plano
+// ("clave=valor") en perfil.txt, junto al EBOOT (ms0:/PSP/GAME/FortnitePSP/perfil.txt), y
+// se carga al arrancar.
+//
+// Guardado seguro: se escribe primero perfil.tmp y despues se cambia por perfil.txt, asi un
+// apagado a mitad de escritura no deja el perfil vacio (al cargar, si falta perfil.txt se
+// usa perfil.tmp). Al cargar se valida todo: valores negativos o fuera de rango y claves
+// desconocidas se ignoran y quedan los valores por defecto.
 #pragma once
 
 #include <psptypes.h>
+
+#include "app/achievements.h"
+#include "app/locker.h"
 
 namespace app {
 
 struct Profile {
     static constexpr int kMaxName = 12;
+    static constexpr int kMaxKey = 24;
     char name[kMaxName + 1] = "";
     int matches = 0;     // partidas jugadas (terminadas o abandonadas)
     int wins = 0;        // victorias magistrales
@@ -18,11 +28,39 @@ struct Profile {
     int mostKills = 0;   // mas bajas en una partida
     int bestPlace = 0;   // mejor puesto (0 = aun ninguno)
     int seconds = 0;     // tiempo jugado
+    // Parche (fase 8): contadores de los logros.
+    int top5 = 0;               // partidas terminadas entre los 5 primeros
+    int chestsOpened = 0;
+    int airdropsOpened = 0;
+    int llamasOpened = 0;
+    int piecesBuilt = 0;
+    int materialsHarvested = 0;
+    int trapKills = 0;
+    int explosiveKills = 0;
+    int itemsUsed = 0;
+    AchievementState achievements[kAchievementCount];
+    // Taquilla: clave del objeto equipado en cada categoria ("" = el de por defecto).
+    char equipped[kCosmeticSlotCount][kMaxKey] = {};
 
     bool hasName() const { return name[0] != '\0'; }
+    int stat(Stat s) const;
+    int& mutableStat(Stat s);
+    // Desbloquea los logros cuya meta se ha alcanzado (con la fecha AAAAMMDD). Deja en
+    // `out` los nuevos (como mucho `max`) y devuelve cuantos.
+    int unlockReached(int date, AchievementId* out, int max);
+    int unlockedCount() const;
+    // Lo equipado en una categoria (o el objeto por defecto de la categoria).
+    const Cosmetic* equippedIn(CosmeticSlot slot) const;
+    void equip(const Cosmetic& item);
+
     // Devuelven false si no se puede leer / escribir (p. ej. no existe todavia).
     bool load(const char* path);
     bool save(const char* path) const;
+    // Borra el perfil guardado (perfil.txt y su temporal). true si no queda ninguno.
+    static bool erase(const char* path);
 };
+
+// Fecha de hoy como AAAAMMDD (reloj de la consola), o 0 si no se sabe.
+int todayDate();
 
 }  // namespace app

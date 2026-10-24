@@ -270,7 +270,9 @@ void Match::updateTraps(float dt) {
                 addDamageNumber(chestOf(id), m_config.trapDamage, false);
             }
             pushEvent(GameEventType::HitEntity, id, t.owner, chestOf(id));
+            m_damageSource = static_cast<int>(ItemType::SpikeTrap);
             applyDamage(id, m_config.trapDamage, t.owner);
+            m_damageSource = -1;
         }
     }
 }
