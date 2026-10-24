@@ -33,6 +33,7 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/app/build_visuals.cpp" \
     "$ROOT/src/app/lobby_scene.cpp" \
     "$ROOT/src/app/prop_visuals.cpp" \
+    "$ROOT/src/app/profile.cpp" \
     "$ROOT/src/app/ui.cpp" \
     "$ROOT/src/audio/audio_system.cpp" \
     "$ROOT/src/audio/mixer.cpp" \

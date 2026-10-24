@@ -367,7 +367,7 @@ def read_wav(path):
 
 
 # Sonidos de Recursos/Sonidos/Sonidos Limpios que ya tienen uso en el juego -> nombre en
-# assets/sounds. El baile se conserva en Recursos pero no se empaqueta (aun no hay bailes).
+# assets/sounds.
 CLEAN_SOUNDS = {
     # nombre en assets/sounds: (fichero, segundos maximos o None)
     "disparo": ("scardisparo.wav", None),                       # fusil de asalto / SCAR
@@ -381,6 +381,7 @@ CLEAN_SOUNDS = {
     "salto_autobus": ("Saltar del autobus.mp3", 4.5),
     "ala_delta": ("Opertura ala delta.wav", None),
     "francotirador": ("Fortnite fusil de tirador de cerrojomp3.mp3", None),
+    "baile": ("Fortnite bailemp3.mp3", None),                   # cruceta arriba (7.7 s, se repite)
 }
 STEP_SOURCE = "Fortnite Running Sound Effect.wav"
 

@@ -616,6 +616,7 @@ void Match::botShoot(int index) {
     if (!b.weapon.tryFire()) return;
     float spreadDeg = m_config.botSpreadDegrees + m_config.botSpreadPerMeter * d + weapon.hipSpread * 0.4f;
     if (body(b.target).state().horizontalSpeed() > 2.0f) spreadDeg += 1.5f;
+    if (b.target == 0 && m_playerCrouched) spreadDeg += m_config.crouchedSpreadPenalty;  // agachado: mas dificil
     if (s.horizontalSpeed() > 1.0f) spreadDeg += 1.0f;
     fireWeapon(self, eye, math3d::normalize(aim - eye), weapon, spreadDeg, scale, type);
     b.weapon.addCooldown(weapon.fireInterval * m_rng.range(-0.15f, 0.25f));  // cadencia algo irregular

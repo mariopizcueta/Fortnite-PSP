@@ -244,9 +244,12 @@ int main(int argc, char** argv) {
             fog.color = config::kColorSky;
             gfx::begin3D(proj, view, fog);
             w.draw(math3d::Frustum::fromMatrix(proj * view), c.eye, config::kFogEnd);
-            // Jugador apuntando con el fusil y los otros con escopeta, subfusil y francotirador.
+            // Jugador apuntando con el fusil, escopeta corriendo, subfusil agachado y
+            // francotirador bailando (el baile no lleva nada en la mano).
             const game::HeldItem held[4] = {game::HeldItem::Rifle, game::HeldItem::Shotgun, game::HeldItem::Smg,
-                                            game::HeldItem::Sniper};
+                                            game::HeldItem::Empty};
+            const game::BodyPose poses[4] = {game::BodyPose::Normal, game::BodyPose::Normal, game::BodyPose::Crouch,
+                                             game::BodyPose::Dance};
             for (int i = 0; i < c.count; ++i) {
                 game::CharacterState s;
                 s.position = {c.count == 1 ? 0.15f : -1.65f + 1.1f * i, 0.0f, 30.0f};
@@ -254,7 +257,8 @@ int main(int argc, char** argv) {
                 s.velocity = i == 1 ? game::forwardFromYaw(c.yaw) * 5.5f : Vec3{0, 0, 0};
                 game::CharacterAnim anim;
                 for (int k = 0; k < 40; ++k) anim.update(s, i == 0 && c.count > 1, true, 1.0f / 60.0f);
-                models[i].draw(s, anim, w.textures(), false, held[i]);
+                models[i].draw(s, anim, w.textures(), false, held[i], false,
+                               c.count == 1 ? game::BodyPose::Normal : poses[i]);
             }
             char path[512];
             snprintf(path, sizeof(path), "%s/%s.png", outDir, c.name);

@@ -60,6 +60,7 @@ namespace {
 constexpr float kHipY = 0.95f;
 constexpr float kHipX = 0.105f;
 constexpr float kKneeDrop = 0.43f;    // cadera -> rodilla
+constexpr float kCrouchDrop = 0.36f;  // agachado: cuanto baja la cadera
 constexpr float kShoulderY = 1.395f;
 constexpr float kShoulderX = 0.245f;
 constexpr float kElbowDrop = 0.285f;  // hombro -> codo
@@ -728,7 +729,9 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
                           const world::TextureLibrary& /*textures*/, bool eliminated, HeldItem held,
                           bool lowDetail, BodyPose pose) const {
     const Vec3& pos = state.position;
-    if (!eliminated && pose == BodyPose::Normal) {
+    const bool crouch = pose == BodyPose::Crouch, dance = pose == BodyPose::Dance;
+    const float t = anim.idleTime;
+    if (!eliminated && (pose == BodyPose::Normal || crouch || dance)) {
         // Sombra circular bajo los pies: encoge al subir, para leer la altura del salto.
         // Se apoya en la altura real de los pies al tocar suelo (cajas, altillo).
         const float groundY = state.grounded() ? pos.y : world::groundHeightAt(pos.x, pos.z);
@@ -754,6 +757,16 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     } else if (pose == BodyPose::Glide) {
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-0.18f) *
                Mat4::translation({0.0f, -kHipY, 0.0f});
+    } else if (crouch) {
+        // Agachado: la cadera baja (rodillas dobladas, ver piernas) y el tronco se inclina.
+        root = root * Mat4::translation({0.0f, -kCrouchDrop, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
+               Mat4::rotationX(-0.22f) * Mat4::translation({0.0f, -kHipY, 0.0f}) *
+               Mat4::rotationX(-0.22f * anim.flinch);
+    } else if (dance) {
+        // Baile: rebote al ritmo y vaiven de la cadera.
+        const float beat = sinf(t * 6.0f);
+        root = root * Mat4::translation({0.0f, 0.07f * fabsf(beat), 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
+               Mat4::rotationZ(0.14f * sinf(t * 3.0f)) * Mat4::translation({0.0f, -kHipY, 0.0f});
     } else {
         // Respiracion (muy leve) y sacudida hacia atras al recibir un impacto.
         const float breath = 0.012f * sinf(anim.idleTime * 2.4f) * (state.horizontalSpeed() < 0.5f ? 1.0f : 0.0f);
@@ -782,6 +795,14 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         } else if (glide) {
             hip = s == 0 ? 0.25f : 0.05f;
             knee = 0.35f;
+        } else if (crouch) {
+            // Muslos hacia delante y rodillas muy dobladas (el paso, mas corto).
+            hip = 1.25f + hip * 0.4f;
+            knee = 1.7f + knee * 0.2f;
+        } else if (dance) {
+            hip = 0.35f * sinf(t * 6.0f + (s == 0 ? 0.0f : math3d::kPi));
+            knee = 0.25f + 0.25f * fabsf(sinf(t * 6.0f + s));
+            legSpread = 0.12f;
         }
         const Mat4 thigh = root * Mat4::translation({side * kHipX, kHipY, 0.0f}) * Mat4::rotationX(hip) *
                            Mat4::rotationZ(side * legSpread);
@@ -801,6 +822,12 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             elbow = 0.45f;
             inward = 0.0f;
             spread = 1.25f;
+        } else if (dance) {
+            // Brazos arriba, alternando al ritmo.
+            shoulder = 2.5f + 0.55f * sinf(t * 6.0f + (s == 0 ? 0.0f : math3d::kPi));
+            elbow = 0.7f;
+            inward = 0.0f;
+            spread = 0.55f;
         } else if (glide) {
             // Agarrado a la barra del ala delta, por encima de la cabeza.
             shoulder = 2.85f;

@@ -3,8 +3,8 @@
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
 **Estado: fase 7 (botín, autobús, ala delta, airdrops, bots que cazan y construyen, tormenta
-que se cierra, suelos, rampas, mirilla de francotirador, mapa destruible y bots con
-inventario), v0.10.0.**
+que se cierra, suelos, rampas, mirilla de francotirador, mapa destruible, bots con
+inventario, perfil guardado, headshots, agacharse, bailar y mapa), v0.11.0.**
 una partida completa:
 1. inicio de sesión;
 2. lobby;
@@ -64,6 +64,23 @@ de host. No son capturas de una PSP.*
   - prueba de 10 partidas seguidas sin que crezca la memoria.
 
 Detalle en [docs/PRESENTACION.md](docs/PRESENTACION.md).
+
+**v0.11.0:**
+- **Perfil:** la primera vez se pide el nombre con un teclado en pantalla. El perfil se guarda
+  en `perfil.txt` junto al EBOOT: nombre, partidas, victorias, bajas, impactos a la cabeza,
+  máximo de bajas, mejor puesto y tiempo jugado. Al volver a entrar se carga y se ve en el
+  lobby.
+- **Mapa:** SELECT abre el mapa a pantalla completa, con la tormenta actual y la siguiente,
+  el depósito, los airdrops y el jugador. L + SELECT recorre las páginas del HUD.
+- **Disparos a la cabeza:** el doble de daño, con el número en amarillo. Los bots apenas los
+  consiguen: de los suyos solo cuenta uno de cada cuatro.
+- **Agacharse (cruceta abajo):**
+  - **Movimiento:** se va al 55 % de velocidad.
+  - **Al recibir disparos:** la caja de impacto es más baja y los bots tienen 1,5° más de
+    dispersión. En la simulación recibe la mitad de impactos.
+- **Bailar (cruceta arriba):** con la música de `Fortnite bailemp3`, hasta moverse o actuar.
+- **Francotirador:** con L, la ayuda de puntería sube a 4° (1° con el resto de armas). Solo
+  corrige si la mira no da ya en el rival, así que se puede apuntar a la cabeza.
 
 **v0.10.0** (detalle en [docs/DESTRUCCION.md](docs/DESTRUCCION.md)):
 - **Mapa destruible:** todo el mapa salvo el suelo y la meseta se pica. Paredes de las naves
@@ -248,6 +265,8 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 |---------------|----------------------------------------|----------------------------------------------|
 | Siempre       | **Stick analógico**                    | Andar / correr; la cámara se coloca sola detrás (no al ir hacia atrás) |
 | Siempre       | **X**                                  | Saltar (mantener = salto completo)           |
+| Combate       | **Cruceta ↓ / ↑**                      | Agacharse / bailar                           |
+| Siempre       | **SELECT**                             | Mapa a pantalla completa (L + SELECT: páginas del HUD) |
 | Siempre       | **L (mantener)**                       | Apuntar: con un enemigo a la vista gira la cámara hacia él (el stick mueve de lado); sin él, el stick mueve la mira |
 | Combate       | **Cruceta ← →**                        | Cambiar de ranura del inventario             |
 | Combate       | **TRIÁNGULO**                          | Sacar / guardar el pico                      |
@@ -374,7 +393,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
-- **`make app-sim`: 0 fallos en 86 comprobaciones.** Es la aplicación real, con mando,
+- **`make app-sim`: 0 fallos en 92 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que
     sigue al andar, L + stick, piezas de construcción y cámara libre.
@@ -390,7 +409,7 @@ Recursos/ Referencias/       Recursos directos / material de referencia
       navegación intacta);
     - que el heap no crece;
     - que no se pierde ningún sonido.
-- **`make match-sim`: 0 fallos en 134 comprobaciones.** Navegación, colisiones, disparos,
+- **`make match-sim`: 0 fallos en 138 comprobaciones.** Navegación, colisiones, disparos,
   eliminaciones, 8 partidas completas con 10 y 30 bots, arma, disparo desde la cámara,
   construcción, IA frente a paredes, sucesos de sonido, y en la fase 7: inventario,
   escudo, curas, pico, materiales, coste de las paredes, tormenta del límite del mapa, armas,

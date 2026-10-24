@@ -3,9 +3,11 @@
 #include "app/app.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "app/app_common.h"
 #include "audio/audio_system.h"
+#include "platform/log.h"
 
 namespace app {
 namespace {
@@ -19,6 +21,7 @@ constexpr float kVictoryDelay = 1.0f;      // s desde la ultima baja hasta la pa
 constexpr float kDefeatDelay = 2.5f;       // s viendo la propia caida antes de la pantalla
 constexpr float kResultsInputDelay = 0.8f; // evita saltarse los resultados disparando
 constexpr int kMinBots = 5;
+constexpr int kStatsX = 4, kStatsY = 44, kStatsW = 122, kStatsH = 78;  // panel del perfil en el lobby
 
 const char* const kLoginSteps[] = {"Conectando...", "Comprobando la version...", "Cargando el perfil..."};
 
@@ -87,8 +90,125 @@ void App::updateLogin(const input::Input& in, float dt) {
     m_loginTimer += dt;
     if (m_loginTimer >= kConnectSeconds) {
         playSfx(audio::Sfx::MenuAccept, 0.8f);
+        if (m_profile.hasName()) {
+            goToLobby();
+        } else {
+            // Primera vez: elegir el nombre.
+            m_screen = Screen::Nickname;
+            m_nickBuffer[0] = '\0';
+            m_nickRow = m_nickCol = 0;
+            m_nickLower = false;
+        }
+    }
+}
+
+// --- Nombre (primera vez) ----------------------------------------------------------------
+
+// Teclado en pantalla: 4 filas de 10 caracteres y una de botones (BORRAR | ACEPTAR).
+constexpr int kNickCols = 10, kNickRows = 5;
+const char* const kNickKeys[2][4] = {
+    {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ-_.!", "0123456789"},
+    {"abcdefghij", "klmnopqrst", "uvwxyz-_.!", "0123456789"},
+};
+constexpr float kNickKeyX = 120.0f, kNickKeyY = 104.0f, kNickKeyW = 22.0f, kNickKeyH = 20.0f, kNickGap = 2.0f;
+const ui::Hint kNickHints[] = {{ui::Button::Cross, "escribir"}, {ui::Button::Circle, "borrar"},
+                               {ui::Button::Triangle, "mayus/minus"}, {ui::Button::Start, "aceptar"}};
+
+void App::updateNickname(const input::Input& in) {
+    const int dx = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    const int dy = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (dx || dy) {
+        m_nickRow = (m_nickRow + dy + kNickRows) % kNickRows;
+        m_nickCol = (m_nickCol + dx + kNickCols) % kNickCols;
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+    if (in.pressed(PSP_CTRL_TRIANGLE)) m_nickLower = !m_nickLower;
+    const int len = static_cast<int>(strlen(m_nickBuffer));
+    bool erase = in.pressed(PSP_CTRL_CIRCLE);
+    bool accept = in.pressed(PSP_CTRL_START);
+    if (in.pressed(PSP_CTRL_CROSS)) {
+        if (m_nickRow == kNickRows - 1) {
+            (m_nickCol < kNickCols / 2 ? erase : accept) = true;
+        } else if (len < Profile::kMaxName) {
+            m_nickBuffer[len] = kNickKeys[m_nickLower ? 1 : 0][m_nickRow][m_nickCol];
+            m_nickBuffer[len + 1] = '\0';
+            playSfx(audio::Sfx::MenuMove, 0.6f);
+        }
+    }
+    if (erase && len > 0) {
+        m_nickBuffer[len - 1] = '\0';
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+    if (accept && m_nickBuffer[0] != '\0') {
+        snprintf(m_profile.name, sizeof(m_profile.name), "%s", m_nickBuffer);
+        if (!m_profile.save(m_profilePath)) platform::log::write("aviso: no se pudo guardar %s", m_profilePath);
+        playSfx(audio::Sfx::MenuAccept);
         goToLobby();
     }
+}
+
+void App::renderNickname() const {
+    if (m_lobbyReady) m_lobbyScene.drawBackground(m_lobbyTime);
+    else gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, kNavy);
+    gfx::fillRect(100, 36, 280, 210, rgba(8, 18, 48, 230));
+    ui::frame(100, 36, 280, 210, 2, rgba(90, 160, 255));
+    gfx::fillRect(150, 68, 180, 22, rgba(0, 0, 0, 160));  // casilla del nombre
+    for (int r = 0; r < kNickRows - 1; ++r) {
+        for (int c = 0; c < kNickCols; ++c) {
+            const bool selected = r == m_nickRow && c == m_nickCol;
+            gfx::fillRect(kNickKeyX + c * (kNickKeyW + kNickGap), kNickKeyY + r * (kNickKeyH + kNickGap), kNickKeyW,
+                          kNickKeyH, selected ? kYellow : rgba(30, 60, 130, 230));
+        }
+    }
+    const float y = kNickKeyY + (kNickRows - 1) * (kNickKeyH + kNickGap);
+    const float half = (kNickCols / 2) * (kNickKeyW + kNickGap) - kNickGap;
+    const bool last = m_nickRow == kNickRows - 1;
+    gfx::fillRect(kNickKeyX, y, half, kNickKeyH, last && m_nickCol < kNickCols / 2 ? kYellow : rgba(150, 40, 40, 230));
+    gfx::fillRect(kNickKeyX + half + kNickGap, y, half, kNickKeyH,
+                  last && m_nickCol >= kNickCols / 2 ? kYellow : rgba(40, 130, 60, 230));
+    gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
+    ui::drawHintIcons(m_atlas, 8, kHintsY, kNickHints, 4);
+}
+
+void App::overlayNickname() const {
+    printCentered(46, kWhite, "ELIGE TU NOMBRE DE JUGADOR");
+    char shown[Profile::kMaxName + 2];
+    const bool cursor = fmodf(m_lobbyTime, 1.0f) < 0.5f && strlen(m_nickBuffer) < Profile::kMaxName;
+    snprintf(shown, sizeof(shown), "%s%s", m_nickBuffer, cursor ? "_" : " ");
+    printCentered(75, config::kColorGold, shown);
+    for (int r = 0; r < kNickRows - 1; ++r) {
+        for (int c = 0; c < kNickCols; ++c) {
+            const bool selected = r == m_nickRow && c == m_nickCol;
+            char key[2] = {kNickKeys[m_nickLower ? 1 : 0][r][c], '\0'};
+            gfx::text::print(static_cast<int>(kNickKeyX + c * (kNickKeyW + kNickGap) + 7),
+                             static_cast<int>(kNickKeyY + r * (kNickKeyH + kNickGap) + 6), selected ? kNavy : kWhite,
+                             "%s", key);
+        }
+    }
+    const int y = static_cast<int>(kNickKeyY + (kNickRows - 1) * (kNickKeyH + kNickGap) + 6);
+    const int half = static_cast<int>((kNickCols / 2) * (kNickKeyW + kNickGap) - kNickGap);
+    printCenteredAt(static_cast<int>(kNickKeyX) + half / 2, y, kWhite, "BORRAR");
+    printCenteredAt(static_cast<int>(kNickKeyX) + half + 2 + half / 2, y, kWhite, "ACEPTAR");
+    printCentered(226, kLightGrey, "Se guarda tu nombre y tus estadisticas");
+    ui::printHints(8, kHintsY, kLightGrey, kNickHints, 4);
+}
+
+void App::recordMatch() {
+    // Suma la partida al perfil (una vez por partida: al ver los resultados o al abandonar).
+    if (m_matchRecorded) return;
+    m_matchRecorded = true;
+    const bool won = m_match.phase() == game::MatchPhase::Finished && m_match.winner() == 0;
+    const int kills = m_match.playerKills();
+    ++m_profile.matches;
+    if (won) ++m_profile.wins;
+    if (!m_match.alive(0)) ++m_profile.deaths;
+    m_profile.kills += kills;
+    m_profile.headshots += m_match.playerHeadshots();
+    if (kills > m_profile.mostKills) m_profile.mostKills = kills;
+    const int place = won ? 1 : m_match.playerPlace();
+    if (place > 0 && (m_profile.bestPlace == 0 || place < m_profile.bestPlace)) m_profile.bestPlace = place;
+    m_profile.seconds += static_cast<int>(m_match.elapsed());
+    if (!m_profile.save(m_profilePath)) platform::log::write("aviso: no se pudo guardar %s", m_profilePath);
 }
 
 // Pantalla de inicio: la imagen de Recursos/loginscreen.png, "Pulsa (X) para iniciar" bajo
@@ -219,6 +339,9 @@ void App::renderLobby() {
     }
     gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
     ui::drawHintIcons(m_atlas, 8, kHintsY, kLobbyHints, kLobbyHintCount);
+    // Panel de estadisticas del perfil (el texto, en overlayLobby).
+    gfx::fillRect(kStatsX, kStatsY, kStatsW, kStatsH, rgba(8, 18, 48, 200));
+    ui::frame(kStatsX, kStatsY, kStatsW, kStatsH, 1, rgba(90, 160, 255));
 
     if (m_confirmExit) {
         gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 140));
@@ -232,8 +355,22 @@ void App::overlayLobby() const {
     // Nombre sobre la cabeza del personaje, como en la referencia.
     float x = 0.0f, y = 0.0f;
     if (m_modelsReady && projectToScreen(m_lobbyViewProjection, LobbyScene::namePoint(), &x, &y)) {
-        printCenteredAt(static_cast<int>(x), static_cast<int>(y), kWhite, kPlayerName);
+        printCenteredAt(static_cast<int>(x), static_cast<int>(y), kWhite, m_profile.name);
     }
+    // Estadisticas del perfil (perfil.txt), en el panel de la izquierda.
+    gfx::text::printShadow(kStatsX + 4, kStatsY + 4, config::kColorGold, "%s", m_profile.name);
+    const struct {
+        const char* label;
+        int value;
+    } stats[] = {{"Victorias", m_profile.wins},   {"Partidas", m_profile.matches},   {"Bajas", m_profile.kills},
+                 {"A la cabeza", m_profile.headshots}, {"Max. bajas", m_profile.mostKills}};
+    for (int k = 0; k < 5; ++k) {
+        gfx::text::print(kStatsX + 4, kStatsY + 16 + 10 * k, kLightGrey, "%s", stats[k].label);
+        gfx::text::print(kStatsX + 86, kStatsY + 16 + 10 * k, kWhite, "%4d", stats[k].value);
+    }
+    gfx::text::print(kStatsX + 4, kStatsY + 66, kLightGrey, "Mejor puesto");
+    if (m_profile.bestPlace > 0) gfx::text::print(kStatsX + 94, kStatsY + 66, kWhite, "#%d", m_profile.bestPlace);
+    else gfx::text::print(kStatsX + 110, kStatsY + 66, kWhite, "-");
     const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f);
     char bots[24];
     snprintf(bots, sizeof(bots), "<  BOTS: %d  >", m_botCount);
@@ -326,6 +463,7 @@ void App::updatePause(const input::Input& in) {
         playSfx(audio::Sfx::MenuMove);
     } else if (in.pressed(PSP_CTRL_CROSS)) {
         playSfx(audio::Sfx::MenuAccept);
+        recordMatch();  // abandonar tambien cuenta
         goToLobby();
     }
 }
@@ -374,6 +512,7 @@ void App::updateResults(const input::Input& in, float dt) {
         if (m_audioReady) audio::mixer().stopAll();
         m_chestHumOn = false;
         if (!m_resultSoundPlayed) playSfx(won ? audio::Sfx::Victory : audio::Sfx::Defeat);
+        recordMatch();
         m_resultSoundPlayed = true;
         return;
     }

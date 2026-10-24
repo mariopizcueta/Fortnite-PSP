@@ -29,8 +29,9 @@ Las coordenadas y los ejes son los de [MUNDO.md](MUNDO.md): 1 unidad = 1 m, +Y a
 | CUADRADO                   | Abrir / recoger lo que haya al alcance; si no hay nada, recargar (en construcción: cambiar de material) |
 | X (autobús / caída libre)  | Saltar del autobús / abrir el ala delta (ver BOTIN.md)      |
 | CÍRCULO                    | Modo construcción (cruceta: pared, suelo o rampa; R la coloca) |
-| L con el francotirador     | Mirilla: primera persona con zoom; el stick apunta más despacio |
-| SELECT                     | HUD: partida → depuración → controles → oculto              |
+| L con el francotirador     | Mirilla: primera persona con zoom, ayuda de puntería de 4°; el stick apunta más despacio |
+| Cruceta ↓ / ↑              | Agacharse (más lento, más difícil de acertar) / bailar      |
+| SELECT                     | Mapa a pantalla completa (L + SELECT: páginas del HUD: partida → depuración → controles → oculto) |
 | START                      | Pausa (CONTINUAR / VOLVER AL LOBBY)                         |
 | Resultados                 | X lobby, CUADRADO otra partida, CÍRCULO seguir mirando (derrota) |
 | L + R + START (1 s)        | Salir                                                       |

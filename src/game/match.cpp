@@ -71,6 +71,8 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_pendingCycle = 0;
     m_buildMode = false;
     m_buildMaterial = world::Resource::Wood;
+    m_playerCrouched = false;
+    m_playerHeadshots = 0;
     m_inventory.clear();
     for (const MatchConfig::StartItem& item : m_config.startItems) {
         if (item.type != ItemType::None) m_inventory.add(item.type, item.rarity, item.count);
@@ -190,10 +192,22 @@ bool Match::alive(int id) const {
 
 const CharacterBody& Match::body(int id) const { return id == 0 ? m_player : m_bots[id - 1].body; }
 CharacterBody& Match::mutableBody(int id) { return id == 0 ? m_player : m_bots[id - 1].body; }
+void Match::setPlayerName(const char* name) {
+    if (name && name[0]) snprintf(m_names[0], sizeof(m_names[0]), "%s", name);
+}
+
 const char* Match::name(int id) const { return (id >= 0 && id < entityCount()) ? m_names[id] : "?"; }
 
 Vec3 Match::eyeOf(int id) const { return body(id).state().position + Vec3{0.0f, kEyeHeight, 0.0f}; }
-Vec3 Match::chestOf(int id) const { return body(id).state().position + Vec3{0.0f, kChestHeight, 0.0f}; }
+Vec3 Match::chestOf(int id) const {
+    return body(id).state().position + Vec3{0.0f, id == 0 && m_playerCrouched ? kCrouchChestHeight : kChestHeight, 0.0f};
+}
+
+world::Aabb Match::hitBox(int id) const {
+    const Vec3 p = body(id).state().position;
+    const float h = id == 0 && m_playerCrouched ? kCrouchHitHeight : kHitHeight;
+    return {{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth}, {p.x + kHitHalfWidth, p.y + h, p.z + kHitHalfWidth}};
+}
 
 bool Match::lineOfSight(const Vec3& from, const Vec3& to) const {
     return !m_world->raycast(from, to, world::kBlocksShots, nullptr);
@@ -239,6 +253,7 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (input.jumpPressed) m_pendingJump = true;
     if (commands.placeWall) m_pendingPlace = true;
     m_buildPiece = commands.buildPiece;
+    if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0)) m_playerCrouched = !m_playerCrouched;
     if (commands.cycleMaterial) {
         m_buildMaterial = static_cast<world::Resource>((static_cast<int>(m_buildMaterial) + 1) %
                                                        static_cast<int>(world::Resource::Count));
@@ -309,6 +324,7 @@ void Match::updatePlayer(float dt) {
         m_assistTarget = -1;
         m_pendingUse = false;
         cancelUse();
+        m_playerCrouched = false;
         if (m_air[0] == AirState::Bus) return;
         in.jumpPressed = false;
         const u64 t0 = core::nowMicros();
@@ -336,8 +352,12 @@ void Match::updatePlayer(float dt) {
     m_playerAiming = in.aiming || (!m_buildMode && ((m_aim.fire && m_inventory.activeWeapon()) || swinging));
     in.aiming = m_playerAiming;
 
+    // Saltar levanta; agachado se anda mas despacio.
+    if (in.jumpPressed) m_playerCrouched = false;
+    MoveIntent intent = playerIntent(in);
+    if (m_playerCrouched) intent.speedScale *= m_config.crouchSpeed;
     const u64 t0 = core::nowMicros();
-    m_player.step(playerIntent(in), dt, *m_world);
+    m_player.step(intent, dt, *m_world);
     m_stats.physicsMicros += core::nowMicros() - t0;
 
     if (!control) {
@@ -383,9 +403,9 @@ void Match::updatePlayerItems(float dt, bool reload) {
         if (reload) weapon->startReload();
         // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
         const float range = weapon->config().range;
-        m_assistTarget = m_config.aimAssistDegrees > 0.0f
-                             ? findLockTarget(m_aim.eye, m_aim.direction, m_config.aimAssistDegrees, range)
-                             : -1;
+        const bool sniperScope = m_inventory.activeType() == ItemType::Sniper && m_input.aiming;
+        const float assist = sniperScope ? m_config.sniperAssistDegrees : m_config.aimAssistDegrees;
+        m_assistTarget = assist > 0.0f ? findLockTarget(m_aim.eye, m_aim.direction, assist, range) : -1;
         // tryFire() aplica municion y cadencia: mantener R da como mucho un disparo por
         // intervalo (y por paso), nunca uno por frame.
         if (m_aim.fire && m_phase != MatchPhase::Finished) {
@@ -613,7 +633,11 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, fl
                              const WeaponConfig* weapon, bool emitShot, int weaponType) {
     const Vec3 chest = chestOf(0);
     Vec3 dir = aim.direction;
-    if (m_assistTarget >= 0) dir = math3d::normalize(chestOf(m_assistTarget) - aim.eye);
+    // Ayuda de punteria: solo si la mira no le da ya (asi se puede apuntar a la cabeza).
+    float tAssist;
+    if (m_assistTarget >= 0 && !world::segmentVsAabb(aim.eye, aim.direction * range, hitBox(m_assistTarget), &tAssist)) {
+        dir = math3d::normalize(chestOf(m_assistTarget) - aim.eye);
+    }
     // Dispersion del arma (despues de la ayuda de punteria: la ayuda no la anula).
     if (spreadDegrees > 0.0f) dir = perturb(dir, math3d::toRadians(spreadDegrees), m_rng);
 
@@ -627,9 +651,7 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, fl
     const Vec3 seg = end - start;
     for (int id = 1; id < entityCount(); ++id) {
         if (!alive(id) || m_air[id] == AirState::Bus) continue;
-        const Vec3 p = body(id).state().position;
-        const world::Aabb box{{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth},
-                              {p.x + kHitHalfWidth, p.y + kHitHeight, p.z + kHitHalfWidth}};
+        const world::Aabb box = hitBox(id);
         float t;
         if (world::segmentVsAabb(start, seg, box, &t) && t < best) best = t;
     }
@@ -666,9 +688,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
     int victim = -1;
     for (int id = 0; id < entityCount(); ++id) {
         if (id == shooter || !alive(id) || m_air[id] == AirState::Bus) continue;
-        const Vec3 p = body(id).state().position;
-        const world::Aabb box{{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth},
-                              {p.x + kHitHalfWidth, p.y + kHitHeight, p.z + kHitHalfWidth}};
+        const world::Aabb box = hitBox(id);
         float t;
         if (world::segmentVsAabb(origin, seg, box, &t) && t < best) {
             best = t;
@@ -688,13 +708,21 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         damage *= 1.0f + (weapon->falloffMin - 1.0f) * t;
     }
     if (victim >= 0) {
+        // En la cabeza (lo mas alto de la caja de impacto): dano doble.
+        const world::Aabb box = hitBox(victim);
+        bool headshot = result.end.y >= box.max.y - kHeadSize;
+        if (headshot && victim == 0 && shooter > 0) headshot = m_rng.chance(m_config.botHeadshotChance);
+        if (headshot) damage *= m_config.headshotMultiplier;
         pushEvent(GameEventType::HitEntity, victim, shooter, result.end);
+        m_events[(m_eventCount - 1) % kMaxEvents].amount = headshot ? 1 : 0;
         ++m_stats.shotsHitEntity;
         result.hitEntity = true;
+        result.headshot = headshot;
         result.victim = victim;
         if (shooter == 0) {
             m_sincePlayerHit = 0.0f;
-            addDamageNumber(result.end, damage, false);
+            if (headshot) ++m_playerHeadshots;
+            addDamageNumber(result.end, damage, false, headshot);
         }
         applyDamage(victim, damage, shooter);
     } else if (wall) {
@@ -737,11 +765,12 @@ void Match::pushEvent(GameEventType type, int entity, int other, const Vec3& pos
     ++m_eventCount;
 }
 
-void Match::addDamageNumber(const Vec3& position, float amount, bool structure) {
+void Match::addDamageNumber(const Vec3& position, float amount, bool structure, bool headshot) {
     // Los perdigones de un mismo disparo de escopeta suman en un solo numero.
     DamageNumber& last = m_damageNumbers[(m_nextDamageNumber + kMaxDamageNumbers - 1) % kMaxDamageNumbers];
     if (last.age == 0.0f && last.structure == structure && math3d::length(last.position - position) < 1.6f) {
         last.amount += amount;
+        last.headshot |= headshot;
         return;
     }
     DamageNumber& d = m_damageNumbers[m_nextDamageNumber];
@@ -752,6 +781,7 @@ void Match::addDamageNumber(const Vec3& position, float amount, bool structure) 
     d.amount = amount;
     d.age = 0.0f;
     d.structure = structure;
+    d.headshot = headshot;
 }
 
 world::Aabb Match::bodyBounds(int id) const { return body(id).bounds(); }

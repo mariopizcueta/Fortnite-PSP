@@ -44,6 +44,7 @@ struct PlayerCommands {
     bool reload = false;     // CUADRADO pulsado en modo combate: abrir / recoger o recargar
     int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
+    bool toggleCrouch = false;   // cruceta abajo: agacharse / levantarse
     bool useItem = false;    // R pulsado con un consumible en la mano
 };
 
@@ -133,6 +134,7 @@ struct DamageNumber {
     float amount = 0.0f;
     float age = 99.0f;
     bool structure = false;  // impacto en una pared construida
+    bool headshot = false;   // en la cabeza (numero amarillo)
 };
 
 struct KillEvent {
@@ -150,6 +152,7 @@ struct Tracer {
 
 struct ShotResult {
     bool hitEntity = false;
+    bool headshot = false;
     int victim = -1;
     bool blockedByWorld = false;
     math3d::Vec3 end;
@@ -222,6 +225,10 @@ public:
     bool inStorm(int id) const { return m_inStorm[id]; }
     const CharacterBody& body(int id) const;
     const char* name(int id) const;
+    // Pruebas: el jugador no recibe dano mientras este activo.
+    void setPlayerInvulnerable(bool on) { m_config.invulnerablePlayer = on; }
+    // Nombre del jugador (el del perfil) para el HUD y el registro de eliminaciones.
+    void setPlayerName(const char* name);
     int botCount() const { return static_cast<int>(m_bots.size()); }
     const Bot& bot(int i) const { return m_bots[i]; }
     bool playerAiming() const { return m_playerAiming; }
@@ -274,6 +281,11 @@ public:
     // Arma del bot i (para el HUD de depuracion).
     const char* botWeaponName(int i) const;
     const StructureSystem& structures() const { return m_structures; }
+    // Agachado (cruceta abajo): mas lento, caja de impacto mas baja y los bots fallan mas.
+    bool playerCrouched() const { return m_playerCrouched; }
+    // Caja de impacto de un personaje (mas baja si el jugador esta agachado).
+    world::Aabb hitBox(int id) const;
+    int playerHeadshots() const { return m_playerHeadshots; }
     // Material elegido para construir (CUADRADO en construccion lo cambia).
     world::Resource buildMaterial() const { return m_buildMaterial; }
     // Donde iria una pieza ahora mismo (para dibujar la pieza fantasma).
@@ -369,7 +381,7 @@ private:
     void hearShot(int shooter, const math3d::Vec3& origin);
     float botAttackRange(const Bot& bot) const;
     void damageWall(int wall, float amount, int attacker, const math3d::Vec3& point);
-    void addDamageNumber(const math3d::Vec3& position, float amount, bool structure);
+    void addDamageNumber(const math3d::Vec3& position, float amount, bool structure, bool headshot = false);
     void onStructuresChanged();
     void pushEvent(GameEventType type, int entity, int other, const math3d::Vec3& position);
     world::Aabb bodyBounds(int id) const;
@@ -411,6 +423,8 @@ private:
     bool m_pendingPlace = false;
     PieceType m_buildPiece = PieceType::Wall;
     world::Resource m_buildMaterial = world::Resource::Wood;
+    bool m_playerCrouched = false;
+    int m_playerHeadshots = 0;
     bool m_pendingRemove = false;
     bool m_pendingReload = false;
     bool m_pendingPickaxe = false;

@@ -37,7 +37,6 @@ constexpr int kLineHeight = 11;
 constexpr float kDamageNumberSeconds = 0.9f;
 constexpr float kKillFeedSeconds = 6.0f;
 constexpr float kCorpseSeconds = 8.0f;  // los eliminados se ven tumbados este tiempo
-constexpr const char* kPlayerName = "Jugador";
 
 inline void printCentered(int y, u32 color, const char* str) {
     gfx::text::print((gfx::kScreenWidth - gfx::text::width(str)) / 2, y, color, "%s", str);

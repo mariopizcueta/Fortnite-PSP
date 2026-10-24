@@ -35,6 +35,7 @@ OBJS = src/main.o \
        src/app/build_visuals.o \
        src/app/lobby_scene.o \
        src/app/prop_visuals.o \
+       src/app/profile.o \
        src/app/ui.o \
        src/audio/audio_system.o \
        src/audio/mixer.o \

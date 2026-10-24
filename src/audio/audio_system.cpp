@@ -51,6 +51,7 @@ bool init() {
     load(Sfx::ShotgunShot, assets::sfxEscopeta());
     load(Sfx::SmgShot, assets::sfxSubfusil());
     load(Sfx::Pickup, assets::sfxRecoger());
+    load(Sfx::Dance, assets::sfxBaile());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

@@ -43,4 +43,5 @@ asset_\name\()_end:
     ASSET sfx_escopeta, "assets/sounds/escopeta.wav"
     ASSET sfx_subfusil, "assets/sounds/subfusil.wav"
     ASSET sfx_recoger, "assets/sounds/recoger.wav"
+    ASSET sfx_baile, "assets/sounds/baile.wav"
     ASSET music_menu, "assets/sounds/musica_menu.ima"

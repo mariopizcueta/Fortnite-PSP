@@ -88,7 +88,7 @@ namespace {
 using math3d::Vec3;
 
 // Mismos valores que App::Screen / App::Results.
-enum Screen { kLogin, kLobby, kControls, kLoading, kGame };
+enum Screen { kLogin, kNickname, kLobby, kControls, kLoading, kGame };
 enum Results { kNone, kVictory, kDefeat };
 
 int g_failures = 0;
@@ -110,6 +110,7 @@ public:
         m_input.init();
         m_input.setTrackedCombo(config::kExitCombo);
         softgfx::g.enabled = true;
+        m_app.setDataDirectory(m_outDir);  // perfil.txt en build/app_sim/
         m_app.init();
         m_timer.reset();
     }
@@ -137,6 +138,13 @@ public:
 
     void press(u32 button) {
         frame(button);
+        frame(0);
+    }
+    // Pulsar un boton con otro mantenido (p. ej. L + SELECT).
+    void pressWith(u32 button, u32 held) {
+        frame(held);
+        frame(held | button);
+        frame(held);
         frame(0);
     }
     void hold(u32 buttons, float seconds, float stickX = 0.0f, float stickY = 0.0f) {
@@ -482,11 +490,11 @@ void testNewControls(Sim& sim) {
     sim.press(PSP_CTRL_CIRCLE);
 
     // Camara libre: TRIANGULO solo en la pagina de depuracion.
-    sim.press(PSP_CTRL_SELECT);
+    sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
     sim.press(PSP_CTRL_TRIANGLE);
     check(sim.app().testFreeCamera() && inv.pickaxe(), "en la pagina de depuracion TRIANGULO abre la camara libre");
     sim.press(PSP_CTRL_TRIANGLE);
-    for (int i = 0; i < 3; ++i) sim.press(PSP_CTRL_SELECT);
+    for (int i = 0; i < 3; ++i) sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
     check(!sim.app().testFreeCamera(), "y la cierra");
     sim.press(PSP_CTRL_LEFT);
     sim.shot("26_hud_inventario");
@@ -541,6 +549,11 @@ int main(int argc, char** argv) {
 
     testAudio(outDir);
 
+    // Sin perfil: la primera vez se pide el nombre.
+    char profilePath[512];
+    snprintf(profilePath, sizeof(profilePath), "%s/perfil.txt", outDir);
+    remove(profilePath);
+
     Sim sim(outDir);
     const unsigned heapBefore = heapBytes();
     sim.init();
@@ -558,7 +571,32 @@ int main(int argc, char** argv) {
     sim.wait(0.7f);
     sim.shot("02_login_conectando");
     check(sim.screen() == kLogin, "X inicia la conexion simulada (sigue en la pantalla de inicio)");
-    check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 3.0f), "tras conectar se entra en el lobby");
+    check(sim.waitUntil([&] { return sim.screen() == kNickname; }, 3.0f),
+          "la primera vez (sin perfil.txt) se pide el nombre del jugador");
+    // Teclado en pantalla: cursor en la A; se escribe MARIO y START acepta.
+    sim.wait(0.2f);
+    {
+        const char* rows[] = {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ-_.!", "0123456789"};
+        int row = 0, col = 0;
+        for (const char* c = "MARIO"; *c; ++c) {
+            for (int r = 0; r < 4; ++r) {
+                const char* at = strchr(rows[r], *c);
+                if (!at) continue;
+                const int targetCol = static_cast<int>(at - rows[r]);
+                for (; row < r; ++row) sim.press(PSP_CTRL_DOWN);
+                for (; row > r; --row) sim.press(PSP_CTRL_UP);
+                for (; col < targetCol; ++col) sim.press(PSP_CTRL_RIGHT);
+                for (; col > targetCol; --col) sim.press(PSP_CTRL_LEFT);
+                sim.press(PSP_CTRL_CROSS);
+                break;
+            }
+        }
+    }
+    sim.shot("02b_nombre");
+    sim.press(PSP_CTRL_START);
+    sim.wait(0.2f);
+    check(sim.screen() == kLobby && strcmp(sim.app().testProfile().name, "MARIO") == 0,
+          "con START se acepta el nombre y se entra en el lobby");
 
     printf("\n2) Lobby\n");
     sim.hold(0, 0.6f, 0.0f, 0.0f);
@@ -639,6 +677,33 @@ int main(int argc, char** argv) {
     sim.wait(1.0f);
     sim.shot("08_partida");
 
+    // SELECT: mapa a pantalla completa (y otra vez para cerrarlo).
+    sim.press(PSP_CTRL_SELECT);
+    sim.wait(0.1f);
+    sim.shot("08g_mapa");
+    const bool mapOpen = sim.app().testMapOpen();
+    sim.press(PSP_CTRL_SELECT);
+    check(mapOpen && !sim.app().testMapOpen(), "SELECT abre y cierra el mapa a pantalla completa");
+    // Cruceta arriba: baile (con su musica) hasta moverse.
+    sim.takeAudioPeak();
+    sim.press(PSP_CTRL_UP);
+    sim.wait(0.6f);
+    sim.shot("08h_baile");
+    const bool dancing = sim.app().testDancing();
+    const int dancePeak = sim.takeAudioPeak();
+    sim.hold(0, 0.2f, 1.0f, 0.0f);
+    check(dancing && dancePeak > 3000 && !sim.app().testDancing(), "cruceta arriba baila (con musica) y al moverse para");
+    // Cruceta abajo: agacharse (mas lento) y otra vez para levantarse.
+    sim.press(PSP_CTRL_DOWN);
+    const Vec3 before = match.body(0).state().position;
+    sim.hold(0, 1.0f, 0.0f, -1.0f);
+    const float crouchedSpeed = math3d::length(match.body(0).state().position - before);
+    sim.shot("08i_agachado");
+    const bool crouched = match.playerCrouched();
+    sim.press(PSP_CTRL_DOWN);
+    printf("  agachado: %.1f m en 1 s (de pie ~5.5)\n", static_cast<double>(crouchedSpeed));
+    check(crouched && crouchedSpeed < 3.5f && !match.playerCrouched(), "cruceta abajo agacha (mas lento) y levanta");
+
     const int shotsBefore = match.stats().shotsFired;
     sim.takeAudioPeak();
     sim.hold(PSP_CTRL_RTRIGGER, 0.8f);
@@ -657,12 +722,12 @@ int main(int argc, char** argv) {
     sim.press(PSP_CTRL_SQUARE);  // recarga
     sim.wait(0.3f);
     sim.shot("11_recargando");
-    sim.press(PSP_CTRL_SELECT);
+    sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
     sim.shot("12_hud_depuracion");
-    sim.press(PSP_CTRL_SELECT);
+    sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
     sim.shot("13_hud_controles");
-    sim.press(PSP_CTRL_SELECT);
-    sim.press(PSP_CTRL_SELECT);
+    sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
+    sim.pressWith(PSP_CTRL_SELECT, PSP_CTRL_LTRIGGER);
 
     sim.press(PSP_CTRL_START);
     check(sim.app().testPaused(), "START pausa la partida");
@@ -830,6 +895,7 @@ int main(int argc, char** argv) {
     sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 40.0f);
     // Lejos de los bots (cazan hasta 80 m) hasta que empiece el segundo cierre.
     match.teleport(0, {-68.0f, 0.0f, 68.0f}, 0.0f);
+    match.setPlayerInvulnerable(true);  // que ningun bot lo elimine mientras se espera
     const bool closing = sim.waitUntil([&] { return match.storm().phase() >= 2 || !match.alive(0); }, 130.0f);
     const game::StormZone& storm = match.storm();
     printf("  a los %.0f s: cierre %d, radio %.0f m, %s\n", static_cast<double>(match.elapsed()), storm.phase(),
@@ -844,6 +910,7 @@ int main(int argc, char** argv) {
         sim.press(PSP_CTRL_LTRIGGER);  // recoloca la camara detras
         sim.wait(0.6f);
         sim.shot("29b_tormenta_cerrandose");
+        match.setPlayerInvulnerable(false);
         match.teleport(0, storm.center() + dir * (storm.radius() + 4.0f), faceYaw);
         const float before = match.body(0).state().health;
         sim.wait(1.2f);
@@ -886,7 +953,24 @@ int main(int argc, char** argv) {
     check(sim.app().exitRequested(), "X en la confirmacion cierra el juego");
 
     sim.writeAudio();
+    const app::Profile played = sim.app().testProfile();
     sim.app().shutdown();
+
+    printf("\n8) Perfil guardado\n");
+    app::Profile loaded;
+    const bool read = loaded.load(profilePath);
+    printf("  perfil.txt: %s, %d partidas, %d victorias, %d bajas, %d a la cabeza, mejor puesto %d\n", loaded.name,
+           loaded.matches, loaded.wins, loaded.kills, loaded.headshots, loaded.bestPlace);
+    check(read && strcmp(loaded.name, "MARIO") == 0 && loaded.matches == played.matches && loaded.matches >= 8 &&
+              loaded.wins >= 1 && loaded.kills == played.kills && loaded.kills > 0 && loaded.bestPlace == 1,
+          "las estadisticas de todas las partidas quedan guardadas en perfil.txt");
+    // Al volver a entrar: el juego carga el perfil y del inicio va directo al lobby.
+    app::App again;
+    again.setDataDirectory(outDir);
+    again.init();
+    const bool same = strcmp(again.testProfile().name, "MARIO") == 0 && again.testProfile().matches == loaded.matches;
+    check(same, "al volver a entrar se cargan el nombre y las estadisticas");
+    again.shutdown();
     if (g_logFile) fclose(g_logFile);
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     return g_failures == 0 ? 0 : 1;

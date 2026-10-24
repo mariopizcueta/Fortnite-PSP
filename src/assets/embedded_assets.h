@@ -39,6 +39,7 @@ FORTNITEPSP_ASSET(sfx_francotirador)
 FORTNITEPSP_ASSET(sfx_escopeta)
 FORTNITEPSP_ASSET(sfx_subfusil)
 FORTNITEPSP_ASSET(sfx_recoger)
+FORTNITEPSP_ASSET(sfx_baile)
 FORTNITEPSP_ASSET(music_menu)
 
 namespace assets {
@@ -89,6 +90,7 @@ FORTNITEPSP_BLOB(sfxFrancotirador, sfx_francotirador)
 FORTNITEPSP_BLOB(sfxEscopeta, sfx_escopeta)
 FORTNITEPSP_BLOB(sfxSubfusil, sfx_subfusil)
 FORTNITEPSP_BLOB(sfxRecoger, sfx_recoger)
+FORTNITEPSP_BLOB(sfxBaile, sfx_baile)
 FORTNITEPSP_BLOB(musicMenu, music_menu)
 
 #undef FORTNITEPSP_BLOB

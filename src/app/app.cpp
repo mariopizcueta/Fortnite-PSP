@@ -2,6 +2,7 @@
 
 #include <malloc.h>
 #include <math.h>
+#include <string.h>
 
 #include <psppower.h>
 
@@ -64,9 +65,21 @@ void App::logStage(const char* stage, u64 startMicros) const {
                          heapInUse() / 1024);
 }
 
+void App::setDataDirectory(const char* dir) {
+    snprintf(m_profilePath, sizeof(m_profilePath), "%s%sperfil.txt", dir ? dir : "",
+             dir && dir[0] && dir[strlen(dir) - 1] != '/' ? "/" : "");
+}
+
 void App::init() {
     const u64 bootStart = core::nowMicros();
     u64 t0 = bootStart;
+    // Perfil guardado (nombre y estadisticas); si no existe, se pide el nombre tras el inicio.
+    if (m_profile.load(m_profilePath)) {
+        platform::log::write("perfil de %s: %d partidas, %d victorias, %d bajas", m_profile.name, m_profile.matches,
+                             m_profile.wins, m_profile.kills);
+    } else {
+        platform::log::write("sin perfil en %s: se pedira el nombre", m_profilePath);
+    }
     const assets::Blob login = assets::loginPng();
     // Las imagenes a pantalla completa son opacas: a 16 bits ocupan la mitad (255 KB).
     if (!gfx::loadPngFromMemory(m_login, login.data, login.size, GU_PSM_5551)) {
@@ -170,6 +183,7 @@ void App::startMatch() {
     m_matchConfig.seed = static_cast<u32>(core::nowMicros()) ^ (0x9E3779B9u * ++m_matchesPlayed);
     m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(),
                   kPlayerSpawn, kPlayerSpawnYaw);
+    m_match.setPlayerName(m_profile.name);
     m_eventCursor = m_match.eventCount();
     m_playerKiller = -1;
     m_buildMode = false;
@@ -186,6 +200,9 @@ void App::startMatch() {
                          m_match.airState(0) == game::AirState::Bus ? 0.9f : kPlayerSpawnYaw);
     m_freeCameraActive = false;
     m_lockTarget = -1;
+    m_matchRecorded = false;
+    m_mapOpen = false;
+    m_dancing = false;
     m_chestHumTimer = 0.0f;
     m_airdropMessage = 0.0f;
     m_stormMessage = 0.0f;
@@ -259,6 +276,7 @@ void App::update(const input::Input& in, float dt) {
 
     switch (m_screen) {
         case Screen::Login: updateLogin(in, dt); break;
+        case Screen::Nickname: updateNickname(in); break;
         case Screen::Lobby: updateLobby(in, dt); break;
         case Screen::Controls: updateControlsScreen(in); break;
         case Screen::Loading: updateLoading(dt); break;
@@ -288,9 +306,16 @@ void App::updateGame(const input::Input& in, float dt) {
     if (m_screen != Screen::Game) return;  // los resultados han vuelto al lobby o a cargar
     const bool overlay = m_results != Results::None;
 
+    // SELECT: mapa a pantalla completa. L + SELECT: paginas del HUD (depuracion, controles...).
     if (!overlay && in.pressed(PSP_CTRL_SELECT)) {
-        m_hud = static_cast<Hud>((static_cast<int>(m_hud) + 1) % static_cast<int>(Hud::Count));
+        if (in.held(PSP_CTRL_LTRIGGER)) {
+            m_hud = static_cast<Hud>((static_cast<int>(m_hud) + 1) % static_cast<int>(Hud::Count));
+        } else {
+            m_mapOpen = !m_mapOpen;
+            playSfx(audio::Sfx::MenuMove, 0.6f);
+        }
     }
+    if (overlay) m_mapOpen = false;
     // START: pausa (si no se esta haciendo la combinacion de salida L+R+START).
     if (!overlay && !m_freeCameraActive && in.pressed(PSP_CTRL_START) &&
         !in.held(PSP_CTRL_LTRIGGER) && !in.held(PSP_CTRL_RTRIGGER)) {
@@ -344,6 +369,22 @@ void App::updateGame(const input::Input& in, float dt) {
         playSfx(audio::Sfx::MenuMove, 0.5f);
     }
     if (!m_match.alive(0)) m_buildMode = false;
+    // Cruceta abajo: agacharse / levantarse. Cruceta arriba: bailar (hasta moverse o actuar).
+    if (act && in.pressed(PSP_CTRL_DOWN)) {
+        commands.toggleCrouch = true;
+        m_dancing = false;
+    }
+    if (act && !m_buildMode && in.pressed(PSP_CTRL_UP)) {
+        m_dancing = !m_dancing;
+        m_danceSoundTimer = 0.0f;
+        if (m_dancing && m_match.playerCrouched()) commands.toggleCrouch = true;  // se levanta para bailar
+    }
+    const float stick = sqrtf(in.analogX() * in.analogX() + in.analogY() * in.analogY());
+    if (!act || m_buildMode || stick > 0.35f || in.held(PSP_CTRL_RTRIGGER) || in.held(PSP_CTRL_LTRIGGER) ||
+        in.pressed(PSP_CTRL_CROSS) || in.pressed(PSP_CTRL_SQUARE) || in.pressed(PSP_CTRL_TRIANGLE) || dpad != 0) {
+        m_dancing = false;
+    }
+    updateDanceSound(dt);
     // L: modo apuntado. Con un enemigo a la vista lo fija (y el stick mueve); sin el, el
     // stick gira la camara y sube o baja la mira en lugar de andar.
     const bool aimHeld = act && in.held(PSP_CTRL_LTRIGGER);
@@ -573,6 +614,22 @@ void App::updateChestHum(float dt) {
     }
 }
 
+void App::updateDanceSound(float dt) {
+    // La musica del baile (7.6 s) se repite mientras se baila y se corta al parar.
+    if (m_dancing) {
+        m_danceSoundTimer -= dt;
+        if (m_danceSoundTimer <= 0.0f) {
+            playSfx(audio::Sfx::Dance, 0.8f);
+            m_danceSoundTimer = 7.55f;
+            m_danceSoundOn = true;
+        }
+    } else if (m_danceSoundOn) {
+        if (m_audioReady) audio::mixer().stop(audio::Sfx::Dance);
+        m_danceSoundOn = false;
+        m_danceSoundTimer = 0.0f;
+    }
+}
+
 void App::playFootsteps() {
     // Una pisada = un paso de Sonidos Limpios/Fortnite Running Sound Effect. Los del
     // jugador, siempre; los de los bots, solo cerca (avisan de que alguien se acerca).
@@ -616,7 +673,8 @@ void App::processEvents() {
             }
             case game::GameEventType::HitEntity:
                 if (e.entity > 0) m_botAnims[e.entity - 1].onHit();
-                if (e.other == 0) playSfx(audio::Sfx::HitMarker, 0.9f);
+                if (e.other == 0) playSfx(audio::Sfx::HitMarker, e.amount ? 1.0f : 0.9f);
+                if (e.other == 0 && e.amount) playSfx(audio::Sfx::HitMarker, 0.7f, 0.0f);  // a la cabeza: doble
                 break;
             case game::GameEventType::HitStructure:
                 if (e.other == 0) playSfx(audio::Sfx::HitMarker, 0.4f);
@@ -789,6 +847,7 @@ bool App::projectToScreen(const math3d::Mat4& viewProjection, const Vec3& p, flo
 void App::render(const FrameInfo& frame) {
     switch (m_screen) {
         case Screen::Login: renderLogin(); break;
+        case Screen::Nickname: renderNickname(); break;
         case Screen::Lobby: renderLobby(); break;
         case Screen::Controls: renderControlsScreen(frame); break;
         case Screen::Loading: renderLoading(); break;
@@ -804,6 +863,7 @@ void App::render(const FrameInfo& frame) {
 void App::renderOverlay(const FrameInfo& frame) const {
     switch (m_screen) {
         case Screen::Login: overlayLogin(); break;
+        case Screen::Nickname: overlayNickname(); break;
         case Screen::Lobby: overlayLobby(); break;
         case Screen::Controls: overlayControlsScreen(frame); break;
         case Screen::Loading: overlayLoading(); break;
@@ -899,15 +959,19 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         switch (m_match.airState(id)) {
             case game::AirState::Freefall: return game::BodyPose::Skydive;
             case game::AirState::Glide: return game::BodyPose::Glide;
-            default: return game::BodyPose::Normal;
+            default:
+                if (id == 0 && m_dancing) return game::BodyPose::Dance;
+                if (id == 0 && m_match.playerCrouched()) return game::BodyPose::Crouch;
+                return game::BodyPose::Normal;
         }
     };
     const game::CharacterState player = renderState(0);
     if (m_match.airState(0) != game::AirState::Bus && !sniperScoped() && visible(player.position)) {
         // En la mano: el pico, el arma o nada (consumibles y ranuras vacias).
         const game::Inventory& inv = m_match.inventory();
-        const game::HeldItem held =
-            inv.pickaxe() ? game::HeldItem::Pickaxe : game::heldItemFor(inv.activeType());
+        const game::HeldItem held = m_dancing        ? game::HeldItem::Empty
+                                    : inv.pickaxe() ? game::HeldItem::Pickaxe
+                                                    : game::heldItemFor(inv.activeType());
         m_models[0].draw(player, m_playerAnim, m_world.textures(), !m_match.alive(0), held, false, pose(0));
         if (m_propsReady && m_match.airState(0) == game::AirState::Glide) m_props.drawGlider(player.position, player.yaw);
         triangles += m_models[0].triangles();

@@ -16,10 +16,12 @@
 #include <stdio.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "game/fixed_timestep.h"
 #include "game/match.h"
+#include "game/match_internal.h"
 #include "game/nav_grid.h"
 #include "gfx/graphics.h"
 #include "world/storm.h"
@@ -1376,6 +1378,101 @@ void testBotInventory(world::World& world, game::NavGrid& nav) {
     check(!m.alive(1) && weaponsDropped >= 2 && itemsDropped >= 1, "al caer suelta todas sus armas y consumibles");
 }
 
+void testHeadshotsAndCrouch(world::World& world, game::NavGrid& nav) {
+    printf("\n14c) Disparos a la cabeza, agacharse y ayuda del francotirador\n");
+    world.mutableCollision().clearDynamic();  // paredes que dejaron las pruebas anteriores
+    MatchConfig cfg = MatchConfig::classic();
+    cfg.botCount = 1;
+    cfg.aimAssistDegrees = 0.0f;
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 player{70.0f, 0.0f, 25.0f};
+    m.teleport(0, player, 0.0f);
+    m.teleport(1, {70.0f, 0.0f, 15.0f}, 0.0f);
+    game::PlayerAim aim;
+    aim.eye = m.eyeOf(0);
+    aim.direction = math3d::normalize(m.body(1).state().position + Vec3{0.0f, 1.72f, 0.0f} - aim.eye);
+    const game::ShotResult head = m.playerShot(aim, 30.0f, 100.0f);
+    const float afterHead = m.body(1).state().health;
+    aim.direction = math3d::normalize(m.chestOf(1) - aim.eye);
+    const game::ShotResult chest = m.playerShot(aim, 30.0f, 100.0f);
+    printf("  30 de dano: a la cabeza %s -> vida %.0f; al pecho %s -> vida %.0f\n", head.headshot ? "(cabeza)" : "(cuerpo)",
+           static_cast<double>(afterHead), chest.headshot ? "(cabeza)" : "(cuerpo)",
+           static_cast<double>(m.body(1).state().health));
+    check(head.hitEntity && head.headshot && afterHead == 40.0f && chest.hitEntity && !chest.headshot &&
+              m.body(1).state().health == 10.0f && m.playerHeadshots() == 1,
+          "un disparo a la cabeza hace el doble de dano (al pecho, el normal)");
+
+    // Agachado: caja de impacto mas baja y los bots fallan mas (misma partida, mismo bot).
+    auto hitsOnPlayer = [&](bool crouch) {
+        MatchConfig c = MatchConfig::classic();
+        c.botCount = 1;
+        c.invulnerablePlayer = true;
+        c.seed = 77;
+        Match fight;
+        fight.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        fight.teleport(0, player, 0.0f);
+        fight.teleport(1, {70.0f, 0.0f, 7.0f}, 0.0f);
+        game::PlayerCommands first;
+        first.toggleCrouch = crouch;
+        const u32 from = fight.eventCount();
+        int hits = 0, heads = 0;
+        u32 cursor = from;
+        for (int i = 0; i < 60 * 20; ++i) {
+            game::PlayerInput in;
+            fight.setPlayerInput(in, game::PlayerAim{}, i == 0 ? first : game::PlayerCommands{});
+            fight.step(game::FixedTimestep::kStep);
+            for (; cursor < fight.eventCount(); ++cursor) {
+                const game::GameEvent& e = fight.event(cursor);
+                if (e.type == game::GameEventType::HitEntity && e.entity == 0) {
+                    ++hits;
+                    heads += e.amount;
+                }
+            }
+        }
+        return std::make_pair(hits * 1000 + heads, fight.playerCrouched());
+    };
+    const auto standing = hitsOnPlayer(false), crouched = hitsOnPlayer(true);
+    printf("  bot a 18 m durante 20 s: de pie %d impactos (%d en la cabeza); agachado %d (%d en la cabeza)\n",
+           standing.first / 1000, standing.first % 1000, crouched.first / 1000, crouched.first % 1000);
+    check(crouched.second && crouched.first / 1000 < standing.first / 1000,
+          "agachado recibe menos impactos que de pie");
+    const int botHeads = standing.first % 1000 + crouched.first % 1000;
+    const int botHits = standing.first / 1000 + crouched.first / 1000;
+    check(botHeads * 6 <= botHits + 3, "los bots rara vez aciertan en la cabeza");
+
+    // Francotirador con L: la ayuda de punteria llega a 4 grados (con el resto, 1).
+    MatchConfig real;
+    real.botCount = 1;
+    real.startInBus = false;
+    real.loot = false;
+    real.stormCloses = false;
+    Match s;
+    s.start(real, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    s.teleport(0, player, 0.0f);
+    s.teleport(1, {70.0f, 0.0f, 12.0f}, 0.0f);
+    s.giveItem(game::ItemType::Sniper, 1, game::Rarity::Legendary);
+    s.giveAmmo(game::AmmoType::Heavy, 12);
+    game::PlayerCommands put;
+    put.togglePickaxe = true;  // guarda el pico: el francotirador en la mano
+    game::PlayerAim off;
+    off.eye = s.eyeOf(0);
+    const Vec3 to = math3d::normalize(s.chestOf(1) - off.eye);
+    off.direction = game::detail::rotateY(to, math3d::toRadians(2.5f));
+    auto assistWith = [&](bool aiming, const game::PlayerCommands& cmd) {
+        game::PlayerInput in;
+        in.aiming = aiming;
+        s.setPlayerInput(in, off, cmd);
+        s.step(game::FixedTimestep::kStep);
+        return s.playerAssistTarget();
+    };
+    const int hip = assistWith(false, put);
+    const int scoped = assistWith(true, game::PlayerCommands{});
+    printf("  francotirador a 2.5 grados del bot: sin L ayuda a %d, con L ayuda a %d\n", hip, scoped);
+    check(s.inventory().activeType() == game::ItemType::Sniper && hip < 0 && scoped == 1,
+          "con el francotirador y L la ayuda de punteria es mayor");
+}
+
 void testLoot(world::World& world, game::NavGrid& nav) {
     printf("\n14) Armas, botin, autobus y bots (fase 7)\n");
     using game::ItemType;
@@ -1700,6 +1797,7 @@ int main() {
     testStormZone(world, nav);
     testLoot(world, nav);
     testBotInventory(world, nav);
+    testHeadshotsAndCrouch(world, nav);
     testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);

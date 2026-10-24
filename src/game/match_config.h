@@ -37,6 +37,12 @@ struct MatchConfig {
     float botSpreadDegrees = 2.0f;        // dispersion base de los bots
     float botSpreadPerMeter = 0.07f;      // + por metro de distancia
     float aimAssistDegrees = 1.0f;        // ayuda de punteria del jugador (0 = ninguna)
+    // Con el francotirador y L (mirilla), mas ayuda: compensa el tiempo de apuntar.
+    float sniperAssistDegrees = 4.0f;
+    float headshotMultiplier = 2.0f;      // impacto en la cabeza (el ultimo 0.33 m del cuerpo)
+    float botHeadshotChance = 0.25f;      // de los bots al jugador solo cuenta 1 de cada 4 (poco probable)
+    float crouchSpeed = 0.55f;            // agachado: fraccion de la velocidad normal
+    float crouchedSpreadPenalty = 1.5f;   // grados extra de los bots contra el jugador agachado
     bool weaponSpread = true;             // dispersion de las armas del jugador (ver docs/BOTIN.md)
 
     // Construccion (paredes de madera). Los bots levantan una pared cuando les disparan.

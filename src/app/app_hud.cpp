@@ -81,11 +81,13 @@ const ControlRow kControlRows[] = {
     {nullptr, {{B::R, "disparar / usar"}}, 1, {{B::Square, "recargar"}}, 1},
     {nullptr, {{B::L, "apuntar / fijar"}}, 1, {{B::Triangle, "pico"}}, 1},
     {nullptr, {{B::Left, ""}, {B::Right, "objeto"}}, 2, {{B::L, ""}, {B::Stick, "mira"}}, 2},
+    {nullptr, {{B::Down, "agacharse"}}, 1, {{B::Up, "bailar"}}, 1},
     {"CONSTRUCCION", {}, 0, {}, 0},
     {nullptr, {{B::Circle, "entrar / salir"}}, 1, {{B::R, "colocar pieza"}}, 1},
     {nullptr, {{B::Left, ""}, {B::Right, "pieza"}}, 2, {{B::Square, "material"}}, 1},
     {"PARTIDA", {}, 0, {}, 0},
-    {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "HUD"}}, 1},
+    {nullptr, {{B::Start, "pausa"}}, 1, {{B::Select, "mapa"}}, 1},
+    {nullptr, {{B::L, ""}, {B::Select, "paginas del HUD"}}, 2, {}, 0},
     {nullptr, {{B::L, ""}, {B::R, ""}, {B::Start, "1 s: salir del juego"}}, 3, {}, 0},
 };
 constexpr int kControlsX = 14, kControlsColumn = 14 + 8 * 19, kControlsTop = 40;
@@ -215,7 +217,70 @@ const ui::Hint* App::buildHints(int* count) const {
     return kBuildHints;
 }
 
+// Mapa a pantalla completa (SELECT): todo el mapa a 240x240, con la tormenta, el
+// deposito, los airdrops, el autobus y el jugador.
+constexpr float kFullMapSize = 240.0f, kFullMapX = 120.0f, kFullMapY = 20.0f;
+
+void App::renderFullMap() const {
+    gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 170));
+    gfx::fillRect(kFullMapX - 3, kFullMapY - 3, kFullMapSize + 6, kFullMapSize + 6, rgba(20, 30, 50, 230));
+    if (m_minimap.pixels) {
+        gfx::drawTextureRect(m_minimap, 0, 0, kMapTexels, kMapTexels, kFullMapX, kFullMapY, kFullMapSize, kFullMapSize);
+    }
+    const float scale = kFullMapSize / (2.0f * world::kMapHalfSize);
+    auto toMap = [&](float x, float z, float* sx, float* sy) {
+        *sx = kFullMapX + (x + world::kMapHalfSize) * scale;
+        *sy = kFullMapY + (z + world::kMapHalfSize) * scale;
+        return *sx >= kFullMapX && *sx < kFullMapX + kFullMapSize - 1 && *sy >= kFullMapY &&
+               *sy < kFullMapY + kFullMapSize - 1;
+    };
+    auto circle = [&](const Vec3& center, float radius, u32 color) {
+        if (radius < 0.5f) return;
+        for (int i = 0; i < 160; ++i) {
+            const float a = 2.0f * math3d::kPi * i / 160;
+            float sx, sy;
+            if (toMap(center.x + cosf(a) * radius, center.z + sinf(a) * radius, &sx, &sy)) gfx::fillRect(sx, sy, 2, 2, color);
+        }
+    };
+    const game::StormZone& storm = m_match.storm();
+    if (storm.closes()) {
+        circle(storm.center(), storm.radius(), rgba(190, 110, 255));
+        if (storm.nextRadius() < storm.radius() - 0.5f) circle(storm.nextCenter(), storm.nextRadius(), kWhite);
+    }
+    float sx, sy;
+    if (m_atlas.ready() && toMap(0.0f, -11.0f, &sx, &sy)) {
+        const atlas::Rect& r = atlas::kMapaMinimapa;
+        m_atlas.draw(r, floorf(sx - r.w * 0.5f), floorf(sy - r.h * 0.5f));
+    }
+    for (const game::Container& c : m_match.containers()) {
+        if (c.kind != game::ContainerKind::Airdrop || c.opened || !toMap(c.position.x, c.position.z, &sx, &sy)) continue;
+        gfx::fillRect(sx - 3, sy - 3, 7, 7, rgba(20, 20, 30));
+        gfx::fillRect(sx - 2, sy - 2, 5, 5, rgba(90, 170, 255));
+    }
+    if (m_match.airState(0) == game::AirState::Bus && toMap(m_match.busPosition().x, m_match.busPosition().z, &sx, &sy)) {
+        gfx::fillRect(sx - 3, sy - 4, 7, 8, config::kColorGold);
+    }
+    const game::CharacterState followed = renderState(spectateTarget());
+    if (toMap(followed.position.x, followed.position.z, &sx, &sy)) {
+        const float fx = -sinf(followed.yaw), fy = -cosf(followed.yaw);
+        const float rx = -fy, ry = fx;
+        const u32 c = m_match.alive(0) ? config::kColorGold : kErrorRed;
+        const gfx::LineVertex arrow[] = {
+            {c, sx + fx * 8, sy + fy * 8, 0}, {c, sx - fx * 5 + rx * 5, sy - fy * 5 + ry * 5, 0},
+            {c, sx - fx * 5 + rx * 5, sy - fy * 5 + ry * 5, 0}, {c, sx - fx * 2, sy - fy * 2, 0},
+            {c, sx - fx * 2, sy - fy * 2, 0}, {c, sx - fx * 5 - rx * 5, sy - fy * 5 - ry * 5, 0},
+            {c, sx - fx * 5 - rx * 5, sy - fy * 5 - ry * 5, 0}, {c, sx + fx * 8, sy + fy * 8, 0},
+        };
+        gfx::drawLines2D(arrow, 8);
+        gfx::fillRect(sx - 1, sy - 1, 3, 3, c);
+    }
+}
+
 void App::renderGameHud() const {
+    if (m_mapOpen) {
+        renderFullMap();
+        return;
+    }
     // Dentro de la tormenta: la pantalla se tine de morado y late con cada golpe.
     if (m_match.alive(0) && m_match.inStorm(0)) {
         const float pulse = 0.5f + 0.5f * sinf(m_blinkTime * 6.0f);
@@ -557,8 +622,11 @@ void App::renderDamageNumbers() const {
         if (!projectToScreen(m_viewProjection, d.position + Vec3{0.0f, d.age * 0.9f, 0.0f}, &x, &y)) continue;
         const float fade = d.age < 0.55f ? 1.0f : 1.0f - (d.age - 0.55f) / (kDamageNumberSeconds - 0.55f);
         const u32 alpha = static_cast<u32>(255.0f * fade);
-        const float scale = d.structure ? 2.0f : 3.0f;
-        const u32 color = d.structure ? rgba(200, 220, 255, alpha) : rgba(255, 255, 255, alpha);
+        // Disparo a la cabeza: mas grande y en amarillo, como en Fortnite.
+        const float scale = d.structure ? 2.0f : (d.headshot ? 3.5f : 3.0f);
+        const u32 color = d.structure  ? rgba(200, 220, 255, alpha)
+                          : d.headshot ? rgba(255, 220, 40, alpha)
+                                       : rgba(255, 255, 255, alpha);
         const int value = static_cast<int>(d.amount + 0.5f);
         drawBigNumber(x - bigNumberWidth(value, scale) * 0.5f, y - 2.5f * scale, value, scale, color);
     }
@@ -593,7 +661,21 @@ void App::overlayCompass() const {
 }
 
 void App::overlayGameHud(const FrameInfo& frame) const {
-    gfx::text::printShadow(6, 4, kLightGrey, "%s", kPlayerName);
+    if (m_mapOpen) {
+        // Mapa a pantalla completa: solo su leyenda.
+        const game::StormZone& storm = m_match.storm();
+        char line[64];
+        if (storm.closes() && storm.timeLeft() >= 0.0f) {
+            snprintf(line, sizeof(line), "%s %.0f s", storm.shrinking() ? "La tormenta se cierra:" : "Siguiente cierre en",
+                     static_cast<double>(storm.timeLeft()));
+            printCenteredShadow(4, rgba(210, 150, 255), line);
+        }
+        snprintf(line, sizeof(line), "Vivos %d   Bajas %d", m_match.aliveCount(), m_match.playerKills());
+        gfx::text::printShadow(6, 262, kWhite, "%s", line);
+        gfx::text::printShadow(380, 262, kLightGrey, "SELECT: cerrar");
+        return;
+    }
+    gfx::text::printShadow(6, 4, kLightGrey, "%s", m_match.name(0));
     gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
     overlayCompass();
 

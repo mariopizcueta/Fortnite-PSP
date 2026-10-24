@@ -83,7 +83,8 @@ inline HeldItem heldItemFor(ItemType type) {
     }
 }
 
-enum class BodyPose : u8 { Normal, Skydive, Glide };
+// Agachado (CRUCETA abajo) y bailando (CRUCETA arriba) solo los usa el jugador.
+enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance };
 
 class CharacterModel {
 public:

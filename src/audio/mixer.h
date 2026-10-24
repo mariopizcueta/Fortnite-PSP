@@ -17,7 +17,7 @@ enum class Sfx : u8 {
     Shot, HitMarker, Hurt, Elimination, WallBuild, WallBreak, Reload,
     MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal,
     PlayerDeath, DrinkSmallShield, DrinkShieldPotion, Footstep, StormWarning,
-    ChestOpen, ChestHum, BusJump, GliderOpen, SniperShot, ShotgunShot, SmgShot, Pickup, Count
+    ChestOpen, ChestHum, BusJump, GliderOpen, SniperShot, ShotgunShot, SmgShot, Pickup, Dance, Count
 };
 
 class Mixer {

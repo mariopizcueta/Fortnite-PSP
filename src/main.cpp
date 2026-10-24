@@ -4,6 +4,7 @@
 // Orden de cierre: app -> GU -> log -> sceKernelExitGame() (vuelve al XMB).
 
 #include <malloc.h>
+#include <string.h>
 
 #include <pspkernel.h>
 #include <psppower.h>
@@ -17,7 +18,7 @@
 #include "platform/callbacks.h"
 #include "platform/log.h"
 
-PSP_MODULE_INFO("FortnitePSP", PSP_MODULE_USER, 0, 10);
+PSP_MODULE_INFO("FortnitePSP", PSP_MODULE_USER, 0, 11);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-1024);  // toda la RAM de usuario salvo 1 MB para el sistema
 
@@ -49,6 +50,15 @@ int main(int argc, char* argv[]) {
     input.setTrackedCombo(config::kExitCombo);
 
     app::App app;
+    // El perfil se guarda junto al EBOOT: "ms0:/PSP/GAME/FortnitePSP/EBOOT.PBP" -> esa carpeta.
+    char dataDir[256] = "";
+    if (argc > 0 && argv[0]) {
+        strncpy(dataDir, argv[0], sizeof(dataDir) - 1);
+        char* slash = strrchr(dataDir, '/');
+        if (slash) slash[1] = '\0';
+        else dataDir[0] = '\0';
+    }
+    app.setDataDirectory(dataDir);
     app.init();
     const struct mallinfo mem = mallinfo();
     platform::log::write("heap en uso %u KB; entrando en el bucle principal",

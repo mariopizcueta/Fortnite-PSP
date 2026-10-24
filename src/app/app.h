@@ -11,6 +11,7 @@
 
 #include "app/build_visuals.h"
 #include "app/lobby_scene.h"
+#include "app/profile.h"
 #include "app/prop_visuals.h"
 #include "app/ui.h"
 #include "audio/mixer.h"
@@ -38,6 +39,8 @@ class App {
 public:
     // Carga recursos y construye el escenario (mostrando la pantalla de inicio mientras).
     // Si algo falla se muestra en pantalla (y en el log) en lugar de cerrar la aplicacion.
+    // Carpeta donde se guarda el perfil (la del EBOOT). Antes de init().
+    void setDataDirectory(const char* dir);
     void init();
     void shutdown();
 
@@ -67,12 +70,15 @@ public:
     int testLockTarget() const { return m_lockTarget; }
     bool testFreeCamera() const { return m_freeCameraActive; }
     int testBuildPiece() const { return m_buildPiece; }
+    const Profile& testProfile() const { return m_profile; }
+    bool testMapOpen() const { return m_mapOpen; }
+    bool testDancing() const { return m_dancing; }
     u32 testFootsteps() const { return m_playerSteps; }
     float testFogEnd() const { return m_fogEnd; }
 #endif
 
 private:
-    enum class Screen { Login, Lobby, Controls, Loading, Game };
+    enum class Screen { Login, Nickname, Lobby, Controls, Loading, Game };
     // Paginas del HUD de la partida (SELECT las recorre).
     enum class Hud { Game, Debug, Controls, Hidden, Count };
     // Pantalla de resultados sobre la partida.
@@ -91,6 +97,12 @@ private:
     void updateGameCameras(const input::Input& in, float dt, bool control, bool aimHeld);
     void processEvents();
     void playFootsteps();
+    void updateDanceSound(float dt);
+    void updateNickname(const input::Input& in);
+    void renderNickname() const;
+    void overlayNickname() const;
+    void recordMatch();             // suma la partida al perfil y lo guarda (una vez)
+    void renderFullMap() const;
     void updateChestHum(float dt);
     void playSfx(audio::Sfx sfx, float volume = 1.0f, float pan = 0.0f) const;
     // Efecto con volumen por distancia (hasta 60 m) y panoramica respecto a la camara.
@@ -200,6 +212,10 @@ private:
     bool m_propsReady = false;
     float m_chestHumTimer = 0.0f;
     bool m_chestHumOn = false;
+    bool m_mapOpen = false;          // SELECT: mapa a pantalla completa
+    bool m_dancing = false;          // cruceta arriba: baile (hasta moverse o actuar)
+    bool m_danceSoundOn = false;
+    float m_danceSoundTimer = 0.0f;
     float m_airdropMessage = 0.0f;  // s que queda el aviso "airdrop en camino"
     float m_stormMessage = 0.0f;  // s que queda el aviso "la tormenta se cierra"
     BuildVisuals m_buildVisuals;
@@ -222,6 +238,13 @@ private:
 
     // Menus.
     int m_loginStage = 0;          // 0: formulario, 1: conectando
+    // Perfil (perfil.txt) y teclado para el nombre la primera vez.
+    Profile m_profile;
+    char m_profilePath[256] = "perfil.txt";
+    char m_nickBuffer[Profile::kMaxName + 1] = "";
+    int m_nickRow = 0, m_nickCol = 0;
+    bool m_nickLower = false;
+    bool m_matchRecorded = false;  // las estadisticas de esta partida ya se han sumado
     float m_loginTimer = 0.0f;
     LobbyItem m_lobbyItem = LobbyItem::Play;
     bool m_confirmExit = false;
