@@ -52,6 +52,7 @@ OBJS = src/main.o \
        src/game/match_bots.o \
        src/game/match_loot.o \
        src/game/match_projectiles.o \
+       src/game/match_traps.o \
        src/game/nav_grid.o \
        src/game/player.o \
        src/game/structures.o \

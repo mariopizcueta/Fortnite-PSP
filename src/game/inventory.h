@@ -26,9 +26,10 @@ enum class ItemType : u8 {
     // Parche (fase 8).
     BurstRifle, ScopedRifle, SubmachineGun, TacticalShotgun, Pistol, Revolver, SemiAutoSniper,
     RocketLauncher, GrenadeLauncher, Grenade,
+    SpikeTrap,  // trampa de pinchos: no ocupa ranura, va a la barra de construccion
     Count
 };
-enum class ItemKind : u8 { Empty, Weapon, Consumable, Throwable };
+enum class ItemKind : u8 { Empty, Weapon, Consumable, Throwable, Trap };
 // Rareza (color del fondo de la ranura y del haz de luz del botin).
 enum class Rarity : u8 { Common, Uncommon, Rare, Epic, Legendary, Count };
 // Municion comun por tipo (Rockets: lanzacohetes y lanzagranadas).

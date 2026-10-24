@@ -45,6 +45,10 @@ public:
 
     // Estadisticas para el HUD de depuracion.
     int activeVoices() const;
+    // La voz `v` esta sonando ese efecto (pruebas de host; lee el estado del hilo de audio).
+    bool voicePlaying(int v, Sfx id) const {
+        return v >= 0 && v < kVoices && m_voices[v].samples && m_voices[v].samples == m_clips[static_cast<int>(id)].samples;
+    }
     u32 droppedCommands() const { return m_dropped; }
 
 private:

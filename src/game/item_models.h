@@ -22,7 +22,7 @@ enum class ItemModel : u8 {
     None, Pickaxe,
     AssaultRifle, Scar, BurstRifle, ScopedRifle, SuppressedSmg, Smg, PumpShotgun, TacticalShotgun,
     Pistol, Revolver, BoltSniper, SemiAutoSniper, RocketLauncher, GrenadeLauncher,
-    Grenade, Bandage, Medkit, SmallShield, ShieldPotion,
+    Grenade, Bandage, Medkit, SmallShield, ShieldPotion, SpikeTrap,
     Rocket, LauncherGrenade,  // proyectiles en vuelo
     Count
 };

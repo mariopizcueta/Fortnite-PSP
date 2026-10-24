@@ -630,6 +630,106 @@ void testLlamaVisual(Sim& sim) {
     check(match.materials().get(world::Resource::Wood) > wood, "los materiales de la llama se recogen");
 }
 
+
+// Parche C: trampa de pinchos con el mando y sonido propio de la caja de municion.
+void testPatchC(Sim& sim) {
+    printf("\n5g) Parche C: trampa de pinchos y caja de municion\n");
+    game::Match& match = sim.app().testMatch();
+    for (int i = 1; i < match.entityCount(); ++i) {
+        if (match.alive(i)) match.teleport(i, {-80.0f + i * 2.0f, 0.0f, 80.0f}, 0.0f);
+    }
+    match.teleport(0, {70.0f, 0.0f, 25.0f}, 0.0f);
+    sim.app().testSetCameraAim(0.0f, -0.065f);
+    match.giveTraps(2);
+    sim.wait(0.3f);
+    sim.press(PSP_CTRL_CIRCLE);  // construccion
+    for (int k = 0; k < 4 && sim.app().testBuildPiece() != 3; ++k) sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.2f);
+    const game::TrapPlacement plan = sim.app().testTrapPlan();
+    sim.shot("33a_trampa_fantasma");
+    check(sim.app().testBuildPiece() == 3 && plan.valid && plan.surface == game::TrapSurface::Floor,
+          "en construccion la cuarta pieza es la trampa y delante hay un sitio valido");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
+    int placed = -1;
+    for (int i = 0; i < game::Match::kMaxTraps; ++i) placed = match.traps()[i].active ? i : placed;
+    check(placed >= 0 && match.trapStock() == 1, "R coloca la trampa (queda 1)");
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.wait(0.3f);
+    sim.shot("33b_trampa_colocada");
+    // Un bot la pisa.
+    const Vec3 at = match.traps()[placed].place.center;
+    int victim = -1;
+    for (int i = 1; i < match.entityCount() && victim < 0; ++i) victim = match.alive(i) ? i : -1;
+    sim.takeAudioPeak();
+    match.teleport(victim, at, 3.14f);
+    sim.wait(0.15f);
+    sim.shot("33c_trampa_salta");
+    printf("  bot %d sobre la trampa: vida %.0f\n", victim, static_cast<double>(match.body(victim).state().health));
+    check(match.body(victim).state().health < 100.0f && sim.takeAudioPeak() > 3000, "la trampa salta (con su sonido) y hace dano");
+
+    // Caja de municion: su sonido, no el del cofre (que sigue sonando al abrir cofres).
+    int box = -1;
+    float best = 1e9f;
+    for (size_t i = 0; i < match.containers().size(); ++i) {
+        const game::Container& c = match.containers()[i];
+        const float d = math3d::length(c.position - match.body(0).state().position);
+        if (c.kind == game::ContainerKind::AmmoBox && !c.opened && d < best) {
+            best = d;
+            box = static_cast<int>(i);
+        }
+    }
+    if (box < 0) {
+        check(false, "hay una caja de municion sin abrir");
+        return;
+    }
+    const game::Container c = match.containers()[box];
+    const float yaw = sim.app().testCameraYaw();
+    match.teleport(0, c.position - Vec3{-sinf(yaw), 0.0f, -cosf(yaw)} * 1.3f, yaw);
+    sim.wait(0.4f);
+    audio::mixer().stopAll();
+    sim.frame(0);
+    sim.press(PSP_CTRL_SQUARE);
+    const int voices = audio::mixer().activeVoices();
+    bool chestSound = false, boxSound = false;
+    for (int v = 0; v < audio::Mixer::kVoices; ++v) {
+        chestSound |= audio::mixer().voicePlaying(v, audio::Sfx::ChestOpen);
+        boxSound |= audio::mixer().voicePlaying(v, audio::Sfx::AmmoBoxOpen);
+    }
+    printf("  caja de municion abierta: %s, %d voces (cofre %s, caja %s)\n", match.containers()[box].opened ? "si" : "no",
+           voices, chestSound ? "si" : "no", boxSound ? "si" : "no");
+    check(match.containers()[box].opened && boxSound && !chestSound, "la caja de municion suena a caja, no a cofre");
+    sim.wait(1.0f);
+    int again = 0;
+    for (int v = 0; v < audio::Mixer::kVoices; ++v) again += audio::mixer().voicePlaying(v, audio::Sfx::AmmoBoxOpen) ? 1 : 0;
+    check(again == 0, "abierta, no se repite su sonido");
+    // Y el cofre sigue sonando a cofre.
+    int chest = -1;
+    best = 1e9f;
+    for (size_t i = 0; i < match.containers().size(); ++i) {
+        const game::Container& k = match.containers()[i];
+        const float d = math3d::length(k.position - match.body(0).state().position);
+        if (k.kind == game::ContainerKind::Chest && !k.opened && d < best) {
+            best = d;
+            chest = static_cast<int>(i);
+        }
+    }
+    if (chest >= 0) {
+        const game::Container k = match.containers()[chest];
+        match.teleport(0, k.position - Vec3{-sinf(yaw), 0.0f, -cosf(yaw)} * 1.3f, yaw);
+        sim.wait(0.4f);
+        audio::mixer().stopAll();
+        sim.frame(0);
+        sim.press(PSP_CTRL_SQUARE);
+        bool chestNow = false, boxNow = false;
+        for (int v = 0; v < audio::Mixer::kVoices; ++v) {
+            chestNow |= audio::mixer().voicePlaying(v, audio::Sfx::ChestOpen);
+            boxNow |= audio::mixer().voicePlaying(v, audio::Sfx::AmmoBoxOpen);
+        }
+        check(match.containers()[chest].opened && chestNow && !boxNow, "abrir un cofre sigue sonando a cofre");
+    }
+}
+
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
 void testNewControls(Sim& sim) {
     printf("\n5b) Inventario, consumibles, pico y camara con el mando\n");
@@ -1209,6 +1309,7 @@ int main(int argc, char** argv) {
     sim.app().testForceLlama(false);
     check(landAndEquip(sim), "salto, aterrizaje y equipo");
     testLlamaVisual(sim);
+    testPatchC(sim);  // con los 10 bots de esta partida (la trampa elimina a uno)
     sim.press(PSP_CTRL_START);
     sim.press(PSP_CTRL_DOWN);
     sim.press(PSP_CTRL_CROSS);

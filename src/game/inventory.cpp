@@ -24,6 +24,7 @@ const ItemDef kDefs[] = {
     {"Lanzacohetes", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     {"Lanzagranadas", ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     {"Granada", ItemKind::Throwable, Rarity::Common, 6, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {"Trampa de pinchos", ItemKind::Trap, Rarity::Uncommon, 9, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) == static_cast<int>(ItemType::Count), "falta un objeto");
 

@@ -29,6 +29,10 @@ public:
     // Cohetes y granadas en vuelo (opaco) y explosiones (translucidas, al final).
     void drawProjectiles(const game::Match& match, const math3d::Frustum& frustum, const game::ItemModels& items) const;
     void drawExplosions(const game::Match& match, const math3d::Frustum& frustum) const;
+    // Trampas colocadas (los pinchos salen al saltar) y la trampa fantasma al construir.
+    void drawTraps(const game::Match& match, const math3d::Frustum& frustum, const math3d::Vec3& eye,
+                   float maxDistance) const;
+    void drawTrapGhost(const game::TrapPlacement& placement) const;
     // Haces de luz de rareza (translucidos): despues de todo lo opaco.
     void drawBeams(const game::Match& match, const math3d::Frustum& frustum, const math3d::Vec3& eye,
                    float time) const;
@@ -46,6 +50,7 @@ private:
         kMatWood, kMatStone, kMatMetal,
         kBeam0, kBeam1, kBeam2, kBeam3, kBeam4,
         kBlast0, kBlast1, kBlast2,  // explosion: tres niveles de transparencia
+        kTrapPlate, kTrapSpikes, kTrapGhostValid, kTrapGhostInvalid,
         kMeshCount
     };
 

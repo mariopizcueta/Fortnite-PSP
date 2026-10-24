@@ -171,6 +171,7 @@ WEAPON_SLOTS = {
     "Rocket": ("Weapons/Bazooka_-_Schematic_-_Save_the_World.webp", [2, 3, 4]),
     "Launcher": ("Weapons/Icon_Weapons_SK_Grenade_Launcher_L.webp", [2, 3, 4]),
     "Grenade": ("Weapons/Granada.png", [0]),
+    "Trap": ("HUD/spiketrap.webp", [1]),
 }
 
 
@@ -266,6 +267,7 @@ def ui_atlas():
         "Pared": icon("Pared.png", 26),
         "Rampa": icon("Rampa.png", 26),
         "Suelo": icon("Suelo.png", 26),
+        "Trampa": icon("spiketrap.webp", 26),  # cuarta pieza de construccion (parche, fase 8)
         # Ranuras completas (con su fondo de rareza) dadas en Recursos.
         "SlotScar": slot_art(RES / "Weapons" / "AssaultRiffleLegendary.png"),
         "SlotMinipocion": slot_art(RES / "HUD" / "minipocion.png"),

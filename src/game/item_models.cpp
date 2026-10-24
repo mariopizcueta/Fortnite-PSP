@@ -464,6 +464,19 @@ void buildConsumable(Builder& b, ItemModel model) {
     }
 }
 
+void buildSpikeTrap(Builder& b) {
+    // Trampa plegada (botin del suelo): la placa con su marco y unos pinchos.
+    b.box(0.0f, 0.0f, 0.0f, 0.36f, 0.04f, 0.36f, rgba(210, 200, 176));
+    b.box(0.0f, 0.03f, -0.17f, 0.38f, 0.03f, 0.03f, kDark);
+    b.box(0.0f, 0.03f, 0.17f, 0.38f, 0.03f, 0.03f, kDark);
+    b.box(-0.17f, 0.03f, 0.0f, 0.03f, 0.03f, 0.38f, rgba(230, 190, 40));
+    b.box(0.17f, 0.03f, 0.0f, 0.03f, 0.03f, 0.38f, rgba(230, 190, 40));
+    for (int i = 0; i < 4; ++i) {
+        const float x = (i % 2 ? 0.08f : -0.08f), z = (i / 2 ? 0.08f : -0.08f);
+        b.spike({x, 0.02f, z}, 0.02f, {x, 0.13f, z}, kSilver);
+    }
+}
+
 void buildRocket(Builder& b) {
     b.tubeZ(0.0f, 0.0f, -0.18f, 0.20f, 0.05f, 6, kOlive);
     b.tubeZ(0.0f, 0.0f, -0.28f, -0.18f, 0.03f, 6, kSharkRed);
@@ -499,6 +512,7 @@ ItemModel itemModelFor(ItemType type, Rarity rarity) {
         case ItemType::RocketLauncher: return ItemModel::RocketLauncher;
         case ItemType::GrenadeLauncher: return ItemModel::GrenadeLauncher;
         case ItemType::Grenade: return ItemModel::Grenade;
+        case ItemType::SpikeTrap: return ItemModel::SpikeTrap;
         case ItemType::None:
         case ItemType::Count: break;
     }
@@ -560,6 +574,7 @@ bool ItemModels::build() {
                 case ItemModel::GrenadeLauncher: buildGrenadeLauncher(b); break;
                 case ItemModel::Grenade: buildGrenade(b); break;
                 case ItemModel::Rocket: buildRocket(b); break;
+                case ItemModel::SpikeTrap: buildSpikeTrap(b); break;
                 case ItemModel::LauncherGrenade: buildLauncherGrenade(b); break;
                 case ItemModel::Bandage:
                 case ItemModel::Medkit:

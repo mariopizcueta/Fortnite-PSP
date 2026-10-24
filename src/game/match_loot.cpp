@@ -125,6 +125,16 @@ Pickup Match::randomConsumablePickup() {
     return p;
 }
 
+static Pickup trapPickup(int count) {
+    Pickup p;
+    p.active = true;
+    p.kind = PickupKind::Item;
+    p.item = ItemType::SpikeTrap;
+    p.rarity = itemDef(ItemType::SpikeTrap).rarity;
+    p.count = count;
+    return p;
+}
+
 static Pickup ammoPickup(AmmoType type) {
     Pickup p;
     p.active = true;
@@ -180,8 +190,10 @@ void Match::spawnLoot() {
             Pickup w = randomWeaponPickup(false);
             dropAround(p, w, 0, 2);
             dropAround(p, ammoPickup(static_cast<AmmoType>(weaponConfig(w.item, w.rarity).ammoType)), 1, 2);
-        } else if (r < 0.85f) {
+        } else if (r < 0.81f) {
             dropAround(p, randomConsumablePickup(), 0, 1);
+        } else if (r < 0.85f) {
+            dropAround(p, trapPickup(1), 0, 1);
         } else {
             dropAround(p, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 0, 1);
         }
@@ -302,6 +314,8 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, w, 0, total);
             dropAround(front, ammoPickup(ammo), 1, total);
             if (consumable) dropAround(front, randomConsumablePickup(), 2, total);
+            // A veces, una trampa de pinchos (al lado, fuera del corro).
+            if (m_rng.chance(0.2f)) dropAround(front + forwardFromYaw(c.yaw) * 0.8f, trapPickup(1), 0, 1);
             // Materiales para quien lo abre (en Fortnite salen al suelo; aqui directos).
             if (opener == 0) m_materials.add(static_cast<world::Resource>(m_rng.index(3)), 30);
             break;
@@ -313,7 +327,7 @@ void Match::spawnContainerLoot(int index, int opener) {
         case ContainerKind::Llama: {
             // Como en Fortnite: muchos materiales, municion de todo tipo, curas y granadas.
             // En corro alrededor de la llama (el suelo se ajusta a cada objeto).
-            const int total = 12;
+            const int total = 13;
             int slot = 0;
             for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
                 Pickup m;
@@ -339,7 +353,7 @@ void Match::spawnContainerLoot(int index, int opener) {
             grenades.count = 3;
             dropAround(c.position, grenades, slot++, total, 1.6f);
             dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
-            dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
+            dropAround(c.position, trapPickup(2), slot++, total, 1.6f);
             break;
         }
         case ContainerKind::Airdrop: {
@@ -460,6 +474,17 @@ bool Match::pickUp(int id, int index) {
         pushEvent(GameEventType::PickedUp, 0, -1, p.position);
         return true;
     }
+    // Trampas: a la barra de construccion (no ocupan ranura).
+    if (itemDef(p.item).kind == ItemKind::Trap) {
+        const int room = m_config.maxTrapsCarried - m_trapStock;
+        if (room <= 0) return false;
+        const int taken = p.count < room ? p.count : room;
+        m_trapStock += taken;
+        p.count -= taken;
+        if (p.count <= 0) p.active = false;
+        pushEvent(GameEventType::PickedUp, 0, static_cast<int>(p.item), p.position);
+        return true;
+    }
     // Inventario lleno (no cabe ni una unidad): se cambia por lo de la ranura seleccionada.
     // El jugador elige antes la ranura en el selector del HUD (PlayerCommands::swapSlot).
     if (m_inventory.room(p.item) <= 0) return swapPickup(index, m_inventory.selected());
@@ -481,6 +506,7 @@ int Match::pickupRoom(int index) const {
     const Pickup& p = m_pickups[index];
     if (!p.active) return 0;
     if (p.kind == PickupKind::Ammo) return p.count;
+    if (itemDef(p.item).kind == ItemKind::Trap) return m_config.maxTrapsCarried - m_trapStock;
     return m_inventory.room(p.item);
 }
 
@@ -620,7 +646,8 @@ void Match::dropBotWeapon(int index) {
 
 bool Match::botWants(const Bot& b, const Pickup& p) const {
     if (!p.active || p.kind != PickupKind::Item) return false;
-    if (itemDef(p.item).kind == ItemKind::Throwable) return false;  // los bots no lanzan granadas
+    // Los bots no lanzan granadas ni ponen trampas.
+    if (itemDef(p.item).kind == ItemKind::Throwable || itemDef(p.item).kind == ItemKind::Trap) return false;
     if (!isWeapon(p.item)) {
         // Consumibles: si caben (en un monton suyo o en una ranura libre).
         if (!b.bag.full()) return true;

@@ -211,3 +211,20 @@ y ningún objeto cae a menos de 0.3 m de otro.
 lanzagranadas, granada de mano, materiales de 6 bots, 600 partidas → 23 con llama, 150 con la
 llama forzada → siempre colocada, abrir y romper la llama), `make app-sim` (5e, 5f con
 capturas `31*` y `32*`), `make preview` (`20_armas_*`, `21_armas_en_mano_*`): 0 fallos.
+
+## 4. Bloque C: trampas y sonidos (v0.12.0-c)
+
+- **Trampas de pinchos**: ver [TRAMPAS.md](TRAMPAS.md). Suelo, pared y techo; ajuste a la
+  cara; comprobaciones de superficie y de colisión; activación única con espera; quien la
+  pone no se hace daño; desaparece con su pieza. Icono en la barra de construcción con las
+  que quedan; modelo según la referencia; fantasma azul/rojo.
+- **Caja de munición**: antes reproducía `Chestopening.wav` (el del cofre). En `Recursos`
+  no hay sonido de caja de munición, así que se sintetiza uno propio
+  (`caja_municion.wav`: cierre metálico y cartuchos). Suena una vez al abrirla; el cofre
+  sigue con el suyo y el airdrop también usa el del cofre. La llama tiene el suyo
+  (`llama.wav`).
+- Comprobado (host): `make match-sim` prueba 18 (suelo, quien la pone no se hace daño,
+  activación única y repetición tras 3 s, pared con cara ocupada, rotura de la pared, rampa,
+  techo bajo un altillo del mapa, tronco demasiado pequeño); `make app-sim` 5g con el mando
+  (cuarta pieza, R, un bot la pisa con sonido, caja de munición con su sonido sin repetirse,
+  cofre con el suyo). Capturas `33a/b/c`.

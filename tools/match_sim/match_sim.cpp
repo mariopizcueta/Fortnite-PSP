@@ -2350,6 +2350,158 @@ void testPatchB(world::World& world, game::NavGrid& nav) {
     }
 }
 
+// --- Parche (fase 8), bloque C: trampas ----------------------------------------------------------
+
+void testPatchCTraps(world::World& world, game::NavGrid& nav) {
+    printf("\n18) Parche C: trampas de pinchos (suelo, pared y techo)\n");
+    world.mutableCollision().clearDynamic();
+    MatchConfig cfg;
+    cfg.botCount = 2;
+    cfg.startInBus = false;
+    cfg.loot = false;
+    cfg.stormCloses = false;
+    cfg.botsBuild = false;
+    cfg.trapDamage = 40.0f;  // (configurable) asi el bot aguanta dos saltos
+    Match m;
+    m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+    const Vec3 spot{70.0f, 0.0f, 25.0f};
+    m.teleport(0, spot, 0.0f);
+    m.teleport(1, {-80.0f, 0.0f, 80.0f}, 0.0f);
+    m.teleport(2, {-76.0f, 0.0f, 80.0f}, 0.0f);
+    game::PlayerInput still;
+    auto aimAt = [&](const Vec3& target) {
+        game::PlayerAim a;
+        a.eye = m.eyeOf(0) + Vec3{0.0f, 1.2f, 4.0f};  // como la camara: detras y por encima
+        a.direction = math3d::normalize(target - a.eye);
+        return a;
+    };
+    // Sin trampas no se puede.
+    const game::TrapPlacement none = m.planTrap(aimAt(spot + Vec3{0.0f, 0.0f, -3.0f}));
+    check(!none.valid && none.error == game::TrapError::NoTraps && none.surface == game::TrapSurface::Floor,
+          "sin trampas no se coloca ninguna (el suelo si es valido)");
+    // Se recogen del suelo (no ocupan ranura).
+    game::Pickup trap;
+    trap.kind = game::PickupKind::Item;
+    trap.item = game::ItemType::SpikeTrap;
+    trap.rarity = game::Rarity::Uncommon;
+    trap.count = 3;
+    trap.position = spot;
+    game::Interactable it;
+    it.kind = game::Interactable::Kind::Pickup;
+    it.index = m.dropPickup(trap);
+    m.interact(0, it);
+    m.giveTraps(3);
+    check(m.trapStock() == 6 && m.inventory().slot(0).type == game::ItemType::None, "las trampas se recogen sin ocupar ranuras");
+
+    // Suelo: delante del jugador; un bot que la pisa recibe el dano una vez por activacion.
+    const Vec3 floorPoint = spot + Vec3{0.0f, 0.0f, -3.0f};
+    const int floorTrap = m.placeTrap(aimAt(floorPoint));
+    const game::Trap& ft = m.traps()[floorTrap >= 0 ? floorTrap : 0];
+    check(floorTrap >= 0 && ft.place.surface == game::TrapSurface::Floor && m.trapStock() == 5 &&
+              fabsf(ft.place.center.y) < 0.01f && ft.place.normal.y > 0.9f,
+          "trampa de suelo: sobre el suelo, mirando hacia arriba, gasta una");
+    // El jugador (quien la puso) la pisa sin dano.
+    m.teleport(0, ft.place.center, 0.0f);
+    for (int i = 0; i < 30; ++i) stepWith(m, still, game::PlayerAim{});
+    check(m.body(0).state().health == 100.0f, "quien pone la trampa no recibe dano al pisarla");
+    m.teleport(0, spot, 0.0f);
+    const u32 cursor = m.eventCount();
+    m.teleport(1, ft.place.center, 0.0f);
+    float after1 = 0.0f, after2 = 0.0f;
+    for (int i = 0; i < 60; ++i) {
+        m.teleport(1, ft.place.center, 0.0f);  // se queda encima
+        stepWith(m, still, game::PlayerAim{});
+    }
+    after1 = m.body(1).state().health;
+    const int triggers1 = countEvents(m, cursor, game::GameEventType::TrapTriggered);
+    for (int i = 0; i < 150; ++i) {
+        m.teleport(1, ft.place.center, 0.0f);
+        stepWith(m, still, game::PlayerAim{});
+    }
+    after2 = m.body(1).state().health;
+    printf("  bot sobre la trampa: vida %.0f tras 1 s (saltos %d), %.0f tras 3.5 s (saltos %d)\n", static_cast<double>(after1),
+           triggers1, static_cast<double>(after2), countEvents(m, cursor, game::GameEventType::TrapTriggered));
+    check(triggers1 == 1 && after1 == 100.0f - cfg.trapDamage, "salta una sola vez al pisarla (dano configurable)");
+    check(countEvents(m, cursor, game::GameEventType::TrapTriggered) == 2 && after2 == 100.0f - 2.0f * cfg.trapDamage,
+          "pasada la espera (3 s) vuelve a saltar si sigue dentro");
+
+    // Pared construida: en su cara, ajustada a la pieza; en la otra cara tambien; en la misma, no.
+    m.giveMaterials(world::Resource::Wood, 50);
+    m.teleport(0, spot, 0.0f);
+    const int wall = m.buildWall(0.0f);
+    const world::Aabb wb = m.structures().wall(wall).box;
+    const Vec3 face{(wb.min.x + wb.max.x) * 0.5f, 1.5f, wb.max.z};
+    const game::TrapPlacement wp = m.planTrap(aimAt(face + Vec3{0.6f, -0.3f, 0.0f}));
+    printf("  pared: %s, superficie %d, centro %.2f %.2f %.2f, %.2f x %.2f m\n", wp.valid ? "valida" : game::trapErrorName(wp.error),
+           static_cast<int>(wp.surface), static_cast<double>(wp.center.x), static_cast<double>(wp.center.y),
+           static_cast<double>(wp.center.z), static_cast<double>(wp.halfU * 2), static_cast<double>(wp.halfV * 2));
+    const int wallTrap = m.placeTrap(aimAt(face + Vec3{0.6f, -0.3f, 0.0f}));
+    check(wp.valid && wp.surface == game::TrapSurface::Wall && wp.normal.z > 0.9f && fabsf(wp.center.x - face.x) < 0.01f &&
+              fabsf(wp.center.z - wb.max.z) < 0.01f && wp.halfU > 1.5f && wallTrap >= 0,
+          "trampa de pared: en la cara apuntada de la pieza, centrada y del tamano de la pieza");
+    check(m.planTrap(aimAt(face)).error == game::TrapError::Occupied, "en la misma cara no cabe otra");
+    // Un bot pegado a esa cara la activa.
+    m.teleport(2, {face.x, 0.0f, wb.max.z + 0.5f}, 0.0f);
+    const u32 c2 = m.eventCount();
+    stepWith(m, still, game::PlayerAim{});
+    check(countEvents(m, c2, game::GameEventType::TrapTriggered) == 1 && m.body(2).state().health < 100.0f,
+          "un bot junto a la pared la activa");
+    // Si la pared se rompe, la trampa cae con ella.
+    m.explode(face + Vec3{0.0f, 0.0f, -0.3f}, -1, 0.0f, 2.0f, 1000.0f, -1);
+    stepWith(m, still, game::PlayerAim{});
+    check(!m.traps()[wallTrap].active, "al romperse la pared desaparece su trampa");
+
+    // Rampa: no.
+    m.teleport(0, spot + Vec3{-8.0f, 0.0f, 0.0f}, 0.0f);
+    const int ramp = m.buildWall(0.0f, game::PieceType::Ramp);
+    const world::Aabb rb = m.structures().wall(ramp).box;
+    const game::TrapPlacement rp = m.planTrap(aimAt(Vec3{(rb.min.x + rb.max.x) * 0.5f, 1.0f, (rb.min.z + rb.max.z) * 0.5f}));
+    check(ramp >= 0 && rp.error == game::TrapError::Ramp, "en una rampa no se puede poner");
+
+    // Techo: bajo una caja grande del mapa (altillo, tejado...) con suelo libre debajo.
+    int ceilingBox = -1;
+    for (int i = 0; i < world.collision().count() && ceilingBox < 0; ++i) {
+        const world::Aabb& b = world.collision().collider(i).box;
+        if (b.min.y < 2.2f || b.min.y > 4.2f || b.max.x - b.min.x < 3.0f || b.max.z - b.min.z < 3.0f) continue;
+        const Vec3 c{(b.min.x + b.max.x) * 0.5f, 0.0f, (b.min.z + b.max.z) * 0.5f};
+        if (world::stormDepth(c.x, c.z) > -5.0f) continue;
+        const world::Aabb below{{c.x - 0.5f, 0.1f, c.z - 0.5f}, {c.x + 0.5f, b.min.y - 0.2f, c.z + 0.5f}};
+        if (!world.collision().overlapsAny(below, world::kSolid)) ceilingBox = i;
+    }
+    if (ceilingBox >= 0) {
+        const world::Aabb& b = world.collision().collider(ceilingBox).box;
+        const Vec3 c{(b.min.x + b.max.x) * 0.5f, 0.0f, (b.min.z + b.max.z) * 0.5f};
+        m.teleport(0, c, 0.0f);
+        game::PlayerAim up;
+        up.eye = m.eyeOf(0);
+        up.direction = math3d::normalize(Vec3{0.2f, 1.0f, -0.3f});
+        const game::TrapPlacement cp = m.planTrap(up);
+        printf("  techo a %.1f m: %s, superficie %d, %.1f x %.1f m\n", static_cast<double>(b.min.y),
+               cp.valid ? "valida" : game::trapErrorName(cp.error), static_cast<int>(cp.surface),
+               static_cast<double>(cp.halfU * 2), static_cast<double>(cp.halfV * 2));
+        const int ct = m.placeTrap(up);
+        check(cp.valid && cp.surface == game::TrapSurface::Ceiling && cp.normal.y < -0.9f && ct >= 0,
+              "trampa de techo: bajo una superficie del mapa, mirando hacia abajo");
+    } else {
+        check(false, "hay un techo del mapa para probar la trampa de techo");
+    }
+    // Un tronco de arbol es demasiado pequeno.
+    bool tooSmall = false;
+    for (const world::Harvestable& h : world.harvestables()) {
+        if (h.resource != world::Resource::Wood || h.box.max.x - h.box.min.x > 0.8f) continue;
+        const Vec3 c = (h.box.min + h.box.max) * 0.5f;
+        if (world::stormDepth(c.x, c.z) > -5.0f) continue;
+        m.teleport(0, {c.x, 0.0f, c.z + 2.0f}, 0.0f);
+        game::PlayerAim a;
+        a.eye = m.eyeOf(0);
+        a.direction = math3d::normalize(Vec3{c.x, 1.2f, h.box.max.z} - a.eye);
+        const game::TrapPlacement tp = m.planTrap(a);
+        if (tp.error == game::TrapError::TooSmall || tp.error == game::TrapError::Obstructed) tooSmall = true;
+        break;
+    }
+    check(tooSmall, "en un tronco de arbol no cabe (o hay algo en medio)");
+}
+
 }  // namespace
 
 int main() {
@@ -2382,6 +2534,7 @@ int main() {
     testHeadshotsAndCrouch(world, nav);
     testPatchA(world, nav);
     testPatchB(world, nav);
+    testPatchCTraps(world, nav);
     testRealMatches(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);

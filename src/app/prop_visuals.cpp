@@ -207,6 +207,38 @@ void buildLlama(SceneBuilder& b) {
     b.box(dark, dark, {0.36f, 0.74f, -0.04f}, {0.365f, 0.86f, 0.08f});
 }
 
+// Trampa de pinchos de 2 x 2 (de -1 a 1 en X y Z, normal +Y): se escala a cada superficie.
+// Marco oscuro con franjas amarillas, placa clara con sus agujeros y 9 pinchos (Referencias/
+// FortniteFloorTrap).
+void buildTrapPlate(SceneBuilder& b) {
+    const Material frame = flat(rgba(70, 66, 60));
+    const Material yellow = flat(rgba(230, 186, 40));
+    const Material plate = flat(rgba(214, 204, 180));
+    const Material hole = flat(rgba(120, 100, 80));
+    b.box(plate, plate, {-0.92f, 0.0f, -0.92f}, {0.92f, 0.05f, 0.92f}, true);
+    b.box(frame, frame, {-1.0f, 0.0f, -1.0f}, {1.0f, 0.08f, -0.9f}, true);
+    b.box(frame, frame, {-1.0f, 0.0f, 0.9f}, {1.0f, 0.08f, 1.0f}, true);
+    b.box(frame, frame, {-1.0f, 0.0f, -0.9f}, {-0.9f, 0.08f, 0.9f}, true);
+    b.box(frame, frame, {0.9f, 0.0f, -0.9f}, {1.0f, 0.08f, 0.9f}, true);
+    b.box(yellow, yellow, {-0.6f, 0.08f, -0.98f}, {0.6f, 0.09f, -0.92f});
+    b.box(yellow, yellow, {-0.6f, 0.08f, 0.92f}, {0.6f, 0.09f, 0.98f});
+    b.box(yellow, yellow, {-0.98f, 0.08f, -0.6f}, {-0.92f, 0.09f, 0.6f});
+    b.box(yellow, yellow, {0.92f, 0.08f, -0.6f}, {0.98f, 0.09f, 0.6f});
+    for (int i = 0; i < 9; ++i) {
+        const float x = -0.6f + 0.6f * (i % 3), z = -0.6f + 0.6f * (i / 3);
+        b.box(hole, hole, {x - 0.08f, 0.05f, z - 0.08f}, {x + 0.08f, 0.06f, z + 0.08f});
+    }
+}
+
+void buildTrapSpikes(SceneBuilder& b) {
+    // Pinchos de altura 1 (se escalan con lo que han salido).
+    const Material steel = flat(rgba(196, 200, 210));
+    for (int i = 0; i < 9; ++i) {
+        const float x = -0.6f + 0.6f * (i % 3), z = -0.6f + 0.6f * (i / 3);
+        b.cone(steel, {x, 0.0f, z}, 0.06f, 1.0f, 4);
+    }
+}
+
 const u32 kRarityBeam[5] = {rgba(200, 200, 200, 70), rgba(90, 220, 60, 80), rgba(70, 160, 255, 90),
                             rgba(190, 90, 255, 95), rgba(255, 170, 40, 105)};
 
@@ -246,6 +278,14 @@ bool PropVisuals::build() {
         buildBeam(b, kRarityBeam[i]);
         finish(static_cast<Mesh>(kBeam0 + i));
     }
+    buildTrapPlate(b);
+    finish(kTrapPlate);
+    buildTrapSpikes(b);
+    finish(kTrapSpikes);
+    b.box(flat(rgba(90, 200, 255, 120)), flat(rgba(90, 200, 255, 120)), {-1.0f, 0.0f, -1.0f}, {1.0f, 0.1f, 1.0f}, true);
+    finish(kTrapGhostValid);
+    b.box(flat(rgba(255, 70, 60, 120)), flat(rgba(255, 70, 60, 120)), {-1.0f, 0.0f, -1.0f}, {1.0f, 0.1f, 1.0f}, true);
+    finish(kTrapGhostInvalid);
     // Explosion: bola naranja con nucleo amarillo, en tres transparencias (se apaga).
     const u32 alphas[3] = {190, 120, 60};
     for (int i = 0; i < 3; ++i) {
@@ -353,6 +393,54 @@ void PropVisuals::drawExplosions(const game::Match& match, const math3d::Frustum
         const Mesh mesh = t < 0.4f ? kBlast0 : (t < 0.75f ? kBlast1 : kBlast2);
         draw(mesh, Mat4::translation(e.position) * Mat4::scale({r, r * 0.8f, r}), nullptr);
     }
+    gfx::setBlend(false);
+    gfx::setModelMatrix(Mat4::identity());
+}
+
+namespace {
+
+// Matriz de una placa de trampa: X = eje U de la superficie, Y = su normal, Z = U x N,
+// escalada a sus semianchos (la malla va de -1 a 1).
+Mat4 trapMatrix(const game::TrapPlacement& p, float height) {
+    const Vec3 u = p.axisU, n = p.normal, v = math3d::cross(p.axisU, p.normal);
+    Mat4 m = Mat4::identity();
+    m.m[0] = u.x * p.halfU;
+    m.m[1] = u.y * p.halfU;
+    m.m[2] = u.z * p.halfU;
+    m.m[4] = n.x * height;
+    m.m[5] = n.y * height;
+    m.m[6] = n.z * height;
+    m.m[8] = v.x * p.halfV;
+    m.m[9] = v.y * p.halfV;
+    m.m[10] = v.z * p.halfV;
+    m.m[12] = p.center.x + n.x * 0.01f;
+    m.m[13] = p.center.y + n.y * 0.01f;
+    m.m[14] = p.center.z + n.z * 0.01f;
+    return m;
+}
+
+}  // namespace
+
+void PropVisuals::drawTraps(const game::Match& match, const math3d::Frustum& frustum, const Vec3& eye,
+                            float maxDistance) const {
+    for (int i = 0; i < game::Match::kMaxTraps; ++i) {
+        const game::Trap& t = match.traps()[i];
+        if (!t.active || math3d::length(t.place.center - eye) > maxDistance) continue;
+        if (!frustum.sphereVisible(t.place.center, fmaxf(t.place.halfU, t.place.halfV) + 0.5f)) continue;
+        draw(kTrapPlate, trapMatrix(t.place, 1.0f), nullptr);
+        // Los pinchos asoman un poco y, al saltar, salen 0.45 m en 0.06 s; vuelven al
+        // terminar la espera.
+        const float s = t.sinceTrigger;
+        const float out = s < 0.06f ? s / 0.06f : (s < 1.2f ? 1.0f : (s < 1.5f ? 1.0f - (s - 1.2f) / 0.3f : 0.0f));
+        draw(kTrapSpikes, trapMatrix(t.place, 0.06f + 0.42f * out), nullptr);
+    }
+    gfx::setModelMatrix(Mat4::identity());
+}
+
+void PropVisuals::drawTrapGhost(const game::TrapPlacement& placement) const {
+    if (placement.error == game::TrapError::NoSurface) return;  // no se apunta a nada
+    gfx::setBlend(true);
+    draw(placement.valid ? kTrapGhostValid : kTrapGhostInvalid, trapMatrix(placement, 1.0f), nullptr);
     gfx::setBlend(false);
     gfx::setModelMatrix(Mat4::identity());
 }

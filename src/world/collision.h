@@ -76,6 +76,10 @@ public:
     void removeDynamic(int handle);
     void clearDynamic();
     int dynamicCount() const;
+    // Caja de una caja dinamica activa (o nullptr).
+    const Aabb* dynamicBox(int handle) const {
+        return handle >= 0 && handle < kMaxDynamic && m_dynamic[handle].active ? &m_dynamic[handle].collider.box : nullptr;
+    }
 
     // Llama fn(const Collider&) para cada caja con (flags & mask) que solapa `box`.
     // `includeDynamic = false`: solo las cajas fijas del mapa.

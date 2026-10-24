@@ -111,6 +111,7 @@ const ui::Hint kFreeCameraHint[] = {{B::Triangle, "camara libre"}};
 constexpr int kFreeCameraHintY = 256;
 const ui::Hint kReloadHint[] = {{B::Square, "recargar"}};
 const ui::Hint kBuildHints[] = {{B::R, "colocar"}, {B::Square, "material"}, {B::Circle, "salir"}};
+const ui::Hint kTrapHints[] = {{B::R, "colocar trampa"}, {B::Circle, "salir"}};
 const ui::Hint kBusHint[] = {{B::Cross, "Saltar del autobus"}};
 const ui::Hint kGliderHint[] = {{B::Cross, "Abrir el ala delta"}};
 constexpr int kPromptY = 180;
@@ -139,7 +140,7 @@ void heldButtonsString(u32 buttons, char* out, size_t capacity) {
 }
 
 constexpr float kHarvestPopupSeconds = 0.9f;
-constexpr const char* kBuildPieceNames[] = {"Pared", "Suelo", "Rampa"};
+constexpr const char* kBuildPieceNames[] = {"Pared", "Suelo", "Rampa", "Trampa de pinchos"};
 
 // Fondo de ranura segun la rareza (gris, verde, azul, morado, dorado como en Fortnite).
 u32 rarityColor(game::Rarity r) {
@@ -194,6 +195,7 @@ const assets::ui::Rect* slotArt(game::ItemType type, game::Rarity rarity) {
         case game::ItemType::RocketLauncher: return kRocket[r];
         case game::ItemType::GrenadeLauncher: return kLauncher[r];
         case game::ItemType::Grenade: return &a::kSlotGrenade0;
+        case game::ItemType::SpikeTrap: return &a::kSlotTrap1;
         case game::ItemType::Bandage: return &a::kSlotVendas;
         case game::ItemType::Medkit: return &a::kSlotBotiquin;
         case game::ItemType::SmallShield: return &a::kSlotMinipocion;
@@ -229,6 +231,10 @@ void slotBox(float x, float y, float size, u32 fill, u32 border) {
 
 const ui::Hint* App::buildHints(int* count) const {
     // Ayuda bajo el rotulo de construccion (solo cuando la pieza se puede colocar).
+    if (m_buildPiece == kTrapPiece) {
+        *count = 2;
+        return kTrapHints;
+    }
     *count = 3;
     return kBuildHints;
 }
@@ -313,7 +319,7 @@ void App::renderGameHud() const {
         // Rotulo CONSTRUCCION sobre una franja azul: el modo se ve siempre.
         gfx::fillRect(150, 18, 180, 22, kBuildBlue);
         if (m_atlas.ready()) m_atlas.drawCentered(atlas::kConstruccion, 240, 20);
-        if (m_wallPlan.valid) {
+        if (m_buildPiece == kTrapPiece ? m_trapPlan.valid : m_wallPlan.valid) {
             int n = 0;
             const ui::Hint* hints = buildHints(&n);
             ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hints, n)) / 2, 55, hints, n);
@@ -407,7 +413,8 @@ void App::renderCrosshair() const {
     if (!m_match.alive(0) || m_freeCameraActive) return;
     if (m_buildMode) {
         // Reticula de construccion: cuatro esquinas.
-        const u32 c = m_wallPlan.valid ? kBuildReticle : kErrorRed;
+        const bool valid = m_buildPiece == kTrapPiece ? m_trapPlan.valid : m_wallPlan.valid;
+        const u32 c = valid ? kBuildReticle : kErrorRed;
         for (int sx : {-1, 1}) {
             for (int sy : {-1, 1}) {
                 const float cx = 240.0f + sx * 10.0f, cy = 136.0f + sy * 10.0f;
@@ -614,14 +621,18 @@ void App::renderVitals() const {
 void App::renderSlots() const {
     // Ranuras de construccion: pared, suelo, rampa y una vacia. La cruceta elige la pieza;
     // por ahora solo la pared se puede colocar.
-    const assets::ui::Rect* buildIcons[] = {&atlas::kPared, &atlas::kSuelo, &atlas::kRampa};
+    // La cuarta es la trampa de pinchos (Recursos/HUD/spiketrap.webp), con las que se llevan.
+    const assets::ui::Rect* buildIcons[] = {&atlas::kPared, &atlas::kSuelo, &atlas::kRampa, &atlas::kTrampa};
     for (int i = 0; i < 5; ++i) {
         const float x = kBuildSlotX + i * kBuildSlotStep + (i == 4 ? 4.0f : 0.0f);
         const bool selected = m_buildMode && i == m_buildPiece;
-        const u32 fill = i < 3 ? rgba(90, 170, 230, m_buildMode ? 150 : 70) : rgba(0, 0, 0, 50);
+        const bool trap = i == kTrapPiece;
+        const u32 fill = i < 3 ? rgba(90, 170, 230, m_buildMode ? 150 : 70)
+                         : trap ? rgba(104, 196, 62, m_match.trapStock() > 0 ? (m_buildMode ? 150 : 80) : 40)
+                                : rgba(0, 0, 0, 50);
         slotBox(x, kBuildRowY, kBuildSlotSize, fill, rgba(255, 255, 255, m_buildMode ? 200 : 110));
         if (selected) ui::frame(x - 2, kBuildRowY - 2, kBuildSlotSize + 4, kBuildSlotSize + 4, 2, kWhite);
-        if (i < 3 && m_atlas.ready()) {
+        if (i < 4 && m_atlas.ready() && (!trap || m_match.trapStock() > 0)) {
             const u32 tint = selected ? kWhite : rgba(255, 255, 255, m_buildMode ? 110 : 90);
             m_atlas.draw(*buildIcons[i], x + 1, kBuildRowY + 1, 1.0f, tint);
         }
@@ -769,11 +780,17 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const game::StructureSystem& s = m_match.structures();
         static const char* const kMaterialNames[] = {"madera", "piedra", "metal"};
         char banner[64];
-        snprintf(banner, sizeof(banner), "%s de %s  -  %d/%d", kBuildPieceNames[m_buildPiece],
-                 kMaterialNames[static_cast<int>(m_wallPlan.material)], s.count(), s.config().maxWalls);
+        const bool trap = m_buildPiece == kTrapPiece;
+        if (trap) {
+            snprintf(banner, sizeof(banner), "%s  -  te quedan %d", kBuildPieceNames[m_buildPiece], m_match.trapStock());
+        } else {
+            snprintf(banner, sizeof(banner), "%s de %s  -  %d/%d", kBuildPieceNames[m_buildPiece],
+                     kMaterialNames[static_cast<int>(m_wallPlan.material)], s.count(), s.config().maxWalls);
+        }
         printCenteredShadow(44, kWhite, banner);
-        if (!m_wallPlan.valid) {
-            printCenteredShadow(55, kErrorRed, game::placementErrorName(m_wallPlan.error));
+        if (trap ? !m_trapPlan.valid : !m_wallPlan.valid) {
+            printCenteredShadow(55, kErrorRed, trap ? game::trapErrorName(m_trapPlan.error)
+                                                    : game::placementErrorName(m_wallPlan.error));
         } else {
             int n = 0;
             const ui::Hint* hints = buildHints(&n);
@@ -847,6 +864,11 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     gfx::text::print(static_cast<int>(kBarX) + 4, static_cast<int>(kHealthY) + 1, kWhite, "%.0f|%.0f",
                      p.health, p.maxHealth);
 
+    // Trampas que se llevan, en su casilla de la barra de construccion.
+    if (m_match.trapStock() > 0) {
+        gfx::text::printShadow(static_cast<int>(kBuildSlotX + kTrapPiece * kBuildSlotStep) + 20,
+                               static_cast<int>(kBuildRowY) + 19, kWhite, "%d", m_match.trapStock());
+    }
     // Cantidades en las ranuras: balas en reserva del arma y unidades de los consumibles.
     for (int i = 0; i < game::Inventory::kSlots; ++i) {
         const game::InventorySlot& slot = inv.slot(i);

@@ -46,6 +46,7 @@ struct PlayerCommands {
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
     bool toggleCrouch = false;   // cruceta abajo: agacharse / levantarse
     bool useItem = false;    // R pulsado con un consumible en la mano
+    bool placeTrap = false;  // R en construccion con la trampa elegida (cuarta pieza)
     // Inventario lleno: cambiar el objeto del suelo `swapPickup` por la ranura `swapSlot`
     // (el jugador la elige en el selector del HUD). -1: nada.
     int swapPickup = -1;
@@ -87,6 +88,9 @@ enum class GameEventType : u8 {
     Explosion,     // entity = quien la causa, other = ItemType del arma, amount = radio (dm)
     Thrown,        // entity = quien lanza, other = ItemType (granada de mano)
     LlamaSpawned,  // position = donde esta la llama de esta partida
+    TrapPlaced,    // entity = quien la pone, other = indice de la trampa
+    TrapTriggered, // entity = duena de la trampa, other = indice, amount = personajes alcanzados
+    TrapRemoved,   // la pieza en la que estaba se ha roto (other = indice)
 };
 
 // Fase de la caida desde el autobus de cada personaje.
@@ -123,6 +127,38 @@ struct Container {
     bool landed = true;   // airdrop: false mientras baja con el globo
     int claimedBy = -1;
     float health = 0.0f;  // llama: vida antes de romperse (las demas no se rompen)
+};
+
+// --- Trampas (parche, fase 8; docs/TRAMPAS.md) ---------------------------------------------
+// De momento solo la trampa de pinchos (los unicos recursos: Recursos/HUD/spiketrap.webp y
+// Referencias/FortniteFloorTrap). La estructura es comun para anadir otros tipos.
+enum class TrapType : u8 { Spike };
+// Donde va: en un suelo (pinchos hacia arriba), en una pared o en un techo (hacia abajo).
+enum class TrapSurface : u8 { Floor, Wall, Ceiling };
+enum class TrapError : u8 { None, NoTraps, NoSurface, Ramp, TooSmall, Occupied, Obstructed, LimitReached };
+const char* trapErrorName(TrapError error);
+
+// Placa de la trampa: centro sobre la superficie, normal hacia fuera, y semiancho a lo largo
+// de los dos ejes de la superficie (todas las superficies estan alineadas con los ejes).
+struct TrapPlacement {
+    bool valid = false;
+    TrapError error = TrapError::NoSurface;
+    TrapSurface surface = TrapSurface::Floor;
+    math3d::Vec3 center, normal{0.0f, 1.0f, 0.0f}, axisU{1.0f, 0.0f, 0.0f};
+    float halfU = 1.0f, halfV = 1.0f;
+    int wall = -1;    // pieza construida en la que va (-1: el mapa o el suelo)
+    int object = -1;  // objeto del mapa en el que va (si se destruye, la trampa tambien)
+};
+
+struct Trap {
+    bool active = false;
+    TrapType type = TrapType::Spike;
+    TrapPlacement place;
+    world::Aabb wallBox;      // caja de la pieza al ponerla (si la pieza cambia, ya no esta)
+    world::Aabb trigger;      // donde se activa (delante de la placa)
+    int owner = 0;            // no hace dano a quien la pone
+    float cooldown = 0.0f;    // s hasta poder volver a saltar
+    float sinceTrigger = 99.0f;
 };
 
 // Proyectil en vuelo: cohete, granada del lanzagranadas o granada de mano.
@@ -316,6 +352,16 @@ public:
     // Llama de esta partida (indice en containers()) o -1.
     int llama() const { return m_llama; }
 
+    // Trampas: las que lleva el jugador (en la barra de construccion) y las colocadas.
+    static constexpr int kMaxTraps = 16;
+    int trapStock() const { return m_trapStock; }
+    void giveTraps(int n);
+    const Trap* traps() const { return m_traps; }
+    // Donde iria una trampa apuntando con la mira (y si se puede poner).
+    TrapPlacement planTrap(const PlayerAim& aim) const;
+    // Coloca una trampa (como R en construccion con la trampa): indice o -1.
+    int placeTrap(const PlayerAim& aim);
+
     // Botin.
     const std::vector<Pickup>& pickups() const { return m_pickups; }
     const std::vector<Container>& containers() const { return m_containers; }
@@ -441,6 +487,7 @@ private:
     bool llamaStanding() const;
     world::Aabb llamaBox() const;
     void updateProjectiles(float dt);
+    void updateTraps(float dt);
     void playerLaunch(const WeaponConfig& weapon, float spreadDegrees, int weaponType);
     bool pickUp(int id, int pickup);
     Pickup randomWeaponPickup(bool chest);
@@ -564,6 +611,9 @@ private:
     int m_nextExplosion = 0;
     float m_throwCooldown = 0.0f;
     int m_llama = -1;
+    Trap m_traps[kMaxTraps];
+    int m_trapStock = 0;
+    bool m_pendingTrap = false;
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
 };

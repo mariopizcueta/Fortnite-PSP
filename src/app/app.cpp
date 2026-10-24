@@ -435,8 +435,13 @@ void App::updateGame(const input::Input& in, float dt) {
         playerInput.jumpHeld = in.held(PSP_CTRL_CROSS);
         playerInput.aiming = aimHeld;
         if (m_buildMode) {
-            commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);  // una pieza por pulsacion
-            commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
+            // Una pieza por pulsacion; con la cuarta, una trampa donde apunta la mira.
+            if (m_buildPiece == kTrapPiece) {
+                commands.placeTrap = in.pressed(PSP_CTRL_RTRIGGER);
+            } else {
+                commands.placeWall = in.pressed(PSP_CTRL_RTRIGGER);
+                commands.buildPiece = static_cast<game::PieceType>(m_buildPiece);
+            }
             commands.cycleMaterial = in.pressed(PSP_CTRL_SQUARE);  // madera -> piedra -> metal
         } else {
             if (m_match.inventory().pickaxe() || m_match.inventory().activeWeapon()) {
@@ -482,7 +487,12 @@ void App::updateGame(const input::Input& in, float dt) {
 
     // 5) Camaras y construccion.
     updateGameCameras(in, dt, control, aimHeld);
-    if (m_buildMode) {
+    if (m_buildMode && m_buildPiece == kTrapPiece) {
+        game::PlayerAim now;
+        now.eye = cameraEye();
+        now.direction = m_followCamera.lookDirection();
+        m_trapPlan = m_match.planTrap(now);
+    } else if (m_buildMode) {
         m_wallPlan = m_match.planWall(m_followCamera.yaw(), static_cast<game::PieceType>(m_buildPiece));
     }
     // Las piezas ya no se quitan con CUADRADO (cambia de material): se rompen con el pico.
@@ -789,6 +799,14 @@ void App::processEvents() {
             case game::GameEventType::Explosion:
                 playSpatial(audio::Sfx::Explosion, e.position, 1.0f);
                 break;
+            case game::GameEventType::TrapPlaced:
+                if (e.entity == 0) playSfx(audio::Sfx::WallBuild, 0.8f);
+                break;
+            case game::GameEventType::TrapTriggered:
+                playSpatial(audio::Sfx::TrapTrigger, e.position, 1.0f);
+                break;
+            case game::GameEventType::TrapRemoved:
+                break;
             case game::GameEventType::Thrown:
                 if (e.entity == 0) {
                     playSfx(audio::Sfx::GrenadeThrow, 0.8f);
@@ -1028,6 +1046,7 @@ void App::renderGame(const FrameInfo& frame) {
             m_props.drawBus(m_match.busPosition(), m_world.textures());
             m_props.drawLoot(m_match, frustum, cameraEye(), drawDistance, m_match.elapsed(), m_world.textures(), m_items);
             m_props.drawProjectiles(m_match, frustum, m_items);
+            m_props.drawTraps(m_match, frustum, cameraEye(), drawDistance);
             m_props.drawBeams(m_match, frustum, cameraEye(), m_match.elapsed());
             m_props.drawExplosions(m_match, frustum);
         }
@@ -1038,7 +1057,11 @@ void App::renderGame(const FrameInfo& frame) {
         }
         if (m_buildVisualsReady && m_buildMode && !m_freeCameraActive) {
             if (m_targetWall >= 0) m_buildVisuals.drawHighlight(m_match.structures().wall(m_targetWall));
-            m_buildVisuals.drawGhost(m_wallPlan);
+            if (m_buildPiece == kTrapPiece) {
+                if (m_propsReady) m_props.drawTrapGhost(m_trapPlan);
+            } else {
+                m_buildVisuals.drawGhost(m_wallPlan);
+            }
         }
         m_viewProjection = projection * view;
         gfx::begin2D();

@@ -90,6 +90,13 @@ struct MatchConfig {
     // Los bots sueltan materiales al caer (madera siempre; piedra y metal a veces).
     bool botsDropMaterials = true;
 
+    // Trampas de pinchos: dano a cada personaje dentro al saltar, espera hasta poder
+    // volver a saltar, alcance para colocarlas y cuantas se pueden llevar.
+    float trapDamage = 100.0f;
+    float trapCooldown = 3.0f;
+    float trapReach = 6.0f;
+    int maxTrapsCarried = 9;
+
     // Consumibles: segundos de uso de cada uno (0 = el de ItemDef: vendas 3.5, botiquin 10,
     // minipocion 2, pocion de escudo 5). Mientras se usa no se puede mover ni saltar.
     float useSeconds[static_cast<int>(ItemType::Count)] = {};

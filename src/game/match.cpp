@@ -149,6 +149,9 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_nextExplosion = 0;
     m_throwCooldown = 0.0f;
     m_llama = -1;
+    for (Trap& t : m_traps) t = Trap{};
+    m_trapStock = 0;
+    m_pendingTrap = false;
     // Botin repartido por el mapa y, si se empieza en el autobus, todos dentro. La llama se
     // tira una sola vez aqui (5 %): reiniciar la partida es otra tirada con otra semilla.
     spawnLoot();
@@ -261,6 +264,7 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     // Las pulsaciones se entregan en el siguiente paso aunque este frame no tenga ninguno.
     if (input.jumpPressed) m_pendingJump = true;
     if (commands.placeWall) m_pendingPlace = true;
+    if (commands.placeTrap) m_pendingTrap = true;
     m_buildPiece = commands.buildPiece;
     // Curandose no se puede agachar ni levantar (la animacion de uso no lo permite).
     if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0) && m_useSlot < 0) {
@@ -298,6 +302,7 @@ void Match::step(float dt) {
     autoPickupAmmo(0);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
     updateProjectiles(dt);
+    updateTraps(dt);
     separateCharacters();
     if (m_storm.update(m_time, m_stormRng)) pushEvent(GameEventType::StormClosing, -1, m_storm.phase(), m_storm.nextCenter());
     updateStorm(dt);
@@ -309,6 +314,8 @@ void Match::step(float dt) {
 
 void Match::updatePlayer(float dt) {
     const bool place = m_pendingPlace, remove = m_pendingRemove, reload = m_pendingReload;
+    const bool trap = m_pendingTrap;
+    m_pendingTrap = false;
     const bool togglePickaxe = m_pendingPickaxe;
     const int cycle = m_pendingCycle;
     const int swapIndex = m_pendingSwapPickup, swapTo = m_pendingSwapSlot;
@@ -407,6 +414,7 @@ void Match::updatePlayer(float dt) {
         m_assistTarget = -1;
         m_pendingUse = false;
         if (place) buildWall(m_input.cameraYaw, m_buildPiece);
+        if (trap) placeTrap(m_aim);
         if (remove) removeWallAt(m_aim);
         return;
     }

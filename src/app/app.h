@@ -79,6 +79,7 @@ public:
     void testSetCameraAim(float yaw, float look) { m_followCamera.setAim(yaw, look); }
     // La siguiente partida tiene llama seguro (para las capturas).
     void testForceLlama(bool on) { m_testForceLlama = on; }
+    const game::TrapPlacement& testTrapPlan() const { return m_trapPlan; }
     math3d::Vec3 testAimPoint() const { return aimPointFrom(cameraEye(), m_followCamera.lookDirection()); }
     u32 testFootsteps() const { return m_playerSteps; }
     float testFogEnd() const { return m_fogEnd; }
@@ -219,8 +220,11 @@ private:
     bool m_buildMode = false;
     game::WallPlacement m_wallPlan;
     int m_targetWall = -1;
-    static constexpr int kBuildPieces = 3;  // pared, suelo, rampa (cruceta en construccion)
+    // Pared, suelo, rampa y trampa (cruceta en construccion). La trampa es la cuarta.
+    static constexpr int kBuildPieces = 4;
+    static constexpr int kTrapPiece = 3;
     int m_buildPiece = 0;
+    game::TrapPlacement m_trapPlan;  // donde iria la trampa (con la trampa elegida)
     // Ultimo material conseguido con el pico (aviso "+8" junto a la mira).
     int m_harvestResource = 0, m_harvestAmount = 0;
     float m_harvestAge = 99.0f;
