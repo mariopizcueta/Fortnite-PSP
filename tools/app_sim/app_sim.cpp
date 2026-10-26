@@ -90,7 +90,7 @@ namespace {
 using math3d::Vec3;
 
 // Mismos valores que App::Screen / App::Results.
-enum Screen { kLogin, kNickname, kLobby, kControls, kLoading, kGame };
+enum Screen { kLogin, kNickname, kLobby, kControls, kLoading, kGame, kLanguage };
 enum Results { kNone, kVictory, kDefeat };
 
 int g_failures = 0;
@@ -1181,6 +1181,25 @@ int main(int argc, char** argv) {
     sim.init();
     printf("Arranque: heap %u KB (+%u KB de recursos y escenario)\n", heapBytes() / 1024,
            (heapBytes() - heapBefore) / 1024);
+
+    printf("\n0) Idioma (primer arranque)\n");
+    sim.wait(0.3f);
+    check(sim.screen() == kLanguage, "sin ajustes.txt la aplicacion arranca pidiendo el idioma");
+    sim.shot("00_idioma");
+    sim.press(PSP_CTRL_DOWN);
+    sim.wait(0.1f);
+    sim.shot("00b_idioma_ingles");
+    check(i18n::language() == i18n::Lang::En, "abajo cambia al ingles al momento");
+    sim.press(PSP_CTRL_UP);
+    check(i18n::language() == i18n::Lang::Es, "arriba vuelve al espanol");
+    sim.press(PSP_CTRL_CROSS);
+    {
+        char sp[512];
+        snprintf(sp, sizeof(sp), "%s/ajustes.txt", outDir);
+        FILE* sf = fopen(sp, "r");
+        check(sim.screen() == kLogin && sf != nullptr, "X guarda el idioma en ajustes.txt y pasa al inicio de sesion");
+        if (sf) fclose(sf);
+    }
 
     printf("\n1) Inicio de sesion\n");
     sim.wait(0.5f);

@@ -95,7 +95,7 @@ public:
 #endif
 
 private:
-    enum class Screen { Login, Nickname, Lobby, Controls, Loading, Game };
+    enum class Screen { Login, Nickname, Lobby, Controls, Loading, Game, Language };
     // Paginas del HUD de la partida (SELECT las recorre).
     enum class Hud { Game, Debug, Controls, Hidden, Count };
     // Pantalla de resultados sobre la partida.
@@ -168,6 +168,9 @@ private:
 
     // --- app_menus.cpp ----------------------------------------------------------------
     void updateLogin(const input::Input& in, float dt);
+    void updateLanguage(const input::Input& in);
+    void renderLanguage() const;
+    void overlayLanguage() const;
     void updateLobby(const input::Input& in, float dt);
     void updateLobbyPlay(const input::Input& in);
     void updateAchievementsTab(const input::Input& in);
@@ -300,6 +303,7 @@ private:
     bool m_resultSoundPlayed = false;  // victoria/derrota ya sono en esta partida
 
     // Menus.
+    int m_langChoice = 0;          // pantalla de idioma (primer arranque): 0 espanol, 1 ingles
     int m_loginStage = 0;          // 0: formulario, 1: conectando
     // Perfil (perfil.txt) y teclado para el nombre la primera vez.
     Profile m_profile;

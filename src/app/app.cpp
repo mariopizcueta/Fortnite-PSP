@@ -79,6 +79,9 @@ void App::init() {
         platform::log::write("ajustes cargados de %s", m_settingsPath);
     } else {
         platform::log::write("sin ajustes en %s: valores por defecto", m_settingsPath);
+        // Primer arranque: se elige el idioma antes del inicio de sesion.
+        m_screen = Screen::Language;
+        m_langChoice = m_settings.language == i18n::Lang::En ? 1 : 0;
     }
     applySettings();
     // Perfil guardado (nombre y estadisticas); si no existe, se pide el nombre tras el inicio.
@@ -296,6 +299,7 @@ void App::update(const input::Input& in, float dt) {
     }
 
     switch (m_screen) {
+        case Screen::Language: updateLanguage(in); break;
         case Screen::Login: updateLogin(in, dt); break;
         case Screen::Nickname: updateNickname(in); break;
         case Screen::Lobby: updateLobby(in, dt); break;
@@ -1046,6 +1050,7 @@ bool App::projectToScreen(const math3d::Mat4& viewProjection, const Vec3& p, flo
 
 void App::render(const FrameInfo& frame) {
     switch (m_screen) {
+        case Screen::Language: renderLanguage(); break;
         case Screen::Login: renderLogin(); break;
         case Screen::Nickname: renderNickname(); break;
         case Screen::Lobby: renderLobby(); break;
@@ -1063,6 +1068,7 @@ void App::render(const FrameInfo& frame) {
 
 void App::renderOverlay(const FrameInfo& frame) const {
     switch (m_screen) {
+        case Screen::Language: overlayLanguage(); break;
         case Screen::Login: overlayLogin(); break;
         case Screen::Nickname: overlayNickname(); break;
         case Screen::Lobby: overlayLobby(); break;

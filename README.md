@@ -2,8 +2,13 @@
 
 Demake estilo PS1 de Fortnite para PSP, escrito en C++ sobre PSPSDK.
 
+**[Descargar y jugar](https://github.com/mariopizcueta/Fortnite-PSP/releases/latest):** el zip de
+Releases trae la carpeta `PSP/GAME/FortnitePSP/` lista; se copia a la raíz de la Memory Stick
+(`ms0:/`) y el juego aparece en *Juego → Memory Stick* del XMB. La primera vez pide el idioma
+(español o inglés) y luego el nombre de jugador.
+
 **Estado: fase 8, parche de mecánicas y contenido (armas nuevas con modelos 3D, explosivos,
-trampas, llama, animaciones a dos manos, logros, taquilla, ajustes e inglés), v0.12.0.**
+trampas, llama, animaciones a dos manos, logros, taquilla, ajustes e inglés), v0.12.1.**
 Detalle del parche en [docs/PARCHE.md](docs/PARCHE.md). Antes (fase 7): botín, autobús, ala
 delta, airdrops, bots que cazan y construyen, tormenta que se cierra, suelos, rampas, mirilla,
 mapa destruible, perfil guardado, headshots, agacharse, bailar y mapa.
@@ -15,17 +20,28 @@ una partida completa:
 5. victoria o derrota;
 6. vuelta al lobby u otra partida.
 
+![Elegir idioma](docs/capturas/app_00_idioma.png)
 ![Inicio de sesión](docs/capturas/app_01_login.png)
 ![Lobby](docs/capturas/app_03_lobby.png)
 ![Partida](docs/capturas/app_08_partida.png)
 ![Victoria](docs/capturas/app_20_victoria.png)
+
+Novedades del parche:
+
+![Lobby en inglés](docs/capturas/app_35a_lobby_en.png)
+![Ajustes](docs/capturas/app_34a_ajustes_graficos.png)
+![Logros](docs/capturas/app_05b_lobby_logros.png)
+![Taquilla](docs/capturas/app_05d_lobby_taquilla.png)
+![Explosión](docs/capturas/app_31d_explosion.png)
+![Llama de suministros](docs/capturas/app_32a_llama.png)
+![Trampa](docs/capturas/app_33c_trampa_salta.png)
 
 *Capturas de `make app-sim`: la aplicación real, dibujada por el rasterizador por software
 de host. No son capturas de una PSP.*
 
 ## Qué incluye
 
-**Fase 8 — parche (v0.12.0)** (todo en [docs/PARCHE.md](docs/PARCHE.md)):
+**Fase 8 — parche (v0.12.1)** (todo en [docs/PARCHE.md](docs/PARCHE.md)):
 - **Inventario:** cambiar un objeto del suelo por la ranura que se elija (también con un
   curativo en la mano); las armas soltadas conservan su cargador. Curarse deja quieto.
 - **Combate:** la mirilla apunta donde apuntaba la mira; agacharse mejora la precisión;
@@ -36,6 +52,7 @@ de host. No son capturas de una PSP.*
 - **Botín:** los bots sueltan materiales; llama de suministros (5 % por partida).
 - **Trampas** de pinchos en suelos, paredes y techos ([docs/TRAMPAS.md](docs/TRAMPAS.md)).
 - **Animaciones:** el arma con las dos manos al correr (cinemática inversa) y transiciones.
+- **Primer arranque:** pantalla para elegir idioma (español / inglés) antes del inicio de sesión.
 - **Lobby:** secciones con L/R: JUGAR, LOGROS ([docs/LOGROS.md](docs/LOGROS.md)) y TAQUILLA
   ([docs/TAQUILLA.md](docs/TAQUILLA.md)); START abre los AJUSTES ([docs/AJUSTES.md](docs/AJUSTES.md)):
   gráficos, sensibilidad, controles reasignables, idioma (español / inglés) y borrar datos.
@@ -249,6 +266,8 @@ make && make release
   de la fase hay un commit por cada hito que compila y pasa las pruebas.
 - **Copia del EBOOT:** el de cada versión se guarda en `releases/vX.Y.Z/EBOOT.PBP`. Esta
   carpeta no se sube a git.
+- **Releases de GitHub:** cada versión publica `FortnitePSP-vX.Y.Z.zip` con el juego ya
+  compilado (descargar, copiar a la Memory Stick y jugar).
 
 ### Registro de diagnóstico
 

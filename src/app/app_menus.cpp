@@ -82,6 +82,53 @@ void drawButton(float x, float y, float w, float h, u32 fill, bool selected, flo
 
 }  // namespace
 
+// --- Idioma (primer arranque) -----------------------------------------------------------
+
+// Solo sale cuando no hay ajustes.txt: se elige el idioma y se guarda; despues, el inicio de
+// sesion. Se puede cambiar luego en AJUSTES. El titulo va en los dos idiomas.
+const ui::Hint kLanguageHints[] = {{ui::Button::Dpad, T::HintSelect}, {ui::Button::Cross, T::HintAccept}};
+constexpr float kLangBoxX = 130.0f, kLangBoxY = 70.0f, kLangBoxW = 220.0f, kLangBoxH = 120.0f;
+constexpr float kLangRowX = 160.0f, kLangRowY = 112.0f, kLangRowW = 160.0f, kLangRowH = 28.0f, kLangRowGap = 8.0f;
+
+void App::updateLanguage(const input::Input& in) {
+    const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (step != 0) {
+        m_langChoice = (m_langChoice + 2 + step) % 2;
+        m_settings.language = m_langChoice == 1 ? i18n::Lang::En : i18n::Lang::Es;
+        i18n::setLanguage(m_settings.language);
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+    if (in.pressed(PSP_CTRL_CROSS) || in.pressed(PSP_CTRL_START)) {
+        if (!m_settings.save(m_settingsPath)) platform::log::write("aviso: no se pudo guardar %s", m_settingsPath);
+        playSfx(audio::Sfx::MenuAccept);
+        m_screen = Screen::Login;
+    }
+}
+
+void App::renderLanguage() const {
+    if (m_login.pixels) gfx::drawTexture(m_login, 0.0f, 0.0f);
+    gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 130));
+    gfx::fillRect(kLangBoxX, kLangBoxY, kLangBoxW, kLangBoxH, rgba(8, 18, 48, 235));
+    ui::frame(kLangBoxX, kLangBoxY, kLangBoxW, kLangBoxH, 2, rgba(90, 160, 255));
+    for (int i = 0; i < 2; ++i) {
+        drawButton(kLangRowX, kLangRowY + i * (kLangRowH + kLangRowGap), kLangRowW, kLangRowH,
+                   i == m_langChoice ? kYellow : rgba(30, 60, 130, 230), i == m_langChoice, m_blinkTime);
+    }
+    gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
+    ui::drawHintIcons(m_atlas, centeredHintsX(kLanguageHints, 2), kHintsY, kLanguageHints, 2);
+}
+
+void App::overlayLanguage() const {
+    printCentered(82, kWhite, "ELIGE IDIOMA");
+    printCentered(94, kLightGrey, "CHOOSE LANGUAGE");
+    const char* const names[2] = {"ESPANOL", "ENGLISH"};
+    for (int i = 0; i < 2; ++i) {
+        printCentered(static_cast<int>(kLangRowY + i * (kLangRowH + kLangRowGap) + 10),
+                      i == m_langChoice ? kNavy : kWhite, names[i]);
+    }
+    ui::printHints(centeredHintsX(kLanguageHints, 2), kHintsY, kLightGrey, kLanguageHints, 2);
+}
+
 // --- Inicio de sesion -------------------------------------------------------------------
 
 void App::updateLogin(const input::Input& in, float dt) {
