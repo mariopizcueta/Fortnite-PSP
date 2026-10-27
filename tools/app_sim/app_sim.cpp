@@ -873,9 +873,12 @@ void testSettingsAndEnglish(Sim& sim, const char* outDir) {
     sim.shot("35b_achievements_en");
     sim.press(PSP_CTRL_RTRIGGER);
     sim.wait(0.1f);
+    sim.shot("35c2_shop_en");
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.1f);
     sim.shot("35c_locker_en");
     sim.press(PSP_CTRL_RTRIGGER);  // de vuelta a PLAY
-    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_TRIANGLE);
     sim.wait(1.0f);
     sim.shot("35d_loading_en");
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "partida en ingles");
@@ -918,7 +921,8 @@ void testSettingsAndEnglish(Sim& sim, const char* outDir) {
     sim.press(PSP_CTRL_START);
     sim.press(PSP_CTRL_LTRIGGER);
     sim.press(PSP_CTRL_LTRIGGER);
-    sim.press(PSP_CTRL_LTRIGGER);  // controles
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);  // controles (ADMIN, DATOS, IDIOMA, CONTROLES)
     for (int k = 0; k < 8; ++k) sim.press(PSP_CTRL_DOWN);  // "restaurar"
     sim.press(PSP_CTRL_CROSS);
     sim.press(PSP_CTRL_LTRIGGER);
@@ -986,6 +990,254 @@ void testDeleteData(Sim& sim, const char* outDir, const char* profilePath) {
         fclose(w);
     }
     (void)backup;
+}
+
+// --- v0.13 ----------------------------------------------------------------------------------------
+
+// Perfil de antes de la v0.13 (sin pavos): las victorias se pagan al cargarlo y los logros ya
+// completados quedan por recoger.
+void testLegacyProfile(const char* outDir) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/perfil_antiguo.txt", outDir);
+    FILE* f = fopen(path, "w");
+    if (!f) return;
+    fputs("nombre=VIEJO\npartidas=9\nvictorias=3\nbajas=40\nlogro_primera_victoria=20261020\nlogro_primera_baja=20261021\n"
+          "equipado_Traje=traje_comando\n", f);
+    fclose(f);
+    app::Profile old;
+    const bool read = old.load(path);
+    const int vbucks = old.vbucks, pending = old.claimableCount();
+    // Un traje de la tienda que no se ha comprado no se puede llevar equipado.
+    const bool notEquipped = old.equippedIn(app::CosmeticSlot::Outfit) == app::defaultCosmetic(app::CosmeticSlot::Outfit);
+    const bool claimed = old.claim(app::AchievementId::FirstWin) && !old.claim(app::AchievementId::FirstWin) &&
+                         !old.claim(app::AchievementId::Hunter);
+    old.save(path);
+    app::Profile again;
+    again.load(path);
+    printf("  perfil antiguo: 3 victorias -> %d pavos, %d logros por recoger; tras recoger uno: %d pavos\n", vbucks, pending,
+           again.vbucks);
+    check(read && vbucks == 3 * app::kVbucksPerWin && pending == 2 && notEquipped,
+          "perfil de antes de la v0.13: 50 pavos por cada victoria ya ganada y sus logros por recoger");
+    check(claimed && again.vbucks == vbucks + app::kVbucksPerAchievement && again.claimableCount() == 1 &&
+              again.achievements[static_cast<int>(app::AchievementId::FirstWin)].claimed,
+          "cada recompensa se recoge una vez (50 pavos) y queda guardada");
+    remove(path);
+}
+
+void testUpdate013(Sim& sim, const char* outDir) {
+    printf("\n10) v0.13: pavos, tienda, recompensas, inventario con L + R, admin y mod menu, miras y sonidos\n");
+    char settingsPath[512], profilePath[512];
+    snprintf(settingsPath, sizeof(settingsPath), "%s/ajustes.txt", outDir);
+    snprintf(profilePath, sizeof(profilePath), "%s/perfil.txt", outDir);
+    testLegacyProfile(outDir);
+
+    // Recompensas de los logros ya completados en esta prueba.
+    const app::Profile& profile = sim.app().testProfile();
+    int target = -1;
+    for (int i = 0; i < app::kAchievementCount && target < 0; ++i) {
+        if (profile.achievements[i].unlocked && !profile.achievements[i].claimed) target = i;
+    }
+    sim.press(PSP_CTRL_RTRIGGER);  // LOGROS
+    for (int k = 0; k < app::kAchievementCount && sim.app().testAchievementCursor() != target; ++k) sim.press(PSP_CTRL_DOWN);
+    const int before = profile.vbucks;
+    sim.press(PSP_CTRL_CROSS);
+    sim.wait(0.1f);
+    sim.shot("40a_logros_recompensa");
+    const bool claimedOnce = target >= 0 && profile.vbucks == before + 50 && profile.achievements[target].claimed;
+    sim.press(PSP_CTRL_CROSS);  // otra vez: nada
+    check(claimedOnce && profile.vbucks == before + 50 && fileContains(profilePath, "pavos="),
+          "X en un logro completado recoge 50 pavos (una sola vez) y se guarda");
+
+    // Tienda: sin pavos no se compra; con ellos, confirmacion, compra y equipar.
+    sim.press(PSP_CTRL_RTRIGGER);  // TIENDA
+    sim.app().testAddVbucks(-profile.vbucks);
+    sim.press(PSP_CTRL_CROSS);
+    const bool refused = !sim.app().testShopConfirm();
+    sim.app().testAddVbucks(1000);
+    sim.press(PSP_CTRL_CROSS);
+    const bool asks = sim.app().testShopConfirm();
+    sim.wait(0.1f);
+    sim.shot("40b_tienda_confirmar");
+    sim.press(PSP_CTRL_CIRCLE);
+    const bool canceled = !sim.app().testShopConfirm() && profile.vbucks == 1000;
+    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_CROSS);  // comprar
+    const app::Cosmetic* commando = app::findCosmetic("traje_comando");
+    const bool bought = commando && profile.owns(*commando) && profile.vbucks == 200 &&
+                        fileContains(profilePath, "comprado_traje_comando=1");
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);  // el siguiente cuesta 800 y quedan 200: no
+    const bool tooExpensive = !sim.app().testShopConfirm() && profile.vbucks == 200;
+    sim.press(PSP_CTRL_UP);
+    sim.press(PSP_CTRL_CROSS);  // ya es suyo: X lo equipa
+    sim.wait(0.3f);
+    sim.shot("40c_tienda_comprado");
+    const bool equipped = profile.equippedIn(app::CosmeticSlot::Outfit) == commando;
+    check(refused && asks && canceled, "sin pavos no se compra; con ellos pide confirmacion y CIRCULO cancela");
+    check(bought && tooExpensive, "X confirma la compra (800 pavos), se guarda y el siguiente no llega");
+    check(equipped && fileContains(profilePath, "equipado_Traje=traje_comando"), "X sobre un traje comprado lo equipa");
+    sim.press(PSP_CTRL_RTRIGGER);  // TAQUILLA: el traje comprado esta en su categoria
+    sim.wait(0.2f);
+    sim.shot("40d_taquilla_traje");
+    sim.press(PSP_CTRL_RTRIGGER);  // JUGAR
+
+    // Admin: contrasena mal, bien, mod menu y trucos guardados.
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_LTRIGGER);  // de GRAFICOS a ADMIN
+    sim.press(PSP_CTRL_CROSS);
+    const bool keyboard = sim.app().testPasswordOpen();
+    sim.press(PSP_CTRL_CROSS);  // "a"
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_CROSS);  // "b"
+    sim.wait(0.1f);
+    sim.shot("41a_contrasena");
+    sim.press(PSP_CTRL_START);
+    const bool wrong = !sim.app().testPasswordOpen() && !sim.app().testSettings().admin && !sim.app().testModMenuOpen();
+    sim.press(PSP_CTRL_CROSS);
+    sim.app().testTypePassword("adminpezporno");
+    sim.press(PSP_CTRL_START);
+    const bool unlocked = sim.app().testSettings().admin && sim.app().testModMenuOpen();
+    sim.wait(0.1f);
+    sim.shot("41b_mod_menu");
+    sim.press(PSP_CTRL_CROSS);  // modo dios
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);  // wallhack
+    for (int k = 0; k < 30; ++k) sim.press(PSP_CTRL_DOWN);
+    sim.wait(0.1f);
+    sim.shot("41c_mod_menu_final");
+    const int last = sim.app().testModCursor();
+    sim.press(PSP_CTRL_CIRCLE);
+    sim.press(PSP_CTRL_CIRCLE);
+    check(keyboard && wrong, "ADMIN pide la contrasena; una incorrecta no desbloquea nada");
+    check(unlocked, "\"adminpezporno\" desbloquea el mod menu");
+    check(last == app::cheatCount() - 1 && sim.app().testSettings().cheats.godMode && sim.app().testSettings().cheats.wallhack &&
+              fileContains(settingsPath, "admin=1") && fileContains(settingsPath, "truco_modo_dios=1") &&
+              fileContains(settingsPath, "truco_wallhack=1"),
+          "en el lobby, el mod menu tiene todos los trucos (sin acciones) y se guardan en ajustes.txt");
+
+    // Partida: modo dios y wallhack activos; inventario con L + R; miras; sonidos.
+    sim.press(PSP_CTRL_TRIANGLE);
+    check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "partida con trucos");
+    game::Match& match = sim.app().testMatch();
+    const bool god = match.cheats().godMode && match.cheats().wallhack;
+    check(landAndEquip(sim), "salto, aterrizaje y equipo");
+    match.setPlayerInvulnerable(false);
+    match.applyDamage(0, 50.0f, 1);
+    check(god && match.body(0).state().health == 100.0f, "los trucos llegan a la partida: modo dios");
+    // Un bot delante con escudo: el numero sale azul; el wallhack lo marca.
+    match.teleport(1, {0.0f, 0.0f, 12.0f}, 0.0f);
+    match.setHealth(1, 100.0f, 60.0f);
+    sim.app().testSetCameraAim(0.0f, -0.05f);
+    sim.hold(PSP_CTRL_RTRIGGER, 0.4f);
+    sim.wait(0.05f);
+    sim.shot("42a_escudo_azul_wallhack");
+
+    // L + R a la vez: inventario. Con L mantenida y R despues, no.
+    sim.wait(1.0f);
+    sim.hold(PSP_CTRL_LTRIGGER, 0.5f);
+    sim.frame(PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
+    sim.frame(0);
+    const bool notSequential = !sim.app().testInventoryOpen();
+    sim.wait(0.3f);
+    sim.frame(PSP_CTRL_RTRIGGER);
+    sim.frame(PSP_CTRL_RTRIGGER | PSP_CTRL_LTRIGGER);  // un frame despues: vale (a la vez)
+    sim.frame(0);
+    const bool opened = sim.app().testInventoryOpen();
+    const game::Inventory& inv = match.inventory();
+    const game::ItemType first = inv.slot(0).type;
+    const int cursor = sim.app().testInventoryCursor();
+    sim.wait(0.1f);
+    sim.shot("43a_inventario");
+    // Mover lo de la mano a la ranura de la derecha.
+    sim.press(PSP_CTRL_CROSS);
+    const bool holding = sim.app().testInventoryHeld() == cursor;
+    sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.1f);
+    sim.shot("43b_inventario_moviendo");
+    sim.press(PSP_CTRL_CROSS);
+    const bool moved = inv.slot(cursor + 1).type == first && inv.selected() == cursor + 1;
+    // Soltar las vendas al suelo.
+    int bandages = 0;
+    for (int k = 0; k < game::Inventory::kSlots; ++k) {
+        if (inv.slot(k).type == game::ItemType::Bandage) bandages = k;
+    }
+    while (sim.app().testInventoryCursor() != bandages) sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_SQUARE);
+    bool onFloor = false;
+    for (const game::Pickup& pk : match.pickups()) onFloor |= pk.active && pk.item == game::ItemType::Bandage && pk.count > 0;
+    const bool dropped = inv.slot(bandages).type == game::ItemType::None && onFloor;
+    sim.press(PSP_CTRL_CIRCLE);
+    check(notSequential && opened, "L + R a la vez abre el inventario; L mantenida y R despues, no");
+    check(holding && moved, "X coge un objeto y lo deja en otra ranura (sigue en la mano)");
+    check(dropped && !sim.app().testInventoryOpen() && !sim.app().testBuildMode(),
+          "CUADRADO lo suelta al suelo y CIRCULO cierra (sin entrar en construccion)");
+
+    // Miras: escopeta tactica (cuadrada) y lanzagranadas (circulo con la caida).
+    match.giveItem(game::ItemType::TacticalShotgun, 1, game::Rarity::Rare);
+    match.giveItem(game::ItemType::GrenadeLauncher, 1, game::Rarity::Rare);
+    match.giveAmmo(game::AmmoType::Shells, 16);
+    match.giveAmmo(game::AmmoType::Rockets, 6);
+    for (int k = 0; k < game::Inventory::kSlots && inv.activeType() != game::ItemType::TacticalShotgun; ++k) sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.5f);
+    sim.shot("44a_mira_escopeta_tactica");
+    for (int k = 0; k < game::Inventory::kSlots && inv.activeType() != game::ItemType::GrenadeLauncher; ++k) sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.5f);
+    sim.shot("44b_mira_lanzagranadas");
+    for (int k = 0; k < game::Inventory::kSlots && inv.activeType() != game::ItemType::AssaultRifle; ++k) sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.5f);
+    sim.shot("44c_mira_fusil");
+
+    // Recarga: el sonido de su familia, y se corta si se cambia de arma.
+    match.giveAmmo(game::AmmoType::Medium, 60);
+    // Donde no haya nada que recoger (CUADRADO lo recogeria en vez de recargar).
+    for (int k = 0; k < 20; ++k) {
+        match.teleport(0, {8.0f + 3.0f * k, 0.0f, 30.0f}, 0.0f);
+        sim.wait(0.05f);
+        if (match.playerInteractable().kind == game::Interactable::Kind::None) break;
+    }
+    sim.hold(PSP_CTRL_RTRIGGER, 0.5f);
+    sim.press(PSP_CTRL_SQUARE);
+    const bool rifleReload = sim.app().testReloadSfx() == static_cast<int>(audio::Sfx::ReloadRifle) &&
+                             audio::mixer().activeVoices() > 0;
+    sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.1f);
+    const bool cut = sim.app().testReloadSfx() == static_cast<int>(audio::Sfx::Count);
+    check(rifleReload && cut, "recargar el fusil suena a su recarga y se corta al cambiar de arma");
+
+    // Pausa: la tercera opcion es el MOD MENU; desde ahi, las acciones (eliminar a los bots).
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_DOWN);
+    const bool third = sim.app().testPauseItem() == 2;
+    sim.wait(0.1f);
+    sim.shot("45a_pausa_mod_menu");
+    sim.press(PSP_CTRL_CROSS);
+    const bool modInGame = sim.app().testModMenuOpen();
+    for (int k = 0; k < 40; ++k) sim.press(PSP_CTRL_DOWN);  // ultima accion: eliminar bots
+    sim.wait(0.1f);
+    sim.shot("45b_mod_menu_partida");
+    const int profileWins = sim.app().testProfile().wins, vbucksBefore = sim.app().testProfile().vbucks;
+    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_CIRCLE);  // cierra el mod menu
+    sim.press(PSP_CTRL_CIRCLE);  // y la pausa
+    const bool won = sim.waitUntil([&] { return sim.results() == kVictory; }, 4.0f);
+    sim.wait(1.0f);
+    sim.shot("45c_victoria_pavos");
+    check(third && modInGame && match.aliveCount() == 1, "START > MOD MENU en partida: la accion elimina a todos los bots");
+    check(won && sim.app().testProfile().wins == profileWins + 1 && sim.app().testProfile().vbucks == vbucksBefore + 50,
+          "la victoria magistral da 50 pavos");
+    sim.press(PSP_CTRL_CROSS);
+    check(sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f), "vuelta al lobby");
+
+    // Bloquear el menu de administrador: sin trucos para el resto de la prueba.
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_CIRCLE);
+    check(!sim.app().testSettings().admin && !sim.app().testSettings().cheats.godMode && !fileContains(settingsPath, "admin=1"),
+          "bloquear el menu de administrador quita los trucos");
 }
 
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
@@ -1244,12 +1496,14 @@ int main(int argc, char** argv) {
     sim.shot("03_lobby");
     sim.hold(0, 0.5f, 1.0f, 0.0f);  // el stick gira el personaje
     sim.shot("04_lobby_girado");
+    // v0.13: sin cruceta en el lobby; SELECT abre los controles.
     sim.press(PSP_CTRL_DOWN);
-    sim.wait(0.2f);
-    sim.shot("05_lobby_controles");
     sim.press(PSP_CTRL_CROSS);
     sim.wait(0.2f);
-    check(sim.screen() == kControls, "CONTROLES abre la pantalla de controles");
+    check(sim.screen() == kLobby && sim.app().testBotSetting() == 10, "la cruceta y X no hacen nada en el lobby (JUGAR)");
+    sim.press(PSP_CTRL_SELECT);
+    sim.wait(0.2f);
+    check(sim.screen() == kControls, "SELECT abre la pantalla de controles");
     sim.shot("06_controles", PSP_CTRL_LTRIGGER | PSP_CTRL_CROSS);
     sim.press(PSP_CTRL_CIRCLE);
     check(sim.screen() == kLobby, "O vuelve al lobby");
@@ -1266,8 +1520,11 @@ int main(int argc, char** argv) {
     sim.shot("05c_lobby_logros_bajando");
     sim.press(PSP_CTRL_RTRIGGER);
     sim.wait(0.2f);
+    const bool shopTab = sim.app().testLobbyTab() == 2;
+    sim.press(PSP_CTRL_RTRIGGER);
+    sim.wait(0.2f);
     sim.shot("05d_lobby_taquilla");
-    const bool lockerTab = sim.app().testLobbyTab() == 2;
+    const bool lockerTab = sim.app().testLobbyTab() == 3;
     sim.press(PSP_CTRL_RIGHT);  // mochila (vacia)
     sim.press(PSP_CTRL_CROSS);
     sim.wait(0.1f);
@@ -1280,21 +1537,33 @@ int main(int argc, char** argv) {
     sim.shot("05f_taquilla_pico");
     sim.press(PSP_CTRL_CROSS);  // equipar
     const app::Cosmetic* pick = sim.app().testProfile().equippedIn(app::CosmeticSlot::Pickaxe);
-    check(achievementsTab && lockerTab, "R pasa de JUGAR a LOGROS y a TAQUILLA");
+    check(achievementsTab && shopTab && lockerTab, "R pasa de JUGAR a LOGROS, a TIENDA y a TAQUILLA");
     check(emptyOpen && !sim.app().testLockerChoosing() && pick && strcmp(pick->key, "pico_defecto") == 0,
           "en la taquilla se recorren las categorias, una vacia lo indica y se equipa el pico");
     sim.press(PSP_CTRL_LTRIGGER);
     sim.press(PSP_CTRL_LTRIGGER);
+    sim.press(PSP_CTRL_LTRIGGER);
     check(sim.app().testLobbyTab() == 0, "L vuelve a JUGAR");
-    sim.press(PSP_CTRL_UP);  // de CONTROLES a JUGAR
+    // CUADRADO: panel del modo de juego y de los bots (alli si va la cruceta).
+    sim.press(PSP_CTRL_SQUARE);
+    const bool modeOpen = sim.app().testModeOpen();
     sim.press(PSP_CTRL_RIGHT);
-    check(sim.app().testBotSetting() == 15, "derecha sobre JUGAR sube los bots (15)");
+    const bool oneShot = sim.app().testGameMode() == 1;
+    sim.wait(0.1f);
+    sim.shot("05g_lobby_modo");
+    sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_RIGHT);
+    check(modeOpen && oneShot && sim.app().testGameMode() == 0 && sim.app().testBotSetting() == 15,
+          "CUADRADO abre el panel: izquierda/derecha cambian el modo (Monodisparo) y los bots (15)");
     sim.press(PSP_CTRL_LEFT);
     check(sim.app().testBotSetting() == 10, "izquierda los baja (10)");
+    sim.press(PSP_CTRL_SQUARE);
+    check(!sim.app().testModeOpen(), "CUADRADO cierra el panel");
 
     printf("\n3) Carga y partida\n");
-    sim.press(PSP_CTRL_CROSS);
-    check(sim.screen() == kLoading, "JUGAR abre la pantalla de carga");
+    sim.press(PSP_CTRL_TRIANGLE);
+    check(sim.screen() == kLoading, "TRIANGULO (JUGAR) abre la pantalla de carga");
     sim.wait(1.0f);
     sim.shot("07_carga");
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "tras la carga empieza la partida");
@@ -1482,7 +1751,7 @@ int main(int argc, char** argv) {
     int walkable = -1;
     for (int round = 0; round < 8; ++round) {
         sim.wait(0.3f);
-        sim.press(PSP_CTRL_CROSS);  // JUGAR
+        sim.press(PSP_CTRL_TRIANGLE);  // JUGAR
         flowOk &= sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
         flowOk &= match.aliveCount() == 11 && sim.app().testWorld().collision().dynamicCount() == 0;
         if (walkable < 0) walkable = sim.app().testNavWalkable();
@@ -1541,7 +1810,7 @@ int main(int argc, char** argv) {
     check(audio::mixer().droppedCommands() == 0, "no se ha perdido ningun sonido por la cola llena");
 
     printf("\n6b) Tormenta en el limite del mapa\n");
-    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    sim.press(PSP_CTRL_TRIANGLE);  // JUGAR
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "nueva partida");
     sim.wait(0.5f);
     const float centerFog = sim.app().testFogEnd();
@@ -1575,7 +1844,7 @@ int main(int argc, char** argv) {
     check(sim.screen() == kLobby, "vuelta al lobby");
 
     printf("\n6c) Tormenta que se cierra\n");
-    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    sim.press(PSP_CTRL_TRIANGLE);  // JUGAR
     sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
     sim.press(PSP_CTRL_CROSS);  // saltar del autobus
     sim.waitUntil([&] { return match.airState(0) == game::AirState::Ground; }, 40.0f);
@@ -1630,7 +1899,7 @@ int main(int argc, char** argv) {
 
     // Partida con llama (forzada) para verla y abrirla.
     sim.app().testForceLlama(true);
-    sim.press(PSP_CTRL_CROSS);  // JUGAR
+    sim.press(PSP_CTRL_TRIANGLE);  // JUGAR
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "partida con llama");
     sim.app().testForceLlama(false);
     check(landAndEquip(sim), "salto, aterrizaje y equipo");
@@ -1644,16 +1913,15 @@ int main(int argc, char** argv) {
     // Parche F. El perfil de antes de probar a borrarlo es el que se comprueba en la seccion 8.
     testTextsFit();
     testSettingsAndEnglish(sim, outDir);
+    testUpdate013(sim, outDir);
     const app::Profile played = sim.app().testProfile();
     testDeleteData(sim, outDir, profilePath);
 
     printf("\n7) Salir desde el lobby\n");
-    sim.press(PSP_CTRL_DOWN);
-    sim.press(PSP_CTRL_DOWN);
-    sim.press(PSP_CTRL_CROSS);
+    sim.press(PSP_CTRL_CIRCLE);
     sim.wait(0.2f);
     sim.shot("21_salir");
-    check(!sim.app().exitRequested(), "SALIR pide confirmacion");
+    check(!sim.app().exitRequested(), "CIRCULO (SALIR) pide confirmacion");
     sim.press(PSP_CTRL_CROSS);
     check(sim.app().exitRequested(), "X en la confirmacion cierra el juego");
 

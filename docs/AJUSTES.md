@@ -19,6 +19,7 @@ restaurar, idioma, borrar). Todo se aplica al momento y se guarda al cerrar.
 | Controles | Saltar, construir, recargar/recoger/material, pico, disparar/usar/colocar, apuntar, agacharse, bailar | X espera el nuevo botón (START cancela). Solo X, O, □, △, L, R, ↑, ↓; si otro lo tenía, se **intercambian** (nunca dos acciones en el mismo). "Restaurar predeterminados". Fijos: cruceta ←/→, SELECT, START, L+SELECT y L+R+START |
 | Idioma | Español / English | Toda la interfaz al momento (textos y rótulos) |
 | Datos | Borrar datos del jugador | Ver abajo |
+| Admin (v0.13) | Contraseña / Abrir MOD MENU / Bloquear | Con la contraseña se desbloquea el menú de trucos; ver [ACTUALIZACION_0_13.md](ACTUALIZACION_0_13.md#10-menú-de-administrador-mod-menu). Se guarda `admin=1` y `truco_<clave>=1` |
 
 Ninguna opción necesita reiniciar la partida (el menú solo se abre en el lobby). Todas las
 ayudas de botones de la partida, la página de controles y los consejos de carga muestran el

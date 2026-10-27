@@ -5,9 +5,10 @@ Sección **TAQUILLA** del lobby, según `Referencias/locker.jpg`: rejilla de cat
 del objeto ("rareza | categoría" y nombre). Cruceta para elegir la categoría, X para
 entrar, arriba/abajo para elegir objeto, X para equiparlo, CÍRCULO para volver.
 
-De momento solo hay los objetos **por defecto** (traje "Recluta", pico, ala delta y
-baile). Mochila y envoltorio están vacías y lo indican ("aún no hay objetos; llegarán en
-una actualización"). No hay tienda, monedas ni compras.
+Están los objetos **por defecto** (traje "Recluta", pico, ala delta y baile) y, desde la
+v0.13, los trajes de los personajes de la CPU que se hayan comprado en la **TIENDA** con
+pavos ([TIENDA.md](TIENDA.md)); solo sale lo que se tiene. Mochila y envoltorio están
+vacías y lo indican ("aún no hay objetos; llegarán en una actualización").
 
 Lo equipado se guarda en `perfil.txt` (`equipado_<categoría>=<clave>`); si una clave no
 existe en el catálogo (o no es de esa categoría) se usa el objeto por defecto.

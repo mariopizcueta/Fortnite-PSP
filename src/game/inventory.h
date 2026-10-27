@@ -108,6 +108,8 @@ public:
     }
     // Quita y devuelve el contenido de una ranura.
     InventorySlot take(int index);
+    // Intercambia el contenido de dos ranuras (cada arma con su cargador).
+    void swapSlots(int a, int b);
 
     const InventorySlot& slot(int i) const { return m_slots[i]; }
     InventorySlot& mutableSlot(int i) { return m_slots[i]; }

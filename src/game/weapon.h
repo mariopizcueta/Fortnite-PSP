@@ -17,6 +17,9 @@ namespace game {
 // Proyectiles (lanzacohetes, lanzagranadas, granada de mano): vuelan con su velocidad (y
 // gravedad las granadas) y explotan con dano en un radio (ver game::Match).
 enum class ProjectileKind : u8 { None, Rocket, LauncherGrenade, HandGrenade };
+// Gravedad de las granadas (m/s^2; algo menos que la de los personajes: mas alcance). La usa
+// tambien la mira del lanzagranadas para marcar la caida.
+constexpr float kGrenadeGravity = 20.0f;
 
 struct WeaponConfig {
     const char* name = "SCAR";
@@ -86,6 +89,16 @@ public:
 
     // Anade un retardo extra antes del siguiente disparo (los bots varian su cadencia).
     void addCooldown(float seconds) { m_cooldown += seconds; }
+
+    // Trucos del menu de administrador: la recarga en curso termina en el siguiente paso,
+    // el cargador se llena sin gastar reserva y la espera entre disparos se acorta.
+    void finishReload() {
+        if (m_reloadTimer > 0.0f) m_reloadTimer = 1e-6f;
+    }
+    void fillMagazine() { m_ammo = m_config.magazineSize; }
+    void scaleCooldown(float factor) {
+        if (m_cooldown > 0.0f) m_cooldown *= factor;
+    }
 
     const WeaponConfig& config() const { return m_config; }
     int ammo() const { return m_ammo; }

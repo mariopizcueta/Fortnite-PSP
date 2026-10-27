@@ -41,6 +41,8 @@ cada impacto resta el daño del arma. Las que llegan a 0 quedan eliminadas:
 | Desplazarse     | Desplazarse   | Sigue el camino, recortando esquinas si el tramo siguiente está libre |
 | Buscar objetivo | Buscar obj.   | Al llegar, se para 2–4 s girando: visión de 360°               |
 | Atacar          | Atacar        | Encara al objetivo, se mueve de lado, se aleja si está a menos de 7 m, se acerca si está a más de 26 m y dispara |
+| Picar (v0.13)   | Picar         | Sin materiales y sin nadie cerca, pica el objeto del mapa más cercano hasta tener 120 |
+| Huir (v0.13)    | Huir          | Con poca vida: se aleja a donde no le vean, se cubre con una pared y se cura (o busca curas); acorralado (< 5 m), pelea |
 | Eliminado       | Eliminado     | Nada                                                           |
 
 **Transiciones:**

@@ -17,6 +17,7 @@ struct PlayerInput {
     bool jumpPressed = false; // flanco de pulsacion (se guarda unos ms en un buffer)
     bool jumpHeld = false;    // soltar pronto corta el salto (salto variable)
     bool aiming = false;      // disparando o fijando objetivo: el cuerpo mira con la camara
+    bool crouchHeld = false;  // boton de agacharse mantenido (truco de volar: bajar)
 };
 
 // Convierte la entrada del jugador en una intencion de movimiento.

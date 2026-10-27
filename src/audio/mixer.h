@@ -18,7 +18,10 @@ enum class Sfx : u8 {
     MenuMove, MenuAccept, Victory, Defeat, Pickaxe, Heal,
     PlayerDeath, DrinkSmallShield, DrinkShieldPotion, Footstep, StormWarning,
     ChestOpen, ChestHum, BusJump, GliderOpen, SniperShot, ShotgunShot, SmgShot, Pickup, Dance,
-    PistolShot, RocketLaunch, GrenadeLaunch, GrenadeThrow, Explosion, AmmoBoxOpen, LlamaOpen, TrapTrigger, Count
+    PistolShot, RocketLaunch, GrenadeLaunch, GrenadeThrow, Explosion, AmmoBoxOpen, LlamaOpen, TrapTrigger,
+    // v0.13.
+    RevolverShot, PumpShotgunShot, MedkitUse, BandageUse, ReloadRifle, ReloadShotgun, ReloadTactical, ReloadSmg,
+    ReloadPistol, ReloadRevolver, ReloadSniper, ReloadGrenadeLauncher, ReloadRocket, Count
 };
 
 class Mixer {

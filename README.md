@@ -7,8 +7,18 @@ Releases trae la carpeta `PSP/GAME/FortnitePSP/` lista; se copia a la raíz de l
 (`ms0:/`) y el juego aparece en *Juego → Memory Stick* del XMB. La primera vez pide el idioma
 (español o inglés) y luego el nombre de jugador.
 
-**Estado: fase 8, parche de mecánicas y contenido (armas nuevas con modelos 3D, explosivos,
-trampas, llama, animaciones a dos manos, logros, taquilla, ajustes e inglés), v0.12.1.**
+**Actualizar sin perder los datos:** el perfil (`perfil.txt`: nombre, estadísticas, logros,
+pavos y compras) y los ajustes (`ajustes.txt`) están en `ms0:/PSP/GAME/FortnitePSP/`, junto al
+EBOOT, y el zip no los trae. Basta con copiar **solo el `EBOOT.PBP`** nuevo encima del viejo
+en esa carpeta; no hay que borrar ni sustituir la carpeta entera (en el Mac, "Reemplazar" una
+carpeta borra lo que tenía dentro). Por si acaso, antes se pueden copiar esos dos `.txt` al
+ordenador.
+
+**Estado: v0.13.0: armas que rompen el mapa, inventario con L + R, pavos y tienda, bots que
+pican, se cubren, huyen y se curan, menú de administrador y modo Monodisparo.** Detalle en
+[docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md). Antes, fase 8, parche de mecánicas y
+contenido (armas nuevas con modelos 3D, explosivos, trampas, llama, animaciones a dos manos,
+logros, taquilla, ajustes e inglés), v0.12.1.
 Detalle del parche en [docs/PARCHE.md](docs/PARCHE.md). Antes (fase 7): botín, autobús, ala
 delta, airdrops, bots que cazan y construyen, tormenta que se cierra, suelos, rampas, mirilla,
 mapa destruible, perfil guardado, headshots, agacharse, bailar y mapa.
@@ -40,6 +50,28 @@ Novedades del parche:
 de host. No son capturas de una PSP.*
 
 ## Qué incluye
+
+**v0.13.0** (todo en [docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md)):
+- **Combate:** las balas rompen los objetos del mapa (naves, contenedores, cajas, árboles…).
+  Número de daño **azul** si el rival tenía escudo. Mira en cruz simétrica, la de la escopeta
+  táctica igual que la de corredera y la del lanzagranadas con las marcas de caída.
+- **Inventario (L + R a la vez):** mover objetos entre ranuras, soltarlos y llevarlos a la mano.
+- **Pavos y tienda:** 50 por victoria y 50 por logro (los de antes se recogen en LOGROS);
+  sección TIENDA con los trajes de los bots (poco comunes, 800 pavos). Ver
+  [docs/TIENDA.md](docs/TIENDA.md).
+- **Bots:** aterrizan sin materiales y pican cuando les faltan; abren cofres y cambian de arma
+  hasta tener un inventario completo; con poca vida huyen, se cubren y se curan (o buscan curas).
+- **Sonidos:** pistola, revólver, escopeta de corredera, lanzacohetes, botiquín y vendas de
+  `Sonidos Limpios`; una recarga distinta por familia de arma.
+- **Lobby:** TRIÁNGULO juega, CUADRADO elige el modo (Battle Royale / **Monodisparo**: solo
+  francotiradores, armas con mira y granadas) y los bots.
+- **Menú de administrador** en AJUSTES > ADMIN (con contraseña): mod menu con 23 trucos y
+  acciones, también desde la pausa.
+
+![Lobby](docs/capturas/app_v13_lobby.png)
+![Tienda](docs/capturas/app_v13_tienda.png)
+![Inventario](docs/capturas/app_v13_inventario.png)
+![Mod menu](docs/capturas/app_v13_mod_menu.png)
 
 **Fase 8 — parche (v0.12.1)** (todo en [docs/PARCHE.md](docs/PARCHE.md)):
 - **Inventario:** cambiar un objeto del suelo por la ranura que se elija (también con un
@@ -286,11 +318,14 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 | Pantalla          | Botón                  | Acción                                              |
 |-------------------|------------------------|-----------------------------------------------------|
 | Inicio de sesión  | **X**                  | Iniciar sesión (conexión simulada)                  |
-| Lobby             | **Cruceta ↑ ↓**        | Elegir JUGAR / CONTROLES / SALIR                    |
-| Lobby             | **Cruceta ← →**        | Sobre JUGAR: número de bots (5–30, por defecto 10)  |
-| Lobby             | **X**                  | Aceptar (SALIR pide confirmación: X sale, O cancela)|
+| Lobby (JUGAR)     | **TRIÁNGULO**          | Jugar                                               |
+| Lobby (JUGAR)     | **CUADRADO**           | Modo de juego y bots (panel: ↑↓ fila, ←→ valor; CUADRADO, X u O cierran) |
+| Lobby (JUGAR)     | **SELECT**             | Controles                                           |
+| Lobby (JUGAR)     | **CÍRCULO**            | Salir (pide confirmación: X sale, O cancela)        |
 | Lobby             | **Stick**              | Girar el personaje                                  |
-| Lobby             | **L / R**              | Secciones: JUGAR / LOGROS / TAQUILLA                |
+| Lobby             | **L / R**              | Secciones: JUGAR / LOGROS / TIENDA / TAQUILLA       |
+| Logros            | **↑ ↓ + X**            | Recorrer y recoger la recompensa (50 pavos)         |
+| Tienda            | **↑ ↓ + X**            | Elegir y comprar (con confirmación) o equipar lo comprado |
 | Lobby             | **START**              | Ajustes (modal: L/R secciones del menú, ↑↓ opción, ←→ valor, X activar, O o START cerrar) |
 | Taquilla          | **Cruceta + X**        | Elegir categoría y equipar (O vuelve)               |
 | Controles         | **O**                  | Volver al lobby                                     |
@@ -310,6 +345,7 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 | Siempre       | **SELECT**                             | Mapa a pantalla completa (L + SELECT: páginas del HUD) |
 | Siempre       | **L (mantener)**                       | Apuntar: con un enemigo a la vista gira la cámara hacia él (el stick mueve de lado); sin él, el stick mueve la mira |
 | Combate       | **Cruceta ← →**                        | Cambiar de ranura del inventario             |
+| Combate       | **L + R a la vez**                     | Inventario: ←→ elegir, X mover, □ soltar, △ a la mano, O cerrar |
 | Combate       | **TRIÁNGULO**                          | Sacar / guardar el pico                      |
 | Combate       | **R**                                  | Disparar (arma), golpear (pico, mantener) o usar (consumible) |
 | Combate       | **CUADRADO**                           | Abrir / recoger lo que haya al alcance; si no, recargar |
@@ -373,6 +409,8 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 
 ```
 Makefile                     Build basado en build.mak de PSPSDK
+docs/ACTUALIZACION_0_13.md   v0.13: mapa que se rompe, inventario, pavos, IA, admin, Monodisparo
+docs/TIENDA.md               Pavos, recompensas y tienda de objetos (v0.13)
 docs/PRESENTACION.md         Pantallas, HUD, estilo, animaciones, sonido, memoria (fase 6)
 docs/INVENTARIO.md           Inventario, escudo, curas, pico y materiales (fase 7)
 docs/BOTIN.md                Armas, botin, autobus, ala delta, airdrops y bots de la fase 7
@@ -439,6 +477,9 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
+- **v0.13.0: `make app-sim` 0 fallos en 164 comprobaciones, `make match-sim` 0 fallos en
+  206, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 10 (app-sim) y 19
+  (match-sim); ver [docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md).
 - **`make app-sim`: 0 fallos en 92 comprobaciones.** Es la aplicación real, con mando,
   reloj y audio simulados.
   - **Controles de la fase 7:** cruceta, consumibles, pico frente a un árbol, cámara que

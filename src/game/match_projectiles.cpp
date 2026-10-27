@@ -23,18 +23,10 @@ using namespace detail;
 
 namespace {
 
-constexpr float kGrenadeGravity = 20.0f;   // m/s^2 (algo menos que los personajes: mas alcance)
 constexpr float kBounce = 0.45f;           // velocidad que conserva al rebotar
 constexpr float kGrenadeRadius = 0.08f;    // para no atravesar el suelo
 constexpr float kOwnerGrace = 0.15f;       // s en que el proyectil no toca a quien lo lanza
 constexpr float kExplosionEdge = 0.4f;     // fraccion del dano en el borde del radio
-
-// Distancia de un punto a una caja (0 dentro).
-float distanceToBox(const Vec3& p, const world::Aabb& b) {
-    const Vec3 c{math3d::clampf(p.x, b.min.x, b.max.x), math3d::clampf(p.y, b.min.y, b.max.y),
-                 math3d::clampf(p.z, b.min.z, b.max.z)};
-    return math3d::length(p - c);
-}
 
 }  // namespace
 
@@ -99,7 +91,7 @@ bool Match::throwGrenade() {
     const Vec3 dir = horizontal * c + Vec3{0.0f, sinf(theta), 0.0f};
     g.projectileSpeed = speed;
     if (spawnProjectile(0, from + dir * 0.3f, dir, g, 1.0f, static_cast<int>(ItemType::Grenade)) < 0) return false;
-    m_inventory.consumeOne(slot);
+    if (!m_config.cheats.infiniteAmmo) m_inventory.consumeOne(slot);
     m_throwCooldown = 0.8f;
     pushEvent(GameEventType::Thrown, 0, static_cast<int>(ItemType::Grenade), from);
     return true;
@@ -206,6 +198,7 @@ void Match::explode(const Vec3& at, int owner, float damage, float radius, float
     visual.radius = radius;
     visual.age = 0.0f;
     if (radius <= 0.0f) return;
+    if (owner == 0 && m_config.cheats.oneShot) damage *= 10.0f;
 
     // Personajes: dano segun la distancia a su caja, si se ven desde el centro.
     for (int id = 0; id < entityCount(); ++id) {
@@ -222,7 +215,7 @@ void Match::explode(const Vec3& at, int owner, float damage, float radius, float
         const float amount = damage * (1.0f - (1.0f - kExplosionEdge) * (d / radius));
         if (owner == 0) {
             m_sincePlayerHit = 0.0f;
-            if (id != 0) addDamageNumber(chest, amount, false);
+            if (id != 0) addDamageNumber(chest, amount, false, false, body(id).state().shield > 0.0f);
         }
         pushEvent(GameEventType::HitEntity, id, owner, chest);
         m_damageSource = weaponType;

@@ -44,6 +44,13 @@ struct MoveIntent {
     // (0 = las normales). Caida libre ~13 y 20 m/s; ala delta ~10 y 6 m/s.
     float airSpeed = 0.0f;
     float fallSpeed = 0.0f;
+    // Trucos del menu de administrador (solo el jugador): velocidad maxima, impulso del
+    // salto y gravedad multiplicados, y vuelo (sin gravedad; flyVertical -1..1 baja o sube).
+    float maxSpeedScale = 1.0f;
+    float jumpScale = 1.0f;
+    float gravityScale = 1.0f;
+    bool fly = false;
+    float flyVertical = 0.0f;
 };
 
 namespace tuning {

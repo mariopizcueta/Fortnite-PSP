@@ -7,6 +7,10 @@
 //   Desplazarse     sigue el camino; si se atasca, se aparta, salta o replanifica
 //   BuscarObjetivo  se para y gira mirando alrededor (vision de 360 grados)
 //   Atacar          encara al objetivo, se mueve de lado y dispara con dispersion
+//   Picar           (v0.13) sin materiales y sin nadie cerca: va a un objeto del mapa y lo
+//                   pica con el pico hasta tener bastantes
+//   Huir            (v0.13) con poca vida: se aleja a donde el rival no le vea, se cubre
+//                   con una pared y se cura (o busca curas); solo pelea si le acorralan
 //   Eliminado       no actua, no colisiona y no se le puede disparar
 //
 // La IA "piensa" (percepcion + cambios de estado + caminos) solo cada
@@ -19,7 +23,7 @@
 
 namespace game {
 
-enum class BotState { Explore, Travel, Search, Attack, Loot, Eliminated };
+enum class BotState { Explore, Travel, Search, Attack, Loot, Harvest, Flee, Eliminated };
 
 const char* botStateName(BotState state);
 
@@ -60,8 +64,14 @@ struct Bot {
     math3d::Vec3 landingTarget;
     float glideHeight = 26.0f;   // altura a la que abre el ala delta
 
-    // Construccion: levanta una pared hacia quien le dispara.
+    // Construccion: levanta una pared hacia quien le dispara (gastando sus materiales).
     float wallCooldown = 0.0f;
+    Materials materials;         // aterriza sin nada: los consigue picando (o de los caidos)
+    int harvestObject = -1;      // objeto del mapa que va a picar (BotState::Harvest)
+    float swingTimer = 0.0f;
+    // Huida con poca vida: de quien huye, cuanto lleva huyendo y desde cuando no le dan.
+    int threat = -1;
+    float sinceHurt = 99.0f;
     float meleeTimer = 0.0f;     // sin arma: golpes de pico
     int coverFrom = -1;          // le han disparado: en su siguiente paso se cubre de este
     float strafeTimer = 0.0f;

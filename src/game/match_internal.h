@@ -50,6 +50,13 @@ inline Vec3 perturb(const Vec3& dir, float spread, core::Random& rng) {
     return math3d::normalize(dir * cosf(angle) + offset * sinf(angle));
 }
 
+// Punto de la caja mas cercano a `p` y distancia de `p` a la caja (0 dentro).
+inline Vec3 closestOnBox(const Vec3& p, const world::Aabb& b) {
+    return {math3d::clampf(p.x, b.min.x, b.max.x), math3d::clampf(p.y, b.min.y, b.max.y),
+            math3d::clampf(p.z, b.min.z, b.max.z)};
+}
+inline float distanceToBox(const Vec3& p, const world::Aabb& b) { return math3d::length(p - closestOnBox(p, b)); }
+
 inline world::Aabb bodyBoxAt(const Vec3& feet) {
     return {{feet.x - kBodyRadius, feet.y + kStepHeight, feet.z - kBodyRadius},
             {feet.x + kBodyRadius, feet.y + kBodyHeight, feet.z + kBodyRadius}};

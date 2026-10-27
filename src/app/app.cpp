@@ -37,6 +37,9 @@ constexpr Vec3 kPlayerSpawn{0.0f, 0.0f, 24.0f};
 constexpr float kPlayerSpawnYaw = 0.0f;
 
 constexpr int kMinimapSize = 128;  // texeles por lado: 192 m / 128 = 1.5 m por texel
+// L + R "en seco": las dos pulsaciones a la vez (como mucho 4 frames entre una y otra). Si
+// una ya estaba mantenida de antes, no cuenta.
+constexpr float kChordWindow = 0.07f;
 
 unsigned heapInUse() {
     const struct mallinfo mem = mallinfo();
@@ -199,6 +202,26 @@ void App::startMatch() {
     // Semilla distinta en cada partida (el reloj del sistema).
     m_matchConfig.seed = static_cast<u32>(core::nowMicros()) ^ (0x9E3779B9u * ++m_matchesPlayed);
     m_matchConfig.forceLlama = m_testForceLlama;
+    m_matchConfig.mode = m_gameMode;
+    // Trucos del menu de administrador (solo si esta desbloqueado).
+    m_matchConfig.cheats = m_settings.admin ? m_settings.cheats : game::Cheats{};
+    m_matchConfig.forceLlama |= m_matchConfig.cheats.alwaysLlama;
+    if (m_matchConfig.cheats.legendaryKit) {
+        // Kit legendario: lo mejor de cada familia (en Monodisparo, de las suyas), curas,
+        // municion y materiales.
+        using game::ItemType;
+        using game::Rarity;
+        const bool oneShot = m_gameMode == game::GameMode::OneShot;
+        m_matchConfig.startItems[0] = {oneShot ? ItemType::Sniper : ItemType::AssaultRifle, 1, Rarity::Legendary};
+        m_matchConfig.startItems[1] = {oneShot ? ItemType::ScopedRifle : ItemType::Shotgun, 1,
+                                       oneShot ? Rarity::Epic : Rarity::Legendary};
+        m_matchConfig.startItems[2] = {oneShot ? ItemType::Grenade : ItemType::RocketLauncher, oneShot ? 6 : 1,
+                                       oneShot ? Rarity::Common : Rarity::Legendary};
+        m_matchConfig.startItems[3] = {ItemType::ShieldPotion, 3, Rarity::Rare};
+        m_matchConfig.startItems[4] = {ItemType::Medkit, 3, Rarity::Uncommon};
+        for (int a = 0; a < static_cast<int>(game::AmmoType::Count); ++a) m_matchConfig.startAmmo[a] = 120;
+        for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) m_matchConfig.startMaterials[r] = 500;
+    }
     m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(),
                   kPlayerSpawn, kPlayerSpawnYaw);
     m_match.setPlayerName(m_profile.name);
@@ -219,6 +242,11 @@ void App::startMatch() {
     m_freeCameraActive = false;
     m_lockTarget = -1;
     m_matchRecorded = false;
+    m_matchVbucks = 0;
+    m_inventoryOpen = false;
+    m_invHeld = -1;
+    m_lPressAge = m_rPressAge = 99.0f;
+    m_useSfx = m_reloadSfx = audio::Sfx::Count;
     m_mapOpen = false;
     m_swapOpen = false;
     m_wasScoped = false;
@@ -249,8 +277,15 @@ void App::goToLobby() {
     m_screen = Screen::Lobby;
     m_paused = false;
     m_results = Results::None;
-    m_lobbyItem = LobbyItem::Play;
     m_confirmExit = false;
+    m_modeOpen = false;
+    m_shopConfirm = false;
+    m_inventoryOpen = false;
+    m_modMenuOpen = false;
+    m_passwordOpen = false;
+    if (m_audioReady && m_useSfx != audio::Sfx::Count) audio::mixer().stop(m_useSfx);
+    if (m_audioReady && m_reloadSfx != audio::Sfx::Count) audio::mixer().stop(m_reloadSfx);
+    m_useSfx = m_reloadSfx = audio::Sfx::Count;
     if (m_audioReady) audio::mixer().playMusic(true);
 }
 
@@ -374,7 +409,31 @@ void App::updateGame(const input::Input& in, float dt) {
     const bool control = !overlay && !m_freeCameraActive && m_match.phase() == game::MatchPhase::Playing;
     // En el autobus o cayendo solo cuentan el stick y X (saltar / abrir el ala delta).
     const bool onGround = m_match.airState(0) == game::AirState::Ground;
-    const bool act = control && onGround;
+    // L + R a la vez: inventario (ordenar y soltar). Mientras esta abierto, el jugador no se
+    // mueve ni actua (la partida sigue). Mantener L y pulsar R despues (o al reves) no cuenta.
+    if (in.pressed(PSP_CTRL_LTRIGGER)) m_lPressAge = 0.0f;
+    if (in.pressed(PSP_CTRL_RTRIGGER)) m_rPressAge = 0.0f;
+    const bool chord = (in.pressed(PSP_CTRL_LTRIGGER) || in.pressed(PSP_CTRL_RTRIGGER)) && in.held(PSP_CTRL_LTRIGGER) &&
+                       in.held(PSP_CTRL_RTRIGGER) && !in.held(PSP_CTRL_START) &&
+                       fabsf(m_lPressAge - m_rPressAge) <= kChordWindow;
+    m_lPressAge += dt;
+    m_rPressAge += dt;
+    if (m_inventoryOpen && (!control || !onGround || !m_match.alive(0))) m_inventoryOpen = false;
+    // Lo que cierra el inventario (CIRCULO) no cuenta despues como accion de la partida.
+    const bool inventoryWasOpen = m_inventoryOpen;
+    if (chord && control && onGround) {
+        m_inventoryOpen = !m_inventoryOpen;
+        m_invCursor = m_match.inventory().selected();
+        m_invHeld = -1;
+        m_swapOpen = false;
+        m_buildMode = false;
+        m_dancing = false;
+        playSfx(audio::Sfx::MenuAccept, 0.6f);
+    } else if (m_inventoryOpen) {
+        updateInventoryScreen(in);
+    }
+    const bool inventory = inventoryWasOpen || m_inventoryOpen || chord;
+    const bool act = control && onGround && !inventory;
     if (!onGround) m_buildMode = false;
     game::PlayerCommands commands;
     const bool usingItem = m_match.useProgress() >= 0.0f;
@@ -449,13 +508,14 @@ void App::updateGame(const input::Input& in, float dt) {
     aim.eye = cameraEye();  // con la mirilla, desde la cabeza
     aim.direction = m_followCamera.lookDirection();
     commands.buildMode = m_buildMode;
-    if (control) {
+    if (control && !inventory) {
         if (!stickAims) {
             playerInput.moveX = in.analogX();
             playerInput.moveY = in.analogY();
         }
         playerInput.jumpPressed = in.pressed(kJump);
         playerInput.jumpHeld = in.held(kJump);
+        playerInput.crouchHeld = in.held(kCrouch);  // truco de volar: bajar
         playerInput.aiming = aimHeld;
         if (m_buildMode) {
             // Una pieza por pulsacion; con la cuarta, una trampa donde apunta la mira.
@@ -491,13 +551,22 @@ void App::updateGame(const input::Input& in, float dt) {
     playerInput.cameraYaw = m_followCamera.yaw();
     m_match.setPlayerInput(playerInput, aim, commands);
 
-    // 2) Simulacion en pasos fijos de 1/60 s, independiente de los FPS.
-    const int steps = m_timestep.advance(dt);
+    // 2) Simulacion en pasos fijos de 1/60 s, independiente de los FPS. Truco "tiempo bala":
+    // todo avanza a la mitad.
+    const int steps = m_timestep.advance(m_match.cheats().slowMotion ? dt * 0.5f : dt);
     for (int i = 0; i < steps; ++i) m_match.step(game::FixedTimestep::kStep);
 
     // 3) Sucesos de la partida -> sonido y reacciones de las animaciones.
     m_harvestAge += dt;
     processEvents();
+    // La recarga se ha interrumpido (otra ranura, el pico, construir...): su sonido se corta.
+    if (m_reloadSfx != audio::Sfx::Count) {
+        const game::Weapon* w = m_match.inventory().activeWeapon();
+        if (!w || !w->reloading()) {
+            if (m_audioReady) audio::mixer().stop(m_reloadSfx);
+            m_reloadSfx = audio::Sfx::Count;
+        }
+    }
 
     // 4) Animaciones (visuales, con el tiempo de frame). Los eliminados tambien: caen.
     {
@@ -673,6 +742,8 @@ audio::Sfx App::shotSound(int weaponType) {
         case game::ItemType::Sniper: return audio::Sfx::SniperShot;
         case game::ItemType::RocketLauncher: return audio::Sfx::RocketLaunch;
         case game::ItemType::GrenadeLauncher: return audio::Sfx::GrenadeLaunch;
+        case game::ItemType::Revolver: return audio::Sfx::RevolverShot;     // grabaciones (v0.13)
+        case game::ItemType::Shotgun: return audio::Sfx::PumpShotgunShot;  // disparo y corredera
         default: break;
     }
     switch (game::weaponClass(type)) {
@@ -681,6 +752,26 @@ audio::Sfx App::shotSound(int weaponType) {
         case game::WeaponClass::Sniper: return audio::Sfx::SniperShot;  // semiautomatico
         case game::WeaponClass::Pistol: return audio::Sfx::PistolShot;
         default: return audio::Sfx::Shot;  // fusiles (y bots con las reglas clasicas)
+    }
+}
+
+audio::Sfx App::reloadSound(int weaponType) {
+    // Cada familia con su recarga (v0.13); el lanzacohetes, la de su grabacion.
+    const game::ItemType type = static_cast<game::ItemType>(weaponType);
+    switch (type) {
+        case game::ItemType::Shotgun: return audio::Sfx::ReloadShotgun;
+        case game::ItemType::TacticalShotgun: return audio::Sfx::ReloadTactical;
+        case game::ItemType::Revolver: return audio::Sfx::ReloadRevolver;
+        case game::ItemType::RocketLauncher: return audio::Sfx::ReloadRocket;
+        case game::ItemType::GrenadeLauncher: return audio::Sfx::ReloadGrenadeLauncher;
+        default: break;
+    }
+    switch (game::weaponClass(type)) {
+        case game::WeaponClass::Rifle: return audio::Sfx::ReloadRifle;
+        case game::WeaponClass::Smg: return audio::Sfx::ReloadSmg;
+        case game::WeaponClass::Pistol: return audio::Sfx::ReloadPistol;
+        case game::WeaponClass::Sniper: return audio::Sfx::ReloadSniper;
+        default: return audio::Sfx::Reload;
     }
 }
 
@@ -896,7 +987,9 @@ void App::processEvents() {
                 if (e.other == 0) playSpatial(audio::Sfx::WallBreak, e.position, 0.9f);  // la rompe el jugador
                 break;
             case game::GameEventType::Reload:
-                playSfx(audio::Sfx::Reload, 0.8f);
+                if (m_audioReady && m_reloadSfx != audio::Sfx::Count) audio::mixer().stop(m_reloadSfx);
+                m_reloadSfx = reloadSound(e.other);
+                playSfx(m_reloadSfx, 0.85f);
                 break;
             case game::GameEventType::StormEnter:
                 if (e.entity == 0) playSfx(audio::Sfx::StormWarning, 1.0f);
@@ -906,6 +999,12 @@ void App::processEvents() {
                 m_stormMessage = 4.0f;
                 break;
             case game::GameEventType::PickaxeSwing:
+                if (e.entity > 0) {
+                    // Un bot picando (v0.13): se oye cerca.
+                    m_botAnims[e.entity - 1].onSwing();
+                    playSpatial(audio::Sfx::Pickaxe, e.position, 0.55f);
+                    break;
+                }
                 m_playerAnim.onSwing();
                 if (e.other == 1) playSfx(audio::Sfx::Pickaxe, 0.9f);
                 break;
@@ -917,21 +1016,34 @@ void App::processEvents() {
                 break;
             case game::GameEventType::ItemUsed:
                 if (e.entity == 0) addStat(Stat::ItemsUsed, 1);
-                // Las pociones de escudo ya suenan mientras se beben (Sonidos Limpios).
+                // Las pociones, las vendas y el botiquin ya suenan mientras se usan (Sonidos
+                // Limpios): al terminar se corta lo que quede y suena la cura.
+                if (m_audioReady && m_useSfx != audio::Sfx::Count && m_useSfx != audio::Sfx::DrinkSmallShield &&
+                    m_useSfx != audio::Sfx::DrinkShieldPotion) {
+                    audio::mixer().stop(m_useSfx);
+                }
+                m_useSfx = audio::Sfx::Count;
                 if (e.other == static_cast<int>(game::ItemType::Bandage) ||
                     e.other == static_cast<int>(game::ItemType::Medkit)) {
-                    playSfx(audio::Sfx::Heal, 0.9f);
+                    playSfx(audio::Sfx::Heal, 0.6f);
                 }
                 break;
             case game::GameEventType::UseStarted:
             case game::GameEventType::UseCanceled: {
-                const audio::Sfx drink = e.other == static_cast<int>(game::ItemType::SmallShield) ? audio::Sfx::DrinkSmallShield
-                                         : e.other == static_cast<int>(game::ItemType::ShieldPotion)
-                                             ? audio::Sfx::DrinkShieldPotion
-                                             : audio::Sfx::Count;
-                if (drink == audio::Sfx::Count || !m_audioReady) break;
-                if (e.type == game::GameEventType::UseStarted) playSfx(drink, 0.9f);
-                else audio::mixer().stop(drink);
+                const game::ItemType item = static_cast<game::ItemType>(e.other);
+                const audio::Sfx use = item == game::ItemType::SmallShield    ? audio::Sfx::DrinkSmallShield
+                                       : item == game::ItemType::ShieldPotion ? audio::Sfx::DrinkShieldPotion
+                                       : item == game::ItemType::Medkit       ? audio::Sfx::MedkitUse
+                                       : item == game::ItemType::Bandage      ? audio::Sfx::BandageUse
+                                                                              : audio::Sfx::Count;
+                if (use == audio::Sfx::Count || !m_audioReady) break;
+                if (e.type == game::GameEventType::UseStarted) {
+                    playSfx(use, 0.9f);
+                    m_useSfx = use;
+                } else {
+                    audio::mixer().stop(use);
+                    m_useSfx = audio::Sfx::Count;
+                }
                 break;
             }
         }
@@ -1075,9 +1187,10 @@ void App::renderOverlay(const FrameInfo& frame) const {
         case Screen::Controls: overlayControlsScreen(frame); break;
         case Screen::Loading: overlayLoading(); break;
         case Screen::Game:
+            // En pausa solo su texto (el del HUD atravesaria el panel: va por CPU encima).
             if (m_results != Results::None) {
                 overlayResults();
-            } else {
+            } else if (!m_paused) {
                 overlayGame(frame);
             }
             if (m_paused) overlayPause();
@@ -1177,6 +1290,8 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
             default:
                 if (id == 0 && m_dancing) return game::BodyPose::Dance;
                 if (id == 0 && m_match.playerCrouched()) return game::BodyPose::Crouch;
+                // Truco "fiesta": los bots vivos bailan.
+                if (id > 0 && m_match.cheats().partyBots && m_match.alive(id)) return game::BodyPose::Dance;
                 return game::BodyPose::Normal;
         }
     };
@@ -1204,8 +1319,10 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         const bool far = math3d::length(s.position - eye) > m_settings.lodDistance();
         const game::CharacterModel& model = m_models[1 + b.palette % 3];
         // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
-        const game::ItemModel held = b.healTimer > 0.0f && b.healSlot >= 0 ? game::itemModelFor(b.bag.slot(b.healSlot).type)
-                                     : !b.armed                             ? game::ItemModel::Pickaxe
+        const bool partying = m_match.cheats().partyBots && !eliminated;
+        const game::ItemModel held = partying                                ? game::ItemModel::None
+                                     : b.healTimer > 0.0f && b.healSlot >= 0 ? game::itemModelFor(b.bag.slot(b.healSlot).type)
+                                     : !b.armed || b.state == game::BotState::Harvest ? game::ItemModel::Pickaxe
                                      : b.weaponType == game::ItemType::None ? game::ItemModel::AssaultRifle
                                                                             : game::itemModelFor(b.weaponType, b.weaponRarity);
         model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id), &m_items);

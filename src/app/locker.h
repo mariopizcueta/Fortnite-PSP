@@ -1,9 +1,7 @@
 // Taquilla (parche, fase 8; docs/TAQUILLA.md): categorias de objetos cosmeticos y su
-// catalogo. De momento solo estan los objetos por defecto (el traje del jugador, el pico,
-// el ala delta y el baile): la personalizacion de skins llegara en una actualizacion. La
-// estructura ya permite anadir objetos y equiparlos (se guarda en el perfil).
-//
-// Sin tienda, monedas ni compras: todo lo del catalogo esta disponible.
+// catalogo: los objetos por defecto (el traje del jugador, el pico, el ala delta y el
+// baile) y, desde la v0.13, los trajes de los personajes de la CPU, que se compran en la
+// TIENDA con pavos (docs/TIENDA.md). Lo equipado y lo comprado se guarda en el perfil.
 #pragma once
 
 #include "core/i18n.h"
@@ -22,6 +20,7 @@ struct Cosmetic {
     game::Rarity rarity;
     // Trajes: la paleta del modelo del personaje (character_model.h). nullptr en el resto.
     const game::CharacterPalette* palette;
+    int price;  // pavos en la tienda (0: gratis, se tiene desde el principio)
 };
 
 i18n::T cosmeticSlotName(CosmeticSlot slot);
@@ -34,5 +33,9 @@ int cosmeticsIn(CosmeticSlot slot, int* out, int max);
 // Por clave (o nullptr). El de por defecto de una categoria (o nullptr si esta vacia).
 const Cosmetic* findCosmetic(const char* key);
 const Cosmetic* defaultCosmetic(CosmeticSlot slot);
+// Objetos de la tienda (los que tienen precio), indices del catalogo. Devuelve cuantos.
+int shopItems(int* out, int max);
+// Indice en el catalogo (o -1).
+int cosmeticIndex(const Cosmetic& item);
 
 }  // namespace app

@@ -204,7 +204,7 @@ TrapPlacement Match::planTrap(const PlayerAim& aim) const {
     int active = 0;
     for (const Trap& t : m_traps) active += t.active ? 1 : 0;
     if (active >= kMaxTraps) p.error = TrapError::LimitReached;
-    else if (m_trapStock <= 0) p.error = TrapError::NoTraps;
+    else if (m_trapStock <= 0 && !m_config.cheats.infiniteMaterials) p.error = TrapError::NoTraps;
     else p.error = TrapError::None;
     p.valid = p.error == TrapError::None;
     return p;
@@ -222,7 +222,7 @@ int Match::placeTrap(const PlayerAim& aim) {
         t.owner = 0;
         if (p.wall >= 0) t.wallBox = m_structures.wall(p.wall).box;
         t.trigger = plateBox(p, reachFor(p.surface), 0.0f);
-        --m_trapStock;
+        if (!m_config.cheats.infiniteMaterials) --m_trapStock;
         pushEvent(GameEventType::TrapPlaced, 0, i, p.center);
         return i;
     }
@@ -267,7 +267,7 @@ void Match::updateTraps(float dt) {
             const int id = victims[k];
             if (t.owner == 0) {
                 m_sincePlayerHit = 0.0f;
-                addDamageNumber(chestOf(id), m_config.trapDamage, false);
+                addDamageNumber(chestOf(id), m_config.trapDamage, false, false, body(id).state().shield > 0.0f);
             }
             pushEvent(GameEventType::HitEntity, id, t.owner, chestOf(id));
             m_damageSource = static_cast<int>(ItemType::SpikeTrap);

@@ -39,6 +39,9 @@ struct Profile {
     int explosiveKills = 0;
     int itemsUsed = 0;
     AchievementState achievements[kAchievementCount];
+    // v0.13: pavos y trajes comprados en la tienda (bit = indice del catalogo).
+    int vbucks = 0;
+    u32 owned = 0;
     // Taquilla: clave del objeto equipado en cada categoria ("" = el de por defecto).
     char equipped[kCosmeticSlotCount][kMaxKey] = {};
 
@@ -49,6 +52,12 @@ struct Profile {
     // `out` los nuevos (como mucho `max`) y devuelve cuantos.
     int unlockReached(int date, AchievementId* out, int max);
     int unlockedCount() const;
+    // Logros completados cuya recompensa aun no se ha recogido; recoger uno suma sus pavos.
+    int claimableCount() const;
+    bool claim(AchievementId id);
+    // Tienda: lo que se tiene (lo gratis siempre) y comprar (false si no hay pavos).
+    bool owns(const Cosmetic& item) const;
+    bool buy(const Cosmetic& item);
     // Lo equipado en una categoria (o el objeto por defecto de la categoria).
     const Cosmetic* equippedIn(CosmeticSlot slot) const;
     void equip(const Cosmetic& item);

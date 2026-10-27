@@ -15,12 +15,24 @@
 #include <psptypes.h>
 
 #include "core/i18n.h"
+#include "game/match_config.h"
 
 namespace app {
 
 // Acciones de la partida que se pueden reasignar (mismo orden que ui::Button::Jump...).
 enum class Action : u8 { Jump, Build, Interact, Pickaxe, Fire, Aim, Crouch, Emote, Count };
 constexpr int kActionCount = static_cast<int>(Action::Count);
+
+// Trucos del menu de administrador (v0.13; ajustes > admin, con contrasena): clave en
+// ajustes.txt, textos del mod menu y el interruptor en game::Cheats.
+struct CheatDef {
+    const char* key;
+    i18n::T name;
+    i18n::T description;
+    bool game::Cheats::*flag;
+};
+int cheatCount();
+const CheatDef& cheatDef(int index);
 
 // Botones que se pueden asignar a las acciones: los 8 de la partida. Fijos (no se
 // reasignan): cruceta izquierda/derecha (objeto o pieza), SELECT (mapa), START (pausa), el
@@ -41,6 +53,9 @@ struct Settings {
     int deadzone = 20;          // % del recorrido del stick (10..35)
     bool invertY = false;
     u32 buttons[kActionCount];  // PSP_CTRL_* de cada accion
+    // Menu de administrador: desbloqueado con la contrasena y los trucos activos (se guardan).
+    bool admin = false;
+    game::Cheats cheats;
 
     Settings() { resetControls(); }
     void resetControls();

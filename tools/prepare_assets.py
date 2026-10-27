@@ -242,6 +242,18 @@ def minimap_label(words=("Polvorín", "Polvoriento")):
     return img
 
 
+def vbucks_icon(size):
+    """Moneda de pavos (dibujo original): circulo azul con borde claro y una V blanca."""
+    big = size * 4
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((2, 2, big - 3, big - 3), fill=(28, 92, 196, 255), outline=(210, 236, 255, 255), width=max(3, big // 12))
+    d.ellipse((big * 0.2, big * 0.14, big * 0.8, big * 0.5), fill=(70, 150, 236, 255))
+    v = [(0.27, 0.26), (0.42, 0.26), (0.5, 0.52), (0.58, 0.26), (0.73, 0.26), (0.57, 0.77), (0.43, 0.77)]
+    d.polygon([(x * big, y * big) for x, y in v], fill=(255, 255, 255, 255), outline=(16, 40, 96, 255))
+    return img.resize((size, size), Image.LANCZOS)
+
+
 def ui_atlas():
     victory = victory_banner()
     logo = alpha_crop(Image.open(RES / "fortnite_PNG25.png").convert("RGBA"))
@@ -276,6 +288,12 @@ def ui_atlas():
         "TabPlay": label("PLAY", 15, stroke=1),
         "TabAchievements": label("ACHIEVEMENTS", 15, stroke=1),
         "TabLocker": label("LOCKER", 15, stroke=1),
+        # v0.13: tienda, pavos y menu de administrador.
+        "TabTienda": label("TIENDA", 15, stroke=1),
+        "TabShop": label("SHOP", 15, stroke=1),
+        "Pavos": vbucks_icon(14),
+        "PavosBig": vbucks_icon(24),
+        "ModMenu": label("MOD MENU", 20),
         "Pico": icon("Pico.png", 26),
         "Pared": icon("Pared.png", 26),
         "Rampa": icon("Rampa.png", 26),
@@ -441,6 +459,17 @@ CLEAN_SOUNDS = {
     "ala_delta": ("Opertura ala delta.wav", None),
     "francotirador": ("Fortnite fusil de tirador de cerrojomp3.mp3", None),
     "baile": ("Fortnite bailemp3.mp3", None),                   # cruceta arriba (7.7 s, se repite)
+    # v0.13: sustituyen a los sintetizados (pistola) o son nuevos.
+    "pistola": ("pistoladisparo.wav", None),
+    "revolver": ("disparorevolver.wav", None),
+    "escopeta_corredera": ("pumpshotgun.wav", None),             # disparo y corredera de la escopeta
+    "botiquin": ("botiquín.wav", 10.0),                          # mientras se usa el botiquin (10 s)
+    "vendas": ("vendas.wav", 4.6),                               # mientras se usan las vendas
+}
+# Un fichero partido en dos: (fichero, inicio, fin) en segundos (fin None: hasta el final).
+SPLIT_SOUNDS = {
+    "cohete": ("disparoyrecargarocketlauncher.wav", 0.0, 1.9),         # disparo y vuelo del cohete
+    "recarga_cohete": ("disparoyrecargarocketlauncher.wav", 2.6, None),  # recarga del lanzacohetes
 }
 STEP_SOURCE = "Fortnite Running Sound Effect.wav"
 
@@ -503,6 +532,14 @@ def sounds():
             x = x.astype(np.int32)
         write_wav(out / f"{name}.wav", x, rate)
         print(f"  assets/sounds/{name}.wav  {len(x) / rate:.2f} s  (de Sonidos Limpios/{source})")
+    for name, (source, start, end) in SPLIT_SOUNDS.items():
+        x, rate = to_mono_22050(clean / source)
+        x = x[int(start * rate):int(end * rate) if end else len(x)].astype(np.float64)
+        x = trim_start(x.astype(np.int32)).astype(np.float64)
+        fade = int(0.15 * rate)
+        x[-fade:] *= np.linspace(1.0, 0.0, fade)
+        write_wav(out / f"{name}.wav", x.astype(np.int32), rate)
+        print(f"  assets/sounds/{name}.wav  {len(x) / rate:.2f} s  (de Sonidos Limpios/{source}, {start}-{end} s)")
     x, rate = to_mono_22050(clean / STEP_SOURCE)
     step, found = footstep(x)
     write_wav(out / "paso.wav", step, rate)
@@ -510,6 +547,14 @@ def sounds():
 
     for wav in sorted((RES / "Sonidos").glob("*.wav")):
         if wav.name == "main title song.wav":
+            continue
+        # Una grabacion con el mismo nombre en Sonidos Limpios (p. ej. recarga_fusil.wav o
+        # .mp3) sustituye al efecto sintetizado.
+        own = [f for f in (clean / f"{wav.stem}.wav", clean / f"{wav.stem}.mp3") if f.exists()]
+        if own:
+            x, rate = to_mono_22050(own[0])
+            write_wav(out / wav.name, trim_start(x), rate)
+            print(f"  assets/sounds/{wav.name}  {len(x) / rate:.2f} s  (de Sonidos Limpios/{own[0].name})")
             continue
         data, rate = read_wav(wav)
         assert data.shape[1] == 1 and rate == 22050, f"{wav.name}: se espera mono 22050 Hz"

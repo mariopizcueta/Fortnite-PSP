@@ -21,6 +21,8 @@ const char* botStateName(BotState state) {
         case BotState::Search: return i18n::tr(i18n::T::BotSearch);
         case BotState::Attack: return i18n::tr(i18n::T::BotAttack);
         case BotState::Loot: return i18n::tr(i18n::T::BotLoot);
+        case BotState::Harvest: return i18n::tr(i18n::T::BotHarvest);
+        case BotState::Flee: return i18n::tr(i18n::T::BotFlee);
         case BotState::Eliminated: return i18n::tr(i18n::T::BotEliminated);
     }
     return "?";
@@ -96,11 +98,14 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     if (m_harvestables) {
         // Todo vuelve a estar en pie: las cajas de lo destruido colisionan otra vez y la
         // navegacion de esas zonas se recalcula.
+        // (Tambien los que rompio otra partida que compartia el mundo: pruebas de host.)
         for (size_t i = 0; i < m_harvestables->size(); ++i) {
             const world::Harvestable& h = (*m_harvestables)[i];
             m_objectHealth[i] = h.health;
-            if (!m_objectDestroyed[i]) continue;
+            bool disabled = m_objectDestroyed[i] != 0;
+            for (int k = 0; k < h.colliderCount; ++k) disabled |= !m_world->staticEnabled(h.collider + k);
             m_objectDestroyed[i] = 0;
+            if (!disabled) continue;
             for (int k = 0; k < h.colliderCount; ++k) m_world->setStaticEnabled(h.collider + k, true);
             m_nav->updateRegion(*m_world, h.box);
         }
@@ -268,7 +273,7 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (commands.placeTrap) m_pendingTrap = true;
     m_buildPiece = commands.buildPiece;
     // Curandose no se puede agachar ni levantar (la animacion de uso no lo permite).
-    if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0) && m_useSlot < 0) {
+    if (commands.toggleCrouch && m_air[0] == AirState::Ground && alive(0) && m_useSlot < 0 && !m_config.cheats.fly) {
         m_playerCrouched = !m_playerCrouched;
     }
     if (commands.swapPickup >= 0 && commands.swapSlot >= 0) {
@@ -401,6 +406,21 @@ void Match::updatePlayer(float dt) {
     if (in.jumpPressed) m_playerCrouched = false;
     MoveIntent intent = playerIntent(in);
     if (m_playerCrouched) intent.speedScale *= m_config.crouchSpeed;
+    // Trucos de movimiento (menu de administrador).
+    const Cheats& cheats = m_config.cheats;
+    if (cheats.superSpeed) {
+        intent.speedScale *= 2.0f;
+        intent.maxSpeedScale = 2.0f;
+    }
+    if (cheats.superJump) intent.jumpScale = 1.75f;  // la altura crece con el cuadrado: x3
+    if (cheats.lowGravity) intent.gravityScale = 0.35f;
+    if (cheats.fly) {
+        // Volar: saltar (mantenido) sube y agacharse (mantenido) baja.
+        m_playerCrouched = false;
+        intent.fly = true;
+        intent.flyVertical = (in.jumpHeld ? 1.0f : 0.0f) - (in.crouchHeld ? 1.0f : 0.0f);
+        intent.jumpPressed = false;
+    }
     const u64 t0 = core::nowMicros();
     m_player.step(intent, dt, *m_world);
     m_stats.physicsMicros += core::nowMicros() - t0;
@@ -450,6 +470,7 @@ void Match::updatePlayerItems(float dt, bool reload) {
         weapon->setReserve(m_inventory.ammo(ammo));
         const bool wasReloading = weapon->reloading();
         if (reload) weapon->startReload();
+        if (m_config.cheats.noReload) weapon->finishReload();
         // Ayuda de punteria: bot visible mas centrado en un cono estrecho alrededor de la mira.
         const float range = weapon->config().range;
         const bool sniperScope = hasScope(m_inventory.activeType()) && m_input.aiming;
@@ -461,7 +482,9 @@ void Match::updatePlayerItems(float dt, bool reload) {
             const float spread = playerSpread(weapon->config());  // antes de tryFire (primer disparo)
             if (weapon->tryFire()) {
                 const WeaponConfig& w = weapon->config();
-                m_recoilBloom = fminf(m_recoilBloom + w.recoil, fmaxf(w.maxRecoil, m_recoilBloom));
+                if (!m_config.cheats.noSpread) m_recoilBloom = fminf(m_recoilBloom + w.recoil, fmaxf(w.maxRecoil, m_recoilBloom));
+                if (m_config.cheats.infiniteAmmo) weapon->fillMagazine();
+                if (m_config.cheats.rapidFire) weapon->scaleCooldown(0.33f);
                 const int type = static_cast<int>(m_inventory.activeType());
                 if (w.projectile != ProjectileKind::None) {
                     playerLaunch(w, spread, type);
@@ -472,7 +495,9 @@ void Match::updatePlayerItems(float dt, bool reload) {
                 }
             }
         }
-        if (!wasReloading && weapon->reloading()) pushEvent(GameEventType::Reload, 0, -1, chestOf(0));
+        if (!wasReloading && weapon->reloading()) {
+            pushEvent(GameEventType::Reload, 0, static_cast<int>(m_inventory.activeType()), chestOf(0));
+        }
         m_inventory.setAmmo(ammo, weapon->reserve());
         return;
     }
@@ -533,6 +558,66 @@ void Match::cancelUse() {
     m_useSlot = -1;
 }
 
+bool Match::moveSlot(int from, int to) {
+    if (from < 0 || to < 0 || from >= Inventory::kSlots || to >= Inventory::kSlots || from == to || !alive(0)) return false;
+    if (m_inventory.slot(from).type == ItemType::None && m_inventory.slot(to).type == ItemType::None) return false;
+    cancelUse();
+    if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
+    m_inventory.swapSlots(from, to);
+    // Lo que se llevaba en la mano sigue en la mano.
+    if (m_inventory.selected() == from) m_inventory.select(to);
+    else if (m_inventory.selected() == to) m_inventory.select(from);
+    return true;
+}
+
+bool Match::selectSlot(int slot) {
+    if (slot < 0 || slot >= Inventory::kSlots || !alive(0)) return false;
+    if (slot == m_inventory.selected() && !m_inventory.pickaxe()) return true;
+    cancelUse();
+    if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
+    m_inventory.setPickaxe(false);
+    m_inventory.select(slot);
+    return true;
+}
+
+bool Match::dropInventorySlot(int slot) {
+    if (slot < 0 || slot >= Inventory::kSlots || !alive(0) || m_air[0] != AirState::Ground) return false;
+    if (m_inventory.slot(slot).type == ItemType::None) return false;
+    if (m_useSlot == slot) cancelUse();
+    if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
+    const InventorySlot dropped = m_inventory.take(slot);
+    // Delante del jugador, como al soltarlo en Fortnite (se puede volver a recoger).
+    dropSlot(dropped, body(0).state().position + forwardFromYaw(m_input.cameraYaw) * 1.0f);
+    return true;
+}
+
+void Match::cheatHeal() {
+    if (!alive(0)) return;
+    CharacterState& s = m_player.state();
+    s.health = s.maxHealth;
+    s.shield = s.maxShield;
+}
+
+void Match::cheatEliminateBots() {
+    for (int id = 1; id < entityCount(); ++id) {
+        if (!alive(id)) continue;
+        m_damageSource = -1;
+        applyDamage(id, 100000.0f, 0, true);
+    }
+}
+
+void Match::cheatRefill() {
+    for (int a = 0; a < static_cast<int>(AmmoType::Count); ++a) m_inventory.setAmmo(static_cast<AmmoType>(a), Inventory::kMaxAmmo);
+    for (int i = 0; i < Inventory::kSlots; ++i) {
+        InventorySlot& slot = m_inventory.mutableSlot(i);
+        if (isWeapon(slot.type)) slot.weapon.fillMagazine();
+    }
+    for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
+        m_materials.add(static_cast<world::Resource>(r), Materials::kMax);
+    }
+    m_trapStock = m_config.maxTrapsCarried;
+}
+
 float Match::useSecondsFor(ItemType type) const {
     const int i = static_cast<int>(type);
     const float configured = i >= 0 && i < static_cast<int>(ItemType::Count) ? m_config.useSeconds[i] : 0.0f;
@@ -546,7 +631,7 @@ float Match::playerSpread(const WeaponConfig& w) const {
     // El retroceso de los ultimos disparos se suma despues: agacharse no lo quita.
     // Quieto, apuntando y sin retroceso pendiente, el primer disparo va exacto (como en
     // Fortnite). La escopeta siempre abre su cono.
-    if (!m_config.weaponSpread) return 0.0f;
+    if (!m_config.weaponSpread || m_config.cheats.noSpread) return 0.0f;
     const CharacterState& s = m_player.state();
     const bool aiming = m_input.aiming;
     float spread = aiming ? w.aimSpread : w.hipSpread;
@@ -694,9 +779,10 @@ void Match::swingPickaxe() {
         damageContainer(m_llama, m_config.pickaxeStructureDamage, 0, point);
     } else if (victim >= 0) {
         m_sincePlayerHit = 0.0f;
-        addDamageNumber(chestOf(victim), m_config.pickaxeDamage, false);
+        const float damage = m_config.pickaxeDamage * (m_config.cheats.oneShot ? 10.0f : 1.0f);
+        addDamageNumber(chestOf(victim), damage, false, false, body(victim).state().shield > 0.0f);
         pushEvent(GameEventType::HitEntity, victim, 0, chestOf(victim));
-        applyDamage(victim, m_config.pickaxeDamage, 0);
+        applyDamage(victim, damage, 0);
     } else if (wall >= 0) {
         damageWall(wall, m_config.pickaxeStructureDamage, 0, point);
     } else if (resource >= 0) {
@@ -731,6 +817,16 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, fl
     if (m_assistTarget >= 0 && !world::segmentVsAabb(aim.eye, aim.direction * range, hitBox(m_assistTarget), &tAssist)) {
         dir = math3d::normalize(chestOf(m_assistTarget) - aim.eye);
     }
+    // Truco "aimbot": a la cabeza del rival visible mas centrado, sin dispersion.
+    if (m_config.cheats.aimbot) {
+        const int target = aimbotTarget(aim.eye, aim.direction, range);
+        if (target >= 0) {
+            const world::Aabb box = hitBox(target);
+            const Vec3 head{(box.min.x + box.max.x) * 0.5f, box.max.y - 0.12f, (box.min.z + box.max.z) * 0.5f};
+            dir = math3d::normalize(head - aim.eye);
+            spreadDegrees = 0.0f;
+        }
+    }
     // Dispersion del arma (despues de la ayuda de punteria: la ayuda no la anula).
     if (spreadDegrees > 0.0f) dir = perturb(dir, math3d::toRadians(spreadDegrees), m_rng);
 
@@ -746,13 +842,38 @@ ShotResult Match::playerShot(const PlayerAim& aim, float damage, float range, fl
     return resolveShot(0, chest, target + toTarget * 0.1f, damage, weapon, emitShot, weaponType);
 }
 
+int Match::aimbotTarget(const Vec3& eye, const Vec3& direction, float range) const {
+    int best = -1;
+    float bestCos = cosf(math3d::toRadians(35.0f));
+    for (int id = 1; id < entityCount(); ++id) {
+        if (!alive(id) || m_air[id] == AirState::Bus) continue;
+        const world::Aabb box = hitBox(id);
+        const Vec3 head{(box.min.x + box.max.x) * 0.5f, box.max.y - 0.12f, (box.min.z + box.max.z) * 0.5f};
+        const Vec3 v = head - eye;
+        const float d = math3d::length(v);
+        if (d < 0.5f || d > range) continue;
+        const float c = math3d::dot(v * (1.0f / d), direction);
+        if (c <= bestCos) continue;
+        if (!m_config.cheats.wallbang && !lineOfSight(eye, head) && !lineOfSight(chestOf(0), head)) continue;
+        bestCos = c;
+        best = id;
+    }
+    return best;
+}
+
+int Match::objectFromCollider(int collider) const {
+    if (collider < 0 || collider >= static_cast<int>(m_harvestByCollider.size())) return -1;
+    const int index = m_harvestByCollider[collider];
+    return index >= 0 && !m_objectDestroyed[index] ? index : -1;
+}
+
 Vec3 Match::aimPoint(const Vec3& eye, const Vec3& dir, float range) const {
     // Empieza a la altura del jugador: lo que haya entre la camara y el jugador no cuenta.
     const float t0 = fmaxf(0.0f, math3d::dot(chestOf(0) - eye, dir));
     const Vec3 start = eye + dir * t0;
     const Vec3 end = start + dir * range;
     world::RayHit wallHit;
-    float best = m_world->raycast(start, end, world::kBlocksShots, &wallHit) ? wallHit.t : 1.0f;
+    float best = !m_config.cheats.wallbang && m_world->raycast(start, end, world::kBlocksShots, &wallHit) ? wallHit.t : 1.0f;
     const Vec3 seg = end - start;
     for (int id = 1; id < entityCount(); ++id) {
         if (!alive(id) || m_air[id] == AirState::Bus) continue;
@@ -787,7 +908,10 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
     ShotResult result;
     const Vec3 seg = end - origin;
     world::RayHit wallHit;
-    const bool wall = m_world->raycast(origin, end, world::kBlocksShots, &wallHit);
+    // Truco "atravesar paredes": las balas del jugador no se paran en nada del mundo.
+    const bool wallbang = shooter == 0 && m_config.cheats.wallbang;
+    const bool wall = !wallbang && m_world->raycast(origin, end, world::kBlocksShots, &wallHit);
+    if (shooter == 0 && m_config.cheats.oneShot) damage *= 10.0f;
     float best = wall ? wallHit.t : 1.0f;
     int victim = -1;
     for (int id = 0; id < entityCount(); ++id) {
@@ -835,6 +959,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         bool headshot = result.end.y >= box.max.y - kHeadSize;
         if (headshot && victim == 0 && shooter > 0) headshot = m_rng.chance(m_config.botHeadshotChance);
         if (headshot) damage *= m_config.headshotMultiplier;
+        const bool shielded = body(victim).state().shield > 0.0f;
         pushEvent(GameEventType::HitEntity, victim, shooter, result.end);
         m_events[(m_eventCount - 1) % kMaxEvents].amount = headshot ? 1 : 0;
         ++m_stats.shotsHitEntity;
@@ -844,16 +969,31 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         if (shooter == 0) {
             m_sincePlayerHit = 0.0f;
             if (headshot) ++m_playerHeadshots;
-            addDamageNumber(result.end, damage, false, headshot);
+            addDamageNumber(result.end, damage, false, headshot, shielded);
         }
         applyDamage(victim, damage, shooter);
         m_damageSource = -1;
     } else if (wall) {
         ++m_stats.shotsBlockedByWorld;
         result.blockedByWorld = true;
-        // Las paredes construidas pierden vida con cada impacto.
+        // Las paredes construidas pierden vida con cada impacto, y los objetos del mapa
+        // (paneles de las naves, contenedores, cajas, arboles...) tambien (v0.13).
         const int built = m_structures.wallFromCollider(wallHit.dynamicHandle);
-        if (built >= 0) damageWall(built, damage, shooter, result.end);
+        const int object = built < 0 ? objectFromCollider(wallHit.collider) : -1;
+        if (built >= 0) {
+            damageWall(built, damage, shooter, result.end);
+        } else if (object >= 0 && m_config.shotObjectDamageScale > 0.0f) {
+            const float amount = damage * m_config.shotObjectDamageScale;
+            ++m_stats.objectsShot;
+            pushEvent(GameEventType::HitStructure, -1, shooter, result.end);
+            if (shooter == 0) addDamageNumber(result.end, amount, true);
+            damageObject(object, amount, result.end, shooter);
+        }
+    }
+    // Truco "balas explosivas": cada disparo del jugador (no cada perdigon) explota donde da.
+    if (shooter == 0 && emitShot && m_config.cheats.explosiveAmmo && (!weapon || weapon->projectile == ProjectileKind::None)) {
+        const Vec3 back = math3d::length(seg) > 0.01f ? math3d::normalize(seg) * -0.25f : Vec3{0.0f, 0.0f, 0.0f};
+        explode(result.end + back, 0, 45.0f, 2.2f, 150.0f, weaponType);
     }
     addTracer(origin, result.end, shooter == 0, victim >= 0);
     if (m_shotObserver) {
@@ -888,12 +1028,13 @@ void Match::pushEvent(GameEventType type, int entity, int other, const Vec3& pos
     ++m_eventCount;
 }
 
-void Match::addDamageNumber(const Vec3& position, float amount, bool structure, bool headshot) {
+void Match::addDamageNumber(const Vec3& position, float amount, bool structure, bool headshot, bool shield) {
     // Los perdigones de un mismo disparo de escopeta suman en un solo numero.
     DamageNumber& last = m_damageNumbers[(m_nextDamageNumber + kMaxDamageNumbers - 1) % kMaxDamageNumbers];
     if (last.age == 0.0f && last.structure == structure && math3d::length(last.position - position) < 1.6f) {
         last.amount += amount;
         last.headshot |= headshot;
+        last.shield |= shield;
         return;
     }
     DamageNumber& d = m_damageNumbers[m_nextDamageNumber];
@@ -905,6 +1046,7 @@ void Match::addDamageNumber(const Vec3& position, float amount, bool structure, 
     d.age = 0.0f;
     d.structure = structure;
     d.headshot = headshot;
+    d.shield = shield;
 }
 
 world::Aabb Match::bodyBounds(int id) const { return body(id).bounds(); }
@@ -926,7 +1068,7 @@ WallPlacement Match::planWall(float yaw, PieceType type) const {
             break;
         }
     }
-    if (p.valid && m_materials.get(p.material) < cost) {
+    if (p.valid && m_materials.get(p.material) < cost && !m_config.cheats.infiniteMaterials) {
         p.valid = false;
         p.error = PlacementError::NoMaterials;
     }
@@ -936,7 +1078,7 @@ WallPlacement Match::planWall(float yaw, PieceType type) const {
 int Match::buildWall(float yaw, PieceType type) {
     const int wall = m_structures.place(planWall(yaw, type));
     if (wall >= 0) {
-        m_materials.spend(m_structures.wall(wall).material, m_config.build.wallCost);
+        if (!m_config.cheats.infiniteMaterials) m_materials.spend(m_structures.wall(wall).material, m_config.build.wallCost);
         ++m_stats.wallsBuilt;
         const world::Aabb& b = m_structures.wall(wall).box;
         pushEvent(GameEventType::WallBuilt, 0, -1, (b.min + b.max) * 0.5f);
@@ -990,7 +1132,7 @@ void Match::commandBotTravel(int botIndex, const Vec3& destination) {
 
 void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShield) {
     if (!alive(victim) || amount <= 0.0f) return;
-    if (victim == 0 && m_config.invulnerablePlayer) return;
+    if (victim == 0 && (m_config.invulnerablePlayer || m_config.cheats.godMode)) return;
     CharacterState& s = mutableBody(victim).state();
     // El escudo absorbe primero; lo que sobra pasa a la vida.
     const float absorbed = ignoreShield ? 0.0f : (s.shield < amount ? s.shield : amount);
@@ -1000,12 +1142,18 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
         m_sincePlayerDamaged = 0.0f;
         pushEvent(GameEventType::PlayerHurt, 0, attacker, chestOf(0));
         if (m_config.interruptUseOnDamage) cancelUse();
-    } else if (attacker >= 0 && attacker != victim && alive(attacker)) {
+    } else if (attacker >= 0 && attacker != victim && alive(attacker) &&
+               !(attacker == 0 && m_config.cheats.invisible)) {
         // Un bot que recibe un disparo se cubre con una pared (a veces, en su siguiente
-        // paso: no a mitad del disparo) y se gira hacia quien le ha dado.
+        // paso: no a mitad del disparo) y se gira hacia quien le ha dado. Con poca vida no:
+        // en su siguiente decision huye de el (v0.13).
         Bot& b = m_bots[victim - 1];
         b.coverFrom = attacker;
-        if (b.state != BotState::Attack || !b.targetVisible) {
+        b.sinceHurt = 0.0f;
+        b.threat = attacker;
+        if (m_config.botsFlee && s.health > 0.0f && botWeak(b)) {
+            if (b.decisionTimer > 0.05f) b.decisionTimer = 0.05f;
+        } else if (b.state != BotState::Attack || !b.targetVisible) {
             b.state = BotState::Attack;
             b.target = attacker;
             b.targetVisible = false;
@@ -1076,6 +1224,10 @@ void Match::updateStorm(float dt) {
     for (int id = 0; id < entityCount(); ++id) {
         if (!alive(id) || m_air[id] == AirState::Bus) {
             m_inStorm[id] = false;
+            continue;
+        }
+        if (id == 0 && m_config.cheats.noStorm) {
+            m_inStorm[0] = false;
             continue;
         }
         const Vec3& p = body(id).state().position;

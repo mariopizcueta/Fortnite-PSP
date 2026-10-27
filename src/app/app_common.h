@@ -8,6 +8,7 @@
 #include "core/i18n.h"
 #include "gfx/debug_text.h"
 #include "gfx/graphics.h"
+#include "app/ui.h"
 #include "math/math3d.h"
 
 namespace app {
@@ -65,6 +66,9 @@ inline float headingDegrees(float yaw) {
 inline const assets::ui::Rect& label(const assets::ui::Rect& es, const assets::ui::Rect& en) {
     return i18n::language() == i18n::Lang::En ? en : es;
 }
+
+// x para centrar una fila de ayudas de controles en la pantalla.
+inline int centeredHintsX(const ui::Hint* hints, int count) { return (gfx::kScreenWidth - ui::hintsWidth(hints, count)) / 2; }
 
 inline void formatTime(float seconds, char* out, size_t size) {
     const int s = seconds > 0.0f ? static_cast<int>(seconds) : 0;

@@ -339,11 +339,151 @@ void App::renderGameHud() const {
             ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, hint, n);
         }
     }
+    if (m_match.cheats().wallhack) renderWallhack();
     renderMinimap();
     renderVitals();
     renderSlots();
     if (m_swapOpen) renderSwapChooser();
     renderDamageNumbers();
+    if (m_inventoryOpen) renderInventoryScreen();
+}
+
+// --- Inventario (L + R a la vez, v0.13) ---------------------------------------------------------
+// Las 5 ranuras en grande: izquierda / derecha eligen, X coge una y la vuelve a dejar en otra
+// (se intercambian), CUADRADO la suelta al suelo, TRIANGULO la lleva a la mano y CIRCULO (o
+// L + R otra vez) cierra. Debajo, lo elegido y la municion y los materiales que se llevan.
+constexpr float kInvX = 56.0f, kInvY = 38.0f, kInvW = 368.0f, kInvH = 178.0f;
+constexpr float kInvSlot = 44.0f, kInvStep = 54.0f, kInvSlotY = 64.0f;
+const ui::Hint kInventoryHints[] = {{B::Left, T::None},          {B::Right, T::HintSelect}, {B::Cross, T::HintMove},
+                                    {B::Square, T::HintDrop},    {B::Triangle, T::HintHand}, {B::Circle, T::HintClose}};
+
+float inventorySlotX(int i) { return 240.0f - (game::Inventory::kSlots * kInvStep - (kInvStep - kInvSlot)) * 0.5f + i * kInvStep; }
+
+void App::updateInventoryScreen(const input::Input& in) {
+    const int slots = game::Inventory::kSlots;
+    const int step = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    if (step != 0) {
+        m_invCursor = (m_invCursor + slots + step) % slots;
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+    const game::Inventory& inv = m_match.inventory();
+    if (in.pressed(PSP_CTRL_CROSS)) {
+        if (m_invHeld < 0) {
+            if (inv.slot(m_invCursor).type != game::ItemType::None) {
+                m_invHeld = m_invCursor;
+                playSfx(audio::Sfx::MenuAccept, 0.6f);
+            }
+        } else {
+            if (m_invHeld != m_invCursor) m_match.moveSlot(m_invHeld, m_invCursor);
+            m_invHeld = -1;
+            playSfx(audio::Sfx::Pickup, 0.6f);
+        }
+    } else if (in.pressed(PSP_CTRL_SQUARE)) {
+        if (m_match.dropInventorySlot(m_invCursor)) playSfx(audio::Sfx::Pickup, 0.6f);
+        m_invHeld = -1;
+    } else if (in.pressed(PSP_CTRL_TRIANGLE)) {
+        if (inv.slot(m_invCursor).type != game::ItemType::None && m_match.selectSlot(m_invCursor)) {
+            playSfx(audio::Sfx::MenuAccept, 0.6f);
+        }
+    } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+        if (m_invHeld >= 0) {
+            m_invHeld = -1;  // primero suelta lo cogido
+        } else {
+            m_inventoryOpen = false;
+        }
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+}
+
+void App::renderInventoryScreen() const {
+    gfx::fillRect(kInvX, kInvY, kInvW, kInvH, rgba(8, 18, 48, 235));
+    ui::frame(kInvX, kInvY, kInvW, kInvH, 2, rgba(90, 160, 255));
+    gfx::fillRect(kInvX, kInvY, kInvW, 18, kFortniteBlue);
+    const game::Inventory& inv = m_match.inventory();
+    for (int i = 0; i < game::Inventory::kSlots; ++i) {
+        const game::InventorySlot& slot = inv.slot(i);
+        const float x = inventorySlotX(i);
+        const float y = kInvSlotY - (i == m_invHeld ? 6.0f : 0.0f);
+        const atlas::Rect* art = slotArt(slot.type, slot.rarity);
+        slotBox(x, y, kInvSlot, slot.type == game::ItemType::None ? rgba(0, 0, 0, 90) : rarityColor(slot.rarity),
+                rgba(255, 255, 255, 150));
+        if (art && m_atlas.ready()) m_atlas.draw(*art, x + 6, y + 6);
+        // En la mano: una marca debajo.
+        if (!inv.pickaxe() && inv.selected() == i) gfx::fillRect(x + kInvSlot * 0.5f - 6, kInvSlotY + kInvSlot + 3, 12, 3, kWhite);
+        if (i == m_invCursor) {
+            const u32 alpha = static_cast<u32>(200.0f + 55.0f * sinf(m_blinkTime * 8.0f));
+            ui::frame(x - 3, y - 3, kInvSlot + 6, kInvSlot + 6, 2, rgba(250, 216, 40, alpha));
+        }
+        if (i == m_invHeld) ui::frame(x - 1, y - 1, kInvSlot + 2, kInvSlot + 2, 1, kWhite);
+    }
+    // Materiales con sus iconos.
+    if (m_atlas.ready()) {
+        const atlas::Rect* icons[3] = {&atlas::kMatMadera, &atlas::kMatLadrillo, &atlas::kMatMetal};
+        for (int r = 0; r < 3; ++r) m_atlas.draw(*icons[r], kInvX + 238 + r * 42, kInvY + 124);
+    }
+    gfx::fillRect(kInvX + 8, kInvY + 120, kInvW - 16, 1, rgba(90, 160, 255, 160));
+    ui::drawHintIcons(m_atlas, static_cast<int>(240 - ui::hintsWidth(kInventoryHints, 6) / 2), static_cast<int>(kInvY + kInvH) - 14,
+                      kInventoryHints, 6);
+}
+
+void App::overlayInventoryScreen() const {
+    printCenteredAt(240, static_cast<int>(kInvY) + 5, kWhite, tr(T::InventoryTitle));
+    const game::Inventory& inv = m_match.inventory();
+    const game::InventorySlot& slot = inv.slot(m_invCursor);
+    char line[64];
+    const int infoY = static_cast<int>(kInvSlotY + kInvSlot) + 10;
+    if (slot.type == game::ItemType::None) {
+        printCenteredAt(240, infoY, kDimGrey, tr(T::InventoryEmpty));
+    } else {
+        const bool weapon = game::isWeapon(slot.type);
+        const char* name = weapon ? slot.weapon.config().name : game::itemName(slot.type);
+        snprintf(line, sizeof(line), "%s - %s", name, game::rarityName(slot.rarity));
+        printCenteredAt(240, infoY, rarityTextColor(slot.rarity), line);
+        if (weapon) {
+            const game::AmmoType ammo = static_cast<game::AmmoType>(slot.weapon.config().ammoType);
+            snprintf(line, sizeof(line), tr(T::InventoryWeaponInfo), slot.weapon.ammo(), slot.weapon.config().magazineSize,
+                     inv.ammo(ammo), game::ammoName(ammo));
+        } else {
+            snprintf(line, sizeof(line), tr(T::InventoryCount), slot.count, game::itemDef(slot.type).maxStack);
+        }
+        printCenteredAt(240, infoY + 11, kLightGrey, line);
+    }
+    if (m_invHeld >= 0) printCenteredAt(240, infoY + 22, kYellow, tr(T::InventoryMoving));
+    // Municion y trampas (izquierda, en dos columnas) y materiales (derecha).
+    const int x = static_cast<int>(kInvX) + 12, y = static_cast<int>(kInvY) + 124;
+    for (int a = 0; a < static_cast<int>(game::AmmoType::Count); ++a) {
+        gfx::text::print(x + (a % 2) * 110, y + (a / 2) * 11, kLightGrey, "%s %d", game::ammoName(static_cast<game::AmmoType>(a)),
+                         inv.ammo(static_cast<game::AmmoType>(a)));
+    }
+    snprintf(line, sizeof(line), tr(T::InventoryTraps), m_match.trapStock());
+    gfx::text::print(x + 110, y + 22, kLightGrey, "%s", line);
+    for (int r = 0; r < 3; ++r) {
+        gfx::text::printShadow(static_cast<int>(kInvX) + 258 + r * 42, y + 4, kWhite, "%d",
+                               m_match.materials().get(static_cast<world::Resource>(r)));
+    }
+    ui::printHints(240 - ui::hintsWidth(kInventoryHints, 6) / 2, static_cast<int>(kInvY + kInvH) - 14, kLightGrey,
+                   kInventoryHints, 6);
+}
+
+void App::renderWallhack() const {
+    // Truco "wallhack": una caja roja por rival vivo, a traves de paredes, con su vida.
+    for (int id = 1; id < m_match.entityCount(); ++id) {
+        if (!m_match.alive(id) || m_match.airState(id) == game::AirState::Bus) continue;
+        const game::CharacterState s = renderState(id);
+        float x0, y0, x1, y1;
+        if (!projectToScreen(m_viewProjection, s.position, &x0, &y0) ||
+            !projectToScreen(m_viewProjection, s.position + Vec3{0.0f, 1.9f, 0.0f}, &x1, &y1)) {
+            continue;
+        }
+        const float h = fmaxf(4.0f, y0 - y1), w = fmaxf(3.0f, h * 0.45f);
+        const float left = x1 - w * 0.5f;
+        if (left > gfx::kScreenWidth || left + w < 0.0f || y1 > gfx::kScreenHeight || y0 < 0.0f) continue;
+        ui::frame(left, y1, w, h, 1, rgba(255, 60, 50, 220));
+        const float hp = math3d::clampf(s.health / 100.0f, 0.0f, 1.0f), sh = math3d::clampf(s.shield / 100.0f, 0.0f, 1.0f);
+        gfx::fillRect(left, y1 - 4, w, 2, rgba(0, 0, 0, 160));
+        gfx::fillRect(left, y1 - 4, w * hp, 2, rgba(80, 220, 80));
+        if (sh > 0.0f) gfx::fillRect(left, y1 - 6, w * sh, 2, kShieldBlue);
+    }
 }
 
 // Selector de que soltar: la ranura elegida parpadea en amarillo sobre la fila de objetos
@@ -444,7 +584,27 @@ void App::renderCrosshair() const {
     // Radio en pixeles del cono: tan(dispersion) * distancia focal (FOV vertical de 60).
     const float focal = 0.5f * gfx::kScreenHeight / tanf(math3d::toRadians(0.5f * config::kFovYDegrees));
     const float spreadPx = focal * tanf(math3d::toRadians(fminf(m_match.playerSpreadNow(), 30.0f)));
-    if (held == game::ItemType::Shotgun) {
+    if (held == game::ItemType::GrenadeLauncher) {
+        // Lanzagranadas: un circulo y, debajo, marcas de la caida de la granada a 5, 10 y
+        // 15 m (lo que baja la granada a esa distancia: se pone la marca sobre el objetivo).
+        // Partidas en dos, con un hueco en medio, para que no las tape el personaje.
+        const float r = 9.0f + floorf(fminf(spreadPx, 30.0f));
+        for (int i = 0; i < 32; ++i) {
+            const float a = 2.0f * math3d::kPi * i / 32;
+            gfx::fillRect(floorf(239.0f + cosf(a) * r), floorf(135.0f + sinf(a) * r), 2, 2, c);
+        }
+        gfx::fillRect(239, 135, 2, 2, c);
+        const float speed = game::weaponConfig(held, game::Rarity::Rare).projectileSpeed;
+        for (int k = 1; k <= 3; ++k) {
+            const float d = 5.0f * k, t = d / speed;
+            const float drop = 0.5f * game::kGrenadeGravity * t * t;
+            const float y = 136.0f + floorf(focal * drop / d);
+            const float w = 18.0f - 3.0f * k;
+            gfx::fillRect(234.0f - w, y, w, 2, c);
+            gfx::fillRect(246.0f, y, w, 2, c);
+        }
+    } else if (game::weaponClass(held) == game::WeaponClass::Shotgun) {
+        // Escopetas (corredera y tactica): la misma mira cuadrada.
         const float h = fmaxf(8.0f, floorf(spreadPx));
         gfx::fillRect(240 - h, 136 - h, 2 * h, 2, c);
         gfx::fillRect(240 - h, 134 + h, 2 * h, 2, c);
@@ -458,11 +618,15 @@ void App::renderCrosshair() const {
         }
         gfx::fillRect(239, 135, 2, 2, c);
     } else {
+        // Cruz: cuatro brazos iguales (6 px) a la misma distancia del punto central (2x2,
+        // centrado en 240,136). Antes el izquierdo y el de arriba eran mas largos (pisaban el
+        // centro) que el derecho y el de abajo.
         const float gap = 3.0f + floorf(fminf(spreadPx, 60.0f));
-        gfx::fillRect(236 - gap, 135, 7, 2, c);
-        gfx::fillRect(241 + gap, 135, 7, 2, c);
-        gfx::fillRect(239, 132 - gap, 2, 7, c);
-        gfx::fillRect(239, 137 + gap, 2, 7, c);
+        constexpr float kArm = 6.0f;
+        gfx::fillRect(239 - gap - kArm, 135, kArm, 2, c);
+        gfx::fillRect(241 + gap, 135, kArm, 2, c);
+        gfx::fillRect(239, 135 - gap - kArm, 2, kArm, c);
+        gfx::fillRect(239, 137 + gap, 2, kArm, c);
         gfx::fillRect(239, 135, 2, 2, c);
     }
     if (m_match.sincePlayerHit() < 0.15f) {
@@ -540,6 +704,15 @@ void App::renderMinimap() const {
         gfx::fillRect(px - 1, py - 1, 2, 2, c);
     }
 
+    // Truco "radar de botin": cofres sin abrir (amarillo) y la llama (morado).
+    if (m_match.cheats().lootRadar) {
+        for (const game::Container& c : m_match.containers()) {
+            if (c.opened || (c.kind != game::ContainerKind::Chest && c.kind != game::ContainerKind::Llama)) continue;
+            float sx, sy;
+            if (!toMap(c.position.x, c.position.z, &sx, &sy)) continue;
+            gfx::fillRect(sx - 1, sy - 1, 3, 3, c.kind == game::ContainerKind::Llama ? rgba(200, 90, 255) : kYellow);
+        }
+    }
     // Airdrops sin abrir (cuadro azul) y el autobus mientras se va dentro (amarillo).
     for (const game::Container& c : m_match.containers()) {
         if (c.kind != game::ContainerKind::Airdrop || c.opened) continue;
@@ -684,7 +857,9 @@ void App::renderDamageNumbers() const {
         const u32 alpha = static_cast<u32>(255.0f * fade);
         // Disparo a la cabeza: mas grande y en amarillo, como en Fortnite.
         const float scale = d.structure ? 2.0f : (d.headshot ? 3.5f : 3.0f);
+        // Con escudo, azul (mas claro si es a la cabeza), como en Fortnite.
         const u32 color = d.structure  ? rgba(200, 220, 255, alpha)
+                          : d.shield   ? (d.headshot ? rgba(120, 220, 255, alpha) : rgba(70, 160, 255, alpha))
                           : d.headshot ? rgba(255, 220, 40, alpha)
                                        : rgba(255, 255, 255, alpha);
         const int value = static_cast<int>(d.amount + 0.5f);
@@ -740,6 +915,11 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     gfx::text::printShadow(6, 4, kLightGrey, "%s", m_match.name(0));
     if (m_settings.showFps) gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
     overlayCompass();
+    // Inventario abierto: solo su texto (el resto del HUD queda debajo del panel).
+    if (m_inventoryOpen) {
+        overlayInventoryScreen();
+        return;
+    }
 
     // Autobus y caida.
     const game::AirState air = m_match.airState(0);

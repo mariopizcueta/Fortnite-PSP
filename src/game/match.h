@@ -206,6 +206,7 @@ struct DamageNumber {
     float age = 99.0f;
     bool structure = false;  // impacto en una pared construida
     bool headshot = false;   // en la cabeza (numero amarillo)
+    bool shield = false;     // el rival tenia escudo (numero azul, como en Fortnite)
 };
 
 struct KillEvent {
@@ -252,6 +253,9 @@ struct MatchStats {
     int wallsBuilt = 0;
     int wallsDestroyed = 0;
     int wallsRemoved = 0;
+    int botHarvestHits = 0;      // golpes de pico de los bots a objetos del mapa (v0.13)
+    int botFlees = 0;            // veces que un bot con poca vida ha empezado a huir
+    int objectsShot = 0;         // impactos de bala en objetos del mapa
     u64 aiMicros = 0;            // tiempo acumulado de IA (decidir + dirigir)
     u64 physicsMicros = 0;       // tiempo acumulado de fisica de personajes
     int steps = 0;
@@ -379,6 +383,24 @@ public:
     // Cambia el objeto del suelo por el de la ranura `slot`, que cae al suelo con su
     // cargador (si es un arma) y se puede volver a recoger. false si no esta al alcance.
     bool swapPickup(int pickup, int slot);
+    // Gestion del inventario (L + R a la vez): intercambia dos ranuras (lo que se lleva en la
+    // mano sigue en la mano) o suelta una al suelo con su cargador. false si no se puede.
+    bool moveSlot(int from, int to);
+    bool dropInventorySlot(int slot);
+    // Lleva a la mano lo de esa ranura (guarda el pico).
+    bool selectSlot(int slot);
+
+    // Trucos del menu de administrador (se pueden cambiar a mitad de partida desde la pausa).
+    void setCheats(const Cheats& cheats) { m_config.cheats = cheats; }
+    const Cheats& cheats() const { return m_config.cheats; }
+    // Mira del aimbot (truco): rival visible mas centrado respecto a la mira, o -1.
+    int aimbotTarget(const math3d::Vec3& eye, const math3d::Vec3& direction, float range) const;
+    // Acciones del menu: vida y escudo al maximo, eliminar a todos los bots y llenar
+    // municion, materiales y trampas.
+    void cheatHeal();
+    void cheatEliminateBots();
+    void cheatRefill();
+
     // Da un objeto al jugador (pruebas; en partida, el botin).
     int giveItem(ItemType type, int count, Rarity rarity = Rarity::Common) {
         return m_inventory.add(type, rarity, count);
@@ -459,6 +481,17 @@ public:
     bool removeWallAt(const PlayerAim& aim);
     // Envia un bot a un destino (pruebas de navegacion).
     void commandBotTravel(int botIndex, const math3d::Vec3& destination);
+    // Da materiales a un bot (pruebas).
+    void giveBotMaterials(int botIndex, world::Resource r, int n) { m_bots[botIndex].materials.add(r, n); }
+    // Da un objeto a un bot (pruebas).
+    int giveBotItem(int botIndex, ItemType type, int count, Rarity rarity = Rarity::Common) {
+        return m_bots[botIndex].bag.add(type, rarity, count);
+    }
+    // Fija la vida y el escudo de una entidad (pruebas).
+    void setHealth(int id, float health, float shield) {
+        mutableBody(id).state().health = health;
+        mutableBody(id).state().shield = shield;
+    }
 
 private:
     CharacterBody& mutableBody(int id);
@@ -492,6 +525,7 @@ private:
     bool pickUp(int id, int pickup);
     Pickup randomWeaponPickup(bool chest);
     Pickup randomConsumablePickup();
+    AmmoType randomAmmoType();
     Rarity randomRarity(bool chest);
     void dropBotWeapon(int bot);  // al caer: todo su inventario queda en el suelo
     // Deja en el suelo lo que se ha sacado de una ranura (arma con sus balas, consumibles).
@@ -502,13 +536,25 @@ private:
     void botEquip(Bot& bot, float distance);
     void botUpdateHealing(int index, float dt);
     // IA de botin, caza y construccion (match_bots.cpp).
-    bool findLoot(int index, float maxDistance);
+    bool findLoot(int index, float maxDistance, bool healsOnly = false);
     void botTakeLoot(int index);
-    void botBuildCover(int index, int attacker);
+    void botBuildCover(int index, int attacker, bool urgent = false);
     void hearShot(int shooter, const math3d::Vec3& origin);
     float botAttackRange(const Bot& bot) const;
     void damageWall(int wall, float amount, int attacker, const math3d::Vec3& point);
-    void addDamageNumber(const math3d::Vec3& position, float amount, bool structure, bool headshot = false);
+    void addDamageNumber(const math3d::Vec3& position, float amount, bool structure, bool headshot = false,
+                         bool shield = false);
+    // Objeto del mapa al que pertenece una caja fija (o -1).
+    int objectFromCollider(int collider) const;
+    // IA v0.13: materiales, picar y huir con poca vida (match_bots.cpp).
+    bool botWeak(const Bot& bot) const;
+    // Material con el que el bot puede construir una pieza (el que mas tenga), o false.
+    bool botPickMaterial(const Bot& bot, world::Resource* out) const;
+    bool findHarvest(int index);
+    void botHarvest(int index, float dt);
+    void startFlee(int index, int threat);
+    bool fleePoint(const Bot& bot, const math3d::Vec3& threat, math3d::Vec3* out);
+    bool botHasHeals(const Bot& bot) const;
     void onStructuresChanged();
     void pushEvent(GameEventType type, int entity, int other, const math3d::Vec3& position);
     world::Aabb bodyBounds(int id) const;

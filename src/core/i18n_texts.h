@@ -50,7 +50,7 @@
     X(StatHeadshots, "A la cabeza", "Headshots")                                                              \
     X(StatMostKills, "Max. bajas", "Most kills")                                                              \
     X(StatBestPlace, "Mejor puesto", "Best place")                                                            \
-    X(BotsSelector, "<  BOTS: %d  >", "<  BOTS: %d  >")                                                       \
+    X(BotsSelector, "%d BOTS", "%d BOTS")                                                       \
     X(BotsWarning, "(mas de 10: mide FPS)", "(over 10: check FPS)")                                           \
     X(NoMapError, "ERROR: sin escenario", "ERROR: no map")                                                    \
     X(ExitQuestion, "Salir de FortnitePSP?", "Quit FortnitePSP?")                                             \
@@ -223,6 +223,8 @@
     X(BotSearch, "Buscar obj.", "Search")                                                                     \
     X(BotAttack, "Atacar", "Attack")                                                                          \
     X(BotLoot, "Botin", "Loot")                                                                               \
+    X(BotHarvest, "Picar", "Harvest")                                                                         \
+    X(BotFlee, "Huir", "Flee")                                                                                \
     X(BotEliminated, "Eliminado", "Eliminated")                                                               \
     X(JumpGrounded, "En suelo", "Grounded")                                                                   \
     X(JumpRising, "Saltando", "Jumping")                                                                      \
@@ -332,4 +334,103 @@
     X(ActFire, "Disparar / usar / colocar", "Fire / use / place")                                             \
     X(ActAim, "Apuntar / fijar", "Aim / lock on")                                                             \
     X(ActCrouch, "Agacharse", "Crouch")                                                                       \
-    X(ActEmote, "Bailar", "Dance")
+    X(ActEmote, "Bailar", "Dance")                                                                            \
+    /* --- v0.13: modo de juego, pavos, tienda, inventario, admin y trucos ---------------------- */ \
+    X(HintBuy, "comprar / equipar", "buy / equip")                                                            \
+    X(HintClaim, "recoger", "claim")                                                                          \
+    X(HintToggle, "activar", "toggle")                                                                        \
+    X(HintPage, "pagina", "page")                                                                             \
+    X(HintMove, "mover", "move")                                                                              \
+    X(HintDrop, "soltar", "drop")                                                                             \
+    X(HintHand, "a la mano", "equip")                                                                         \
+    X(ModeTitle, "MODO DE JUEGO", "GAME MODE")                                                                \
+    X(ModeBattleRoyale, "BATTLE ROYALE", "BATTLE ROYALE")                                                     \
+    X(ModeOneShot, "MONODISPARO", "ONE SHOT")                                                                 \
+    X(ModeBattleRoyaleDesc1, "Todas las armas y objetos.", "Every weapon and item.")                          \
+    X(ModeBattleRoyaleDesc2, "El ultimo en pie gana.", "Last one standing wins.")                             \
+    X(ModeOneShotDesc1, "Solo francotiradores, armas", "Only snipers, scoped weapons")                        \
+    X(ModeOneShotDesc2, "con mira y granadas.", "and grenades.")                                              \
+    X(ModeBots, "BOTS  < %d >", "BOTS  < %d >")                                                               \
+    X(RewardClaimed, "+50 pavos recogidos", "+50 V-Bucks claimed")                                            \
+    X(RewardsPending, "Recompensas por recoger: %d", "Rewards to claim: %d")                                  \
+    X(ResultVbucks, "+%d pavos", "+%d V-Bucks")                                                               \
+    X(ShopTitle, "TIENDA DE OBJETOS", "ITEM SHOP")                                                            \
+    X(ShopOwned, "COMPRADO", "OWNED")                                                                         \
+    X(ShopEquippedTag, "EQUIPADO", "EQUIPPED")                                                                \
+    X(ShopBought, "Comprado! Equipalo con X o en la TAQUILLA", "Bought! Equip it with X or in the LOCKER")    \
+    X(ShopEquipped, "Traje equipado", "Outfit equipped")                                                      \
+    X(ShopNoVbucks, "No tienes pavos suficientes", "Not enough V-Bucks")                                      \
+    X(ShopConfirm, "Comprar %s?", "Buy %s?")                                                                  \
+    X(ShopPrice, "%d pavos (te quedan %d)", "%d V-Bucks (%d left)")                                           \
+    X(LockerBought, "Comprado en la tienda", "Bought in the shop")                                            \
+    X(SkinCommando, "Comando Sombra", "Shadow Commando")                                                      \
+    X(SkinOrange, "Mono Naranja", "Orange Jumpsuit")                                                          \
+    X(SkinRanger, "Guardabosques", "Ranger")                                                                  \
+    X(PauseModMenu, "MOD MENU", "MOD MENU")                                                                   \
+    X(InventoryTitle, "INVENTARIO", "INVENTORY")                                                              \
+    X(InventoryEmpty, "Ranura vacia", "Empty slot")                                                           \
+    X(InventoryWeaponInfo, "Cargador %d/%d - reserva %d (%s)", "Magazine %d/%d - reserve %d (%s)")            \
+    X(InventoryCount, "%d de %d", "%d of %d")                                                                 \
+    X(InventoryMoving, "Elige donde dejarlo y pulsa X", "Choose where to put it and press X")                 \
+    X(InventoryTraps, "Trampas %d", "Traps %d")                                                               \
+    X(SetAdmin, "ADMIN", "ADMIN")                                                                             \
+    X(SetAdminPassword, "Contrasena", "Password")                                                             \
+    X(SetAdminPasswordTitle, "CONTRASENA DE ADMINISTRADOR", "ADMIN PASSWORD")                                 \
+    X(SetAdminOpen, "Abrir MOD MENU", "Open MOD MENU")                                                        \
+    X(SetAdminLock, "Bloquear (quita los trucos)", "Lock (disables cheats)")                                  \
+    X(SetAdminInfo1, "Introduce la contrasena para desbloquear", "Enter the password to unlock")              \
+    X(SetAdminInfo2, "el menu de trucos (MOD MENU).", "the cheat menu (MOD MENU).")                           \
+    X(SetAdminInfoOn, "Tambien en partida: START > MOD MENU", "Also in a match: START > MOD MENU")            \
+    X(SetAdminWrong, "Contrasena incorrecta", "Wrong password")                                               \
+    X(CheatGod, "Modo dios", "God mode")                                                                      \
+    X(CheatGodDesc, "No recibes dano de nada.", "You take no damage.")                                        \
+    X(CheatAimbot, "Aimbot", "Aimbot")                                                                        \
+    X(CheatAimbotDesc, "Cada disparo va a la cabeza del rival visible.", "Every shot hits the head of a visible enemy.") \
+    X(CheatWallhack, "Wallhack", "Wallhack")                                                                  \
+    X(CheatWallhackDesc, "Ves a los rivales y su vida a traves de todo.", "See enemies and their health through walls.") \
+    X(CheatAmmo, "Municion infinita", "Infinite ammo")                                                        \
+    X(CheatAmmoDesc, "El cargador y las granadas no se gastan.", "Magazines and grenades never run out.")     \
+    X(CheatNoReload, "Recarga instantanea", "Instant reload")                                                 \
+    X(CheatNoReloadDesc, "Recargar no lleva tiempo.", "Reloading takes no time.")                             \
+    X(CheatRapidFire, "Cadencia x3", "Rapid fire x3")                                                         \
+    X(CheatRapidFireDesc, "Las armas disparan tres veces mas rapido.", "Weapons fire three times faster.")    \
+    X(CheatNoSpread, "Sin dispersion", "No spread")                                                           \
+    X(CheatNoSpreadDesc, "Precision perfecta y sin retroceso.", "Perfect accuracy, no recoil.")               \
+    X(CheatOneShot, "Un tiro", "One shot")                                                                    \
+    X(CheatOneShotDesc, "Tu dano x10: casi todo elimina de un tiro.", "Your damage x10: almost everything one-shots.") \
+    X(CheatExplosive, "Balas explosivas", "Explosive bullets")                                                \
+    X(CheatExplosiveDesc, "Cada disparo explota donde da. Cuidado!", "Every shot explodes on impact. Careful!") \
+    X(CheatWallbang, "Atravesar paredes", "Shoot through walls")                                              \
+    X(CheatWallbangDesc, "Tus balas atraviesan paredes y objetos.", "Your bullets go through walls and objects.") \
+    X(CheatFly, "Volar", "Fly")                                                                               \
+    X(CheatFlyDesc, "Saltar (mantenido) sube; agacharse baja.", "Hold jump to rise, hold crouch to descend.") \
+    X(CheatSpeed, "Supervelocidad", "Super speed")                                                            \
+    X(CheatSpeedDesc, "Corres al doble de velocidad.", "You run twice as fast.")                              \
+    X(CheatJump, "Supersalto", "Super jump")                                                                  \
+    X(CheatJumpDesc, "Saltas tres veces mas alto.", "You jump three times higher.")                           \
+    X(CheatGravity, "Gravedad lunar", "Moon gravity")                                                         \
+    X(CheatGravityDesc, "Caes despacio, como en la Luna.", "You fall slowly, like on the Moon.")              \
+    X(CheatMaterials, "Materiales infinitos", "Infinite materials")                                           \
+    X(CheatMaterialsDesc, "Construir y poner trampas no gasta nada.", "Building and traps cost nothing.")     \
+    X(CheatInvisible, "Invisible", "Invisible")                                                               \
+    X(CheatInvisibleDesc, "Los bots no te ven ni te oyen.", "Bots can't see or hear you.")                    \
+    X(CheatNoStorm, "Inmune a la tormenta", "Storm immunity")                                                 \
+    X(CheatNoStormDesc, "La tormenta no te hace dano.", "The storm doesn't hurt you.")                        \
+    X(CheatFreeze, "Bots congelados", "Frozen bots")                                                          \
+    X(CheatFreezeDesc, "Los bots se quedan quietos y no disparan.", "Bots stand still and don't shoot.")      \
+    X(CheatParty, "Fiesta", "Party")                                                                          \
+    X(CheatPartyDesc, "Los bots se ponen a bailar (y no pelean).", "Bots start dancing (and don't fight).")   \
+    X(CheatRadar, "Radar de botin", "Loot radar")                                                             \
+    X(CheatRadarDesc, "Cofres y llamas en el minimapa.", "Chests and llamas on the minimap.")                 \
+    X(CheatSlowMo, "Tiempo bala", "Bullet time")                                                              \
+    X(CheatSlowMoDesc, "Todo va a la mitad de velocidad.", "Everything runs at half speed.")                  \
+    X(CheatLlama, "Llama siempre", "Always a llama")                                                          \
+    X(CheatLlamaDesc, "Hay llama en todas las partidas.", "Every match has a supply llama.")                  \
+    X(CheatKit, "Kit legendario", "Legendary kit")                                                            \
+    X(CheatKitDesc, "Empiezas con armas doradas, curas y material.", "Start with gold weapons, heals and mats.") \
+    X(CheatActionHeal, "Vida y escudo al maximo", "Max health and shield")                                    \
+    X(CheatActionRefill, "Llenar municion, material y trampas", "Refill ammo, materials and traps")           \
+    X(CheatActionKillBots, "Eliminar a todos los bots", "Eliminate every bot")                                \
+    X(CheatActionInfo, "Accion: se aplica a la partida al pulsar X.", "Action: applied to the match with X.") \
+    X(CheatAppliesNow, "Se aplica al momento a esta partida.", "Applies to this match immediately.")          \
+    X(CheatAppliesNext, "Se aplica desde la siguiente partida.", "Applies from the next match on.")

@@ -303,6 +303,13 @@ int Inventory::place(int index, ItemType type, Rarity rarity, int count, int loa
     return s.count;
 }
 
+void Inventory::swapSlots(int a, int b) {
+    if (a < 0 || b < 0 || a >= kSlots || b >= kSlots || a == b) return;
+    const InventorySlot tmp = m_slots[a];
+    m_slots[a] = m_slots[b];
+    m_slots[b] = tmp;
+}
+
 InventorySlot Inventory::take(int index) {
     InventorySlot out = m_slots[index];
     m_slots[index] = InventorySlot{};

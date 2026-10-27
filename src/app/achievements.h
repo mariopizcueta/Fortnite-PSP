@@ -41,10 +41,16 @@ struct AchievementDef {
 const AchievementDef& achievementDef(AchievementId id);
 constexpr int kAchievementCount = static_cast<int>(AchievementId::Count);
 
-// Estado de un logro: desbloqueado y la fecha (AAAAMMDD; 0 si no se sabe).
+// Estado de un logro: desbloqueado y la fecha (AAAAMMDD; 0 si no se sabe), y si ya se ha
+// recogido su recompensa de pavos (v0.13; los logros de antes se pueden recoger).
 struct AchievementState {
     bool unlocked = false;
     int date = 0;
+    bool claimed = false;
 };
+
+// Pavos (v0.13; docs/TIENDA.md): por cada victoria magistral y por cada logro completado.
+constexpr int kVbucksPerWin = 50;
+constexpr int kVbucksPerAchievement = 50;
 
 }  // namespace app

@@ -79,6 +79,23 @@ public:
     int testSettingsSection() const { return m_settingsSection; }
     int testToastCount() const { return m_toastCount; }
     int testLockerSlot() const { return m_lockerSlot; }
+    bool testModeOpen() const { return m_modeOpen; }
+    int testGameMode() const { return static_cast<int>(m_gameMode); }
+    int testShopCursor() const { return m_shopCursor; }
+    bool testShopConfirm() const { return m_shopConfirm; }
+    bool testInventoryOpen() const { return m_inventoryOpen; }
+    bool testBuildMode() const { return m_buildMode; }
+    int testInventoryCursor() const { return m_invCursor; }
+    int testInventoryHeld() const { return m_invHeld; }
+    bool testModMenuOpen() const { return m_modMenuOpen; }
+    bool testPasswordOpen() const { return m_passwordOpen; }
+    int testModCursor() const { return m_modCursor; }
+    int testPauseItem() const { return m_pauseItem; }
+    int testReloadSfx() const { return static_cast<int>(m_reloadSfx); }
+    void testAddVbucks(int n) { m_profile.vbucks += n; }
+    int testAchievementCursor() const { return m_achievementCursor; }
+    // Escribe directamente en el teclado de la contrasena (las pruebas no recorren las teclas).
+    void testTypePassword(const char* text) { snprintf(m_passBuffer, sizeof(m_passBuffer), "%s", text); }
     bool testLockerChoosing() const { return m_lockerChoosing; }
     bool testMapOpen() const { return m_mapOpen; }
     bool testDancing() const { return m_dancing; }
@@ -100,9 +117,8 @@ private:
     enum class Hud { Game, Debug, Controls, Hidden, Count };
     // Pantalla de resultados sobre la partida.
     enum class Results { None, Victory, Defeat };
-    enum class LobbyItem { Play, Controls, Exit, Count };
-    // Secciones del lobby (L / R): jugar, logros y taquilla.
-    enum class LobbyTab { Play, Achievements, Locker, Count };
+    // Secciones del lobby (L / R): jugar, logros, tienda (v0.13) y taquilla.
+    enum class LobbyTab { Play, Achievements, Shop, Locker, Count };
     static constexpr int kModelCount = 4;  // jugador + 3 aspectos de bot
 
     // --- app.cpp ----------------------------------------------------------------------
@@ -140,6 +156,16 @@ private:
     void overlaySettings() const;
     void deletePlayerData();
     int settingsItemCount() const;
+    // Menu de administrador (v0.13): contrasena y mod menu (tambien desde la pausa).
+    void openModMenu();
+    void updatePassword(const input::Input& in);
+    void updateModMenu(const input::Input& in);
+    void renderPassword() const;
+    void overlayPassword() const;
+    void renderModMenu() const;
+    void overlayModMenu() const;
+    int modMenuCount() const;
+    void applyCheats();
     void renderAchievementToast() const;
     void overlayAchievementToast() const;
     void renderFullMap() const;
@@ -160,6 +186,7 @@ private:
     math3d::Vec3 scopeEye() const;
     float scopeFov() const;  // campo de vision con la mirilla del arma en la mano
     static audio::Sfx shotSound(int weaponType);
+    static audio::Sfx reloadSound(int weaponType);
     void renderScope() const;
     game::CharacterState renderState(int id) const;
     int spectateTarget() const;
@@ -175,6 +202,18 @@ private:
     void updateLobbyPlay(const input::Input& in);
     void updateAchievementsTab(const input::Input& in);
     void updateLockerTab(const input::Input& in);
+    void updateShopTab(const input::Input& in);
+    void updateModePanel(const input::Input& in);
+    void renderShopTab() const;
+    void overlayShopTab() const;
+    void renderModePanel() const;
+    void overlayModePanel() const;
+    // Objetos de una categoria de la taquilla que se tienen (los gratis y los comprados).
+    int lockerItems(CosmeticSlot slot, int* out, int max) const;
+    // Modelo ya construido con la paleta de un traje (para la vista previa de la tienda).
+    const game::CharacterModel& modelFor(const Cosmetic& outfit) const;
+    void equipOutfit(const Cosmetic& item);
+    void showLobbyMessage(i18n::T text, bool error);
     void renderLobbyTabs() const;
     void overlayLobbyTabs() const;
     void renderAchievementsTab() const;
@@ -210,6 +249,11 @@ private:
     void renderVitals() const;
     void renderSlots() const;
     void renderSwapChooser() const;
+    // Inventario (L + R a la vez, v0.13): ordenar y soltar.
+    void updateInventoryScreen(const input::Input& in);
+    void renderInventoryScreen() const;
+    void overlayInventoryScreen() const;
+    void renderWallhack() const;
     void renderDamageNumbers() const;
     void overlayGame(const FrameInfo& frame) const;
     void overlayGameHud(const FrameInfo& frame) const;
@@ -277,6 +321,14 @@ private:
     bool m_swapOpen = false;
     int m_swapPickup = -1;
     int m_swapCursor = 0;
+    // Inventario (L + R pulsados a la vez): ranura elegida y la que se esta moviendo (-1).
+    bool m_inventoryOpen = false;
+    int m_invCursor = 0;
+    int m_invHeld = -1;
+    float m_lPressAge = 99.0f, m_rPressAge = 99.0f;  // s desde que se pulso L / R
+    // Sonidos que dependen de lo que se hace: recarga y curativo en uso (se cortan al cancelar).
+    audio::Sfx m_reloadSfx = audio::Sfx::Count;
+    audio::Sfx m_useSfx = audio::Sfx::Count;
     bool m_wasScoped = false;        // la mirilla estaba puesta el frame anterior
     bool m_testForceLlama = false;   // solo pruebas de host (testForceLlama)
     bool m_dancing = false;          // cruceta arriba: baile (hasta moverse o actuar)
@@ -313,8 +365,18 @@ private:
     bool m_nickLower = false;
     bool m_matchRecorded = false;  // las estadisticas de esta partida ya se han sumado
     float m_loginTimer = 0.0f;
-    LobbyItem m_lobbyItem = LobbyItem::Play;
     LobbyTab m_lobbyTab = LobbyTab::Play;
+    // Modo de juego y bots (CUADRADO en el lobby abre el panel; TRIANGULO juega).
+    game::GameMode m_gameMode = game::GameMode::BattleRoyale;
+    bool m_modeOpen = false;
+    int m_modeRow = 0;
+    // Tienda: objeto elegido y confirmacion de compra; aviso temporal del lobby.
+    int m_shopCursor = 0;
+    bool m_shopConfirm = false;
+    i18n::T m_lobbyMessage = i18n::T::None;
+    float m_lobbyMessageTime = 0.0f;
+    bool m_lobbyMessageError = false;
+    int m_matchVbucks = 0;  // pavos ganados en esta partida (resultados)
     int m_achievementCursor = 0;   // logro elegido en la lista
     int m_lockerSlot = 0;          // categoria elegida en la taquilla
     bool m_lockerChoosing = false; // dentro de una categoria, eligiendo objeto
@@ -337,6 +399,13 @@ private:
     i18n::T m_settingsMessage = i18n::T::None;
     float m_settingsMessageTime = 0.0f;
     bool m_settingsMessageError = false;
+    // Menu de administrador: teclado de la contrasena y mod menu (opcion elegida).
+    bool m_passwordOpen = false;
+    char m_passBuffer[24] = "";
+    int m_passRow = 0, m_passCol = 0;
+    bool m_passUpper = false;
+    bool m_modMenuOpen = false;
+    int m_modCursor = 0;
     bool m_confirmExit = false;
     float m_lobbyYaw = 0.0f;       // giro del personaje del lobby (stick)
     float m_lobbyTime = 0.0f;

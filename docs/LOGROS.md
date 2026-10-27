@@ -14,6 +14,9 @@ Cada logro muestra nombre, descripción, progreso (`3 / 10`) y, si está consegu
 - Al llegar a la meta se **desbloquea una sola vez** (`Profile::unlockReached`): sale un
   aviso arriba ("LOGRO DESBLOQUEADO"), suena y **se guarda en el momento**. Un logro
   desbloqueado no se vuelve a registrar.
+- **Recompensa (v0.13):** cada logro completado da **50 pavos**, que se recogen con X en
+  la lista (una sola vez; `cobrado_<clave>=1`). Los completados antes de la v0.13 quedan
+  por recoger. Ver [TIENDA.md](TIENDA.md).
 - Se guarda en `perfil.txt` con el resto del perfil (el sistema que ya existía):
   `logro_<clave>=AAAAMMDD` y los contadores (`cofres=`, `piezas=`...). El guardado es
   seguro (se escribe `perfil.tmp` y se cambia por `perfil.txt`; si la consola se apaga a

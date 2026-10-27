@@ -15,9 +15,44 @@ namespace game {
 constexpr int kMaxBots = 30;
 constexpr int kDefaultBots = 10;
 
+// Modos de juego (CUADRADO en el lobby). Monodisparo: en el botin solo hay francotiradores,
+// armas con mirilla y granadas (y curativos); ni trampas ni el resto de armas.
+enum class GameMode : u8 { BattleRoyale, OneShot, Count };
+
+// Trucos del menu de administrador (ajustes > admin, con contrasena). Los marcados (app) los
+// aplica la aplicacion al dibujar; el resto, la partida. Salvo los de los bots, todos son
+// para el jugador.
+struct Cheats {
+    bool godMode = false;            // no recibe dano
+    bool infiniteAmmo = false;       // el cargador no se gasta (ni las granadas)
+    bool noReload = false;           // la recarga es instantanea
+    bool rapidFire = false;          // cadencia x3
+    bool noSpread = false;           // sin dispersion ni retroceso
+    bool aimbot = false;             // cada disparo va a la cabeza del rival visible mas centrado
+    bool oneShot = false;            // dano x10 (balas, explosiones y pico)
+    bool explosiveAmmo = false;      // cada disparo explota al impactar
+    bool wallbang = false;           // las balas atraviesan paredes y objetos
+    bool fly = false;                // vuelo: saltar sube, agacharse baja
+    bool superSpeed = false;         // corre al doble
+    bool superJump = false;          // salta tres veces mas alto
+    bool lowGravity = false;         // gravedad lunar
+    bool infiniteMaterials = false;  // construir no gasta material (ni trampas)
+    bool invisible = false;          // los bots no le ven ni le oyen
+    bool noStorm = false;            // la tormenta no le hace dano
+    bool freezeBots = false;         // los bots se quedan quietos y no disparan
+    bool partyBots = false;          // (app) los bots se quedan bailando
+    bool wallhack = false;           // (app) cajas de los rivales a traves de las paredes
+    bool lootRadar = false;          // (app) cofres, llama y airdrops en el minimapa
+    bool slowMotion = false;         // (app) tiempo bala: todo va a la mitad
+    bool alwaysLlama = false;        // llama en todas las partidas (al empezar)
+    bool legendaryKit = false;       // empieza con armas legendarias (al empezar)
+};
+
 struct MatchConfig {
     int botCount = kDefaultBots;
     u32 seed = 1;
+    GameMode mode = GameMode::BattleRoyale;
+    Cheats cheats;
 
     // IA: cada bot decide cada aiDecisionInterval s (escalonados entre bots); entre
     // decisiones solo sigue su plan (moverse, apuntar), que es barato.
@@ -55,6 +90,24 @@ struct MatchConfig {
     BuildConfig build;
     bool botsBuild = true;
     float botWallCooldown = 9.0f;  // s entre paredes de un mismo bot
+    // Materiales de los bots (v0.13): aterrizan sin nada; cada pieza les cuesta como al
+    // jugador y, cuando les faltan y no hay nadie cerca, pican objetos del mapa hasta tener
+    // botHarvestGoal. Con botsFreeBuild (reglas clasicas de las pruebas) construyen gratis.
+    bool botsHarvest = true;
+    bool botsFreeBuild = false;
+    int botHarvestBelow = 40;   // por debajo de esto (en total) van a picar
+    int botHarvestGoal = 120;   // ...hasta tener esto
+    float botHarvestRange = 28.0f;
+    // Con poca vida (vida + escudo por debajo de botFleeHealth) evitan el combate: huyen a
+    // donde no les vean, se cubren con una pared y se curan; si no llevan curas, las buscan.
+    // Solo pelean si el rival esta encima (botCorneredRange).
+    bool botsFlee = true;
+    float botFleeHealth = 45.0f;
+    float botRecoveredHealth = 75.0f;
+    float botCorneredRange = 5.0f;
+    // Las balas tambien rompen los objetos del mapa (paneles de las naves, cajas,
+    // contenedores...): fraccion del dano del disparo que se aplica (0 = no los rompen).
+    float shotObjectDamageScale = 1.0f;
 
     // Inventario inicial (como en Fortnite: nada, solo el pico).
     struct StartItem {
@@ -156,6 +209,10 @@ struct MatchConfig {
         c.aimAssistDegrees = 3.0f;
         c.weaponSpread = false;
         c.botsBuild = false;
+        c.botsHarvest = false;
+        c.botsFreeBuild = true;
+        c.botsFlee = false;
+        c.shotObjectDamageScale = 0.0f;
         c.startItems[0] = {ItemType::AssaultRifle, 1, Rarity::Legendary};
         c.startItems[1] = {ItemType::Bandage, 5, Rarity::Common};
         c.startItems[2] = {ItemType::SmallShield, 3, Rarity::Uncommon};

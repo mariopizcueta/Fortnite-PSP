@@ -276,6 +276,144 @@ def trampa():
     return normalize(ring * 0.6 + scrape + clunk * 0.7, 0.75)
 
 
+# --- Recargas por familia de arma (v0.13) -----------------------------------------------------
+# Piezas mecanicas: chasquidos metalicos, golpes sordos (cargadores, cartuchos) y deslizamientos.
+# Cada una dura algo menos que la recarga mas rapida de su arma (inventory.cpp).
+
+
+def place(out, start, snd, gain=1.0):
+    i = int(start * RATE)
+    n = min(len(snd), len(out) - i)
+    if n > 0:
+        out[i:i + n] += snd[:n] * gain
+
+
+def clack(freq, dur=0.03, ring=0.4):
+    """Chasquido metalico: ruido + un tono que resuena un poco."""
+    tt = t(dur * 4)
+    tone = np.sin(2 * math.pi * freq * tt) * env(len(tt), 0.0005, dur * ring)
+    noise = rng.uniform(-1, 1, len(tt)) * env(len(tt), 0.0003, dur * 0.25)
+    return tone * 0.7 + noise
+
+
+def thunk(freq=180, dur=0.06):
+    """Golpe sordo (cargador que entra, cartucho que asienta)."""
+    tt = t(dur * 3)
+    body = np.sin(2 * math.pi * (freq * (1.0 - 0.4 * tt / (dur * 3))) * tt) * env(len(tt), 0.001, dur * 0.5)
+    return body + lowpass(rng.uniform(-1, 1, len(tt)), 0.25) * env(len(tt), 0.0005, dur * 0.2) * 0.8
+
+
+def slide(dur=0.12, bright=0.35):
+    """Metal que se desliza (corredera, cerrojo, cargador que sale)."""
+    tt = t(dur)
+    shape = np.sin(math.pi * tt / dur) ** 0.6
+    return lowpass(rng.uniform(-1, 1, len(tt)), bright) * shape * 0.6
+
+
+def recarga_fusil():
+    out = np.zeros(int(1.75 * RATE))
+    place(out, 0.05, clack(900, 0.03))          # boton del cargador
+    place(out, 0.08, slide(0.16, 0.25))         # el cargador sale
+    place(out, 0.88, slide(0.10, 0.3), 0.7)     # el nuevo entra...
+    place(out, 0.98, thunk(220, 0.06))          # ...y asienta
+    place(out, 1.00, clack(1300, 0.025), 0.8)
+    place(out, 1.35, slide(0.08, 0.45))         # palanca de carga atras
+    place(out, 1.43, clack(1600, 0.03))
+    place(out, 1.50, clack(1100, 0.03), 0.8)    # y adelante
+    return normalize(out, 0.6)
+
+
+def shell_insert():
+    snd = np.zeros(int(0.12 * RATE))
+    place(snd, 0.0, slide(0.05, 0.5), 0.5)
+    place(snd, 0.045, clack(1900, 0.02, 0.6), 0.8)
+    place(snd, 0.05, thunk(320, 0.03), 0.6)
+    return snd
+
+
+def pump(start, out):
+    place(out, start, slide(0.09, 0.4))
+    place(out, start + 0.09, clack(700, 0.04, 0.6))
+    place(out, start + 0.17, slide(0.08, 0.45))
+    place(out, start + 0.25, clack(1000, 0.04, 0.6))
+
+
+def recarga_escopeta():
+    # Corredera: un cartucho tras otro y el golpe de la corredera al final.
+    out = np.zeros(int(3.7 * RATE))
+    for k in range(5):
+        place(out, 0.25 + 0.55 * k, shell_insert())
+    pump(3.1, out)
+    return normalize(out, 0.6)
+
+
+def recarga_tactica():
+    out = np.zeros(int(3.3 * RATE))
+    for k in range(6):
+        place(out, 0.2 + 0.42 * k, shell_insert())
+    pump(2.75, out)
+    return normalize(out, 0.6)
+
+
+def recarga_subfusil():
+    out = np.zeros(int(1.5 * RATE))
+    place(out, 0.04, clack(1200, 0.025))
+    place(out, 0.06, slide(0.10, 0.35))
+    place(out, 0.62, slide(0.07, 0.4), 0.6)
+    place(out, 0.69, thunk(260, 0.05))
+    place(out, 0.71, clack(1500, 0.02), 0.8)
+    place(out, 1.05, slide(0.06, 0.5))
+    place(out, 1.11, clack(1800, 0.025))
+    return normalize(out, 0.55)
+
+
+def recarga_pistola():
+    out = np.zeros(int(1.15 * RATE))
+    place(out, 0.03, clack(1400, 0.02))
+    place(out, 0.05, slide(0.07, 0.4), 0.7)
+    place(out, 0.50, thunk(300, 0.04))
+    place(out, 0.52, clack(1700, 0.02), 0.8)
+    place(out, 0.85, clack(2100, 0.03, 0.6))   # corredera adelante
+    return normalize(out, 0.5)
+
+
+def recarga_revolver():
+    out = np.zeros(int(1.8 * RATE))
+    place(out, 0.03, clack(1100, 0.04, 0.6))   # se abre el tambor
+    for k in range(6):                          # vainas fuera y balas dentro
+        place(out, 0.25 + 0.06 * k, clack(2600 + 120 * k, 0.012, 0.8), 0.35)
+    for k in range(3):
+        place(out, 0.75 + 0.18 * k, shell_insert(), 0.7)
+    place(out, 1.40, clack(900, 0.05, 0.5))    # se cierra
+    for k in range(4):                          # y gira
+        place(out, 1.50 + 0.04 * k, clack(2000, 0.01, 0.5), 0.4)
+    return normalize(out, 0.55)
+
+
+def recarga_francotirador():
+    out = np.zeros(int(2.2 * RATE))
+    place(out, 0.05, clack(800, 0.04, 0.6))    # cerrojo arriba
+    place(out, 0.12, slide(0.12, 0.35))        # atras
+    place(out, 0.26, clack(1200, 0.03))
+    place(out, 0.9, shell_insert())            # bala
+    place(out, 1.55, slide(0.12, 0.35))        # adelante
+    place(out, 1.68, clack(1000, 0.03))
+    place(out, 1.78, clack(700, 0.05, 0.6))    # y abajo
+    return normalize(out, 0.6)
+
+
+def recarga_lanzagranadas():
+    out = np.zeros(int(2.3 * RATE))
+    place(out, 0.05, clack(500, 0.07, 0.6))    # se abre (pesado)
+    place(out, 0.08, thunk(120, 0.1))
+    for k in range(3):
+        place(out, 0.55 + 0.38 * k, thunk(160, 0.08))
+        place(out, 0.58 + 0.38 * k, clack(900, 0.03), 0.5)
+    place(out, 1.85, clack(600, 0.08, 0.6))    # se cierra
+    place(out, 1.88, thunk(140, 0.1))
+    return normalize(out, 0.65)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
@@ -285,13 +423,17 @@ SOUNDS = {
     # Parche (fase 8): al final, para que los anteriores sigan saliendo identicos.
     "pistola": pistola, "cohete": cohete, "lanzagranadas": lanzagranadas, "granada_lanzar": granada_lanzar,
     "explosion": explosion, "caja_municion": caja_municion, "llama": llama, "trampa": trampa,
+    # v0.13: recargas por familia (al final: los anteriores siguen saliendo identicos).
+    "recarga_fusil": recarga_fusil, "recarga_escopeta": recarga_escopeta, "recarga_tactica": recarga_tactica,
+    "recarga_subfusil": recarga_subfusil, "recarga_pistola": recarga_pistola, "recarga_revolver": recarga_revolver,
+    "recarga_francotirador": recarga_francotirador, "recarga_lanzagranadas": recarga_lanzagranadas,
 }
 
 
 # Sustituidos por sonidos dados por el usuario (Recursos/Sonidos/Sonidos Limpios, ver
 # tools/prepare_assets.py). Se siguen calculando para no alterar el generador aleatorio:
-# asi los demas efectos salen identicos.
-REPLACED = {"disparo", "victoria"}
+# asi los demas efectos salen identicos. v0.13: la pistola y el cohete ya tienen grabacion.
+REPLACED = {"disparo", "victoria", "pistola", "cohete"}
 
 
 def main():

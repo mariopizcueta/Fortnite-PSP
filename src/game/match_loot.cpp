@@ -56,6 +56,18 @@ constexpr WeaponWeight kWeaponWeights[] = {
     {ItemType::Sniper, 4},        {ItemType::SemiAutoSniper, 4},  {ItemType::RocketLauncher, 3},
     {ItemType::GrenadeLauncher, 3},
 };
+// Monodisparo: solo francotiradores y armas con mirilla.
+constexpr WeaponWeight kOneShotWeights[] = {
+    {ItemType::Sniper, 5}, {ItemType::SemiAutoSniper, 5}, {ItemType::ScopedRifle, 4},
+};
+
+// La rareza existente mas cercana (por encima y, si no hay, por debajo).
+Rarity clampRarity(ItemType type, Rarity rarity) {
+    int k = static_cast<int>(rarity);
+    while (k < 4 && !weaponHasRarity(type, static_cast<Rarity>(k))) ++k;
+    while (k > 0 && !weaponHasRarity(type, static_cast<Rarity>(k))) --k;
+    return static_cast<Rarity>(k);
+}
 
 }  // namespace
 
@@ -78,33 +90,42 @@ Pickup Match::randomWeaponPickup(bool chest) {
     Pickup p;
     p.active = true;
     p.kind = PickupKind::Item;
+    const bool oneShot = m_config.mode == GameMode::OneShot;
+    const WeaponWeight* weights = oneShot ? kOneShotWeights : kWeaponWeights;
+    const int count = oneShot ? static_cast<int>(sizeof(kOneShotWeights) / sizeof(kOneShotWeights[0]))
+                              : static_cast<int>(sizeof(kWeaponWeights) / sizeof(kWeaponWeights[0]));
     float total = 0.0f;
-    for (const WeaponWeight& w : kWeaponWeights) total += w.weight;
+    for (int i = 0; i < count; ++i) total += weights[i].weight;
     float r = m_rng.range(0.0f, total);
-    p.item = kWeaponWeights[0].type;
-    for (const WeaponWeight& w : kWeaponWeights) {
-        if (r < w.weight) {
-            p.item = w.type;
+    p.item = weights[0].type;
+    for (int i = 0; i < count; ++i) {
+        if (r < weights[i].weight) {
+            p.item = weights[i].type;
             break;
         }
-        r -= w.weight;
+        r -= weights[i].weight;
     }
-    p.rarity = randomRarity(chest);
     // Si el arma no existe en esa rareza (escopeta comun, francotirador comun...), la
     // rareza mas cercana por encima.
-    int k = static_cast<int>(p.rarity);
-    while (k < 4 && !weaponHasRarity(p.item, static_cast<Rarity>(k))) ++k;
-    while (k > 0 && !weaponHasRarity(p.item, static_cast<Rarity>(k))) --k;
-    p.rarity = static_cast<Rarity>(k);
+    p.rarity = clampRarity(p.item, randomRarity(chest));
     p.count = 1;
     return p;
+}
+
+AmmoType Match::randomAmmoType() {
+    // Monodisparo: solo la de sus armas (pesada para los francotiradores, media para el
+    // fusil con mira).
+    if (m_config.mode == GameMode::OneShot) return m_rng.chance(0.6f) ? AmmoType::Heavy : AmmoType::Medium;
+    return static_cast<AmmoType>(m_rng.index(4));
 }
 
 Pickup Match::randomConsumablePickup() {
     Pickup p;
     p.active = true;
     p.kind = PickupKind::Item;
-    const float r = m_rng.uniform();
+    float r = m_rng.uniform();
+    // Monodisparo: las granadas son la mitad del botin que no es un arma.
+    if (m_config.mode == GameMode::OneShot) r = r < 0.5f ? 0.35f : (r - 0.5f) * 2.0f;
     if (r < 0.30f) {
         p.item = ItemType::Bandage;
         p.count = 5;
@@ -190,12 +211,12 @@ void Match::spawnLoot() {
             Pickup w = randomWeaponPickup(false);
             dropAround(p, w, 0, 2);
             dropAround(p, ammoPickup(static_cast<AmmoType>(weaponConfig(w.item, w.rarity).ammoType)), 1, 2);
-        } else if (r < 0.81f) {
+        } else if (r < 0.81f || (r < 0.85f && m_config.mode == GameMode::OneShot)) {
             dropAround(p, randomConsumablePickup(), 0, 1);
         } else if (r < 0.85f) {
             dropAround(p, trapPickup(1), 0, 1);
         } else {
-            dropAround(p, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 0, 1);
+            dropAround(p, ammoPickup(randomAmmoType()), 0, 1);
         }
     }
 }
@@ -315,14 +336,16 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, ammoPickup(ammo), 1, total);
             if (consumable) dropAround(front, randomConsumablePickup(), 2, total);
             // A veces, una trampa de pinchos (al lado, fuera del corro).
-            if (m_rng.chance(0.2f)) dropAround(front + forwardFromYaw(c.yaw) * 0.8f, trapPickup(1), 0, 1);
+            if (m_rng.chance(0.2f) && m_config.mode != GameMode::OneShot) {
+                dropAround(front + forwardFromYaw(c.yaw) * 0.8f, trapPickup(1), 0, 1);
+            }
             // Materiales para quien lo abre (en Fortnite salen al suelo; aqui directos).
             if (opener == 0) m_materials.add(static_cast<world::Resource>(m_rng.index(3)), 30);
             break;
         }
         case ContainerKind::AmmoBox:
-            dropAround(front, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 0, 2);
-            dropAround(front, ammoPickup(static_cast<AmmoType>(m_rng.index(4))), 1, 2);
+            dropAround(front, ammoPickup(randomAmmoType()), 0, 2);
+            dropAround(front, ammoPickup(randomAmmoType()), 1, 2);
             break;
         case ContainerKind::Llama: {
             // Como en Fortnite: muchos materiales, municion de todo tipo, curas y granadas.
@@ -353,15 +376,19 @@ void Match::spawnContainerLoot(int index, int opener) {
             grenades.count = 3;
             dropAround(c.position, grenades, slot++, total, 1.6f);
             dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
-            dropAround(c.position, trapPickup(2), slot++, total, 1.6f);
+            if (m_config.mode != GameMode::OneShot) dropAround(c.position, trapPickup(2), slot++, total, 1.6f);
             break;
         }
         case ContainerKind::Airdrop: {
             // Dos armas legendarias distintas, su municion y dos pociones de escudo.
-            const ItemType options[] = {ItemType::AssaultRifle, ItemType::Shotgun,       ItemType::Sniper,
-                                        ItemType::Smg,          ItemType::BurstRifle,    ItemType::TacticalShotgun,
-                                        ItemType::RocketLauncher, ItemType::GrenadeLauncher};
-            constexpr int kOptions = sizeof(options) / sizeof(options[0]);
+            const ItemType normal[] = {ItemType::AssaultRifle, ItemType::Shotgun,       ItemType::Sniper,
+                                       ItemType::Smg,          ItemType::BurstRifle,    ItemType::TacticalShotgun,
+                                       ItemType::RocketLauncher, ItemType::GrenadeLauncher};
+            // Monodisparo: lo mejor de sus armas (el dorado o la rareza mas alta que tengan).
+            const ItemType scoped[] = {ItemType::Sniper, ItemType::SemiAutoSniper, ItemType::ScopedRifle};
+            const bool oneShot = m_config.mode == GameMode::OneShot;
+            const ItemType* options = oneShot ? scoped : normal;
+            const int kOptions = oneShot ? 3 : static_cast<int>(sizeof(normal) / sizeof(normal[0]));
             const int first = m_rng.index(kOptions);
             const int second = (first + 1 + m_rng.index(kOptions - 1)) % kOptions;
             const ItemType chosen[2] = {options[first], options[second]};
@@ -371,10 +398,10 @@ void Match::spawnContainerLoot(int index, int opener) {
                 w.active = true;
                 w.kind = PickupKind::Item;
                 w.item = type;
-                w.rarity = Rarity::Legendary;
+                w.rarity = clampRarity(type, Rarity::Legendary);
                 w.count = 1;
                 dropAround(front, w, slot++, 6);
-                dropAround(front, ammoPickup(static_cast<AmmoType>(weaponConfig(type, Rarity::Legendary).ammoType)), slot++, 6);
+                dropAround(front, ammoPickup(static_cast<AmmoType>(weaponConfig(type, w.rarity).ammoType)), slot++, 6);
             }
             Pickup potion;
             potion.active = true;
@@ -445,8 +472,15 @@ bool Match::pickUp(int id, int index) {
     Pickup& p = m_pickups[index];
     if (!p.active) return false;
     if (id > 0) {
-        // Bot: armas y consumibles a su inventario (la municion no: la suya es infinita).
+        // Bot: armas y consumibles a su inventario (la municion no: la suya es infinita) y
+        // los materiales, a los suyos.
         Bot& b = m_bots[id - 1];
+        if (p.kind == PickupKind::Materials) {
+            p.count -= b.materials.add(p.resource, p.count);
+            if (p.count <= 0) p.active = false;
+            p.claimedBy = -1;
+            return true;
+        }
         if (!botWants(b, p)) {
             p.claimedBy = -1;
             return false;
@@ -605,14 +639,18 @@ void Match::dropBotWeapon(int index) {
         const ItemType t = b.bag.slot(i).type;
         total += t == ItemType::None ? 0 : (isWeapon(t) ? 2 : 1);
     }
-    // Materiales (como en Fortnite): madera siempre; piedra y metal, a veces.
+    // Sus materiales (como en Fortnite): los que haya picado o recogido (v0.13: ya no
+    // aparecen de la nada). Con las reglas clasicas, que no pican, un poco de cada.
     Pickup mats[3];
     int matCount = 0;
     if (m_config.botsDropMaterials) {
-        const int wood = 30 + m_rng.index(31);
-        const int stone = m_rng.chance(0.6f) ? 20 + m_rng.index(21) : 0;
-        const int metal = m_rng.chance(0.35f) ? 10 + m_rng.index(21) : 0;
-        const int amounts[3] = {wood, stone, metal};
+        int amounts[3] = {b.materials.amount[0], b.materials.amount[1], b.materials.amount[2]};
+        if (!m_config.botsHarvest) {
+            amounts[0] = 30 + m_rng.index(31);
+            amounts[1] = m_rng.chance(0.6f) ? 20 + m_rng.index(21) : 0;
+            amounts[2] = m_rng.chance(0.35f) ? 10 + m_rng.index(21) : 0;
+        }
+        b.materials = Materials{};
         for (int r = 0; r < 3; ++r) {
             if (amounts[r] <= 0) continue;
             Pickup& m = mats[matCount++];
@@ -645,6 +683,11 @@ void Match::dropBotWeapon(int index) {
 }
 
 bool Match::botWants(const Bot& b, const Pickup& p) const {
+    if (p.active && p.kind == PickupKind::Materials) {
+        int total = 0;
+        for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) total += b.materials.amount[r];
+        return total < m_config.botHarvestGoal;
+    }
     if (!p.active || p.kind != PickupKind::Item) return false;
     // Los bots no lanzan granadas ni ponen trampas.
     if (itemDef(p.item).kind == ItemKind::Throwable || itemDef(p.item).kind == ItemKind::Trap) return false;

@@ -33,6 +33,8 @@ const Field kFields[] = {
     {"bajas_trampa", &Profile::trapKills},
     {"bajas_explosivo", &Profile::explosiveKills},
     {"curativos", &Profile::itemsUsed},
+    // v0.13.
+    {"pavos", &Profile::vbucks},
 };
 
 // Caracteres permitidos en el nombre (los del teclado en pantalla).
@@ -115,6 +117,33 @@ int Profile::unlockedCount() const {
     return n;
 }
 
+int Profile::claimableCount() const {
+    int n = 0;
+    for (const AchievementState& a : achievements) n += a.unlocked && !a.claimed ? 1 : 0;
+    return n;
+}
+
+bool Profile::claim(AchievementId id) {
+    const int i = static_cast<int>(id);
+    if (i < 0 || i >= kAchievementCount || !achievements[i].unlocked || achievements[i].claimed) return false;
+    achievements[i].claimed = true;
+    vbucks += kVbucksPerAchievement;
+    return true;
+}
+
+bool Profile::owns(const Cosmetic& item) const {
+    const int i = cosmeticIndex(item);
+    return item.price <= 0 || (i >= 0 && i < 32 && (owned & (1u << i)) != 0);
+}
+
+bool Profile::buy(const Cosmetic& item) {
+    const int i = cosmeticIndex(item);
+    if (owns(item) || i < 0 || i >= 32 || vbucks < item.price) return false;
+    vbucks -= item.price;
+    owned |= 1u << i;
+    return true;
+}
+
 const Cosmetic* Profile::equippedIn(CosmeticSlot slot) const {
     const Cosmetic* c = findCosmetic(equipped[static_cast<int>(slot)]);
     return c && c->slot == slot ? c : defaultCosmetic(slot);
@@ -134,6 +163,7 @@ bool Profile::load(const char* path) {
         if (!f) return false;
     }
     *this = Profile{};
+    bool hasVbucks = false;
     char line[96];
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = '\0';
@@ -151,6 +181,20 @@ bool Profile::load(const char* path) {
             }
             clean[n] = '\0';
             snprintf(name, sizeof(name), "%s", clean);
+            continue;
+        }
+        if (strncmp(line, "cobrado_", 8) == 0) {
+            for (int i = 0; i < kAchievementCount; ++i) {
+                if (strcmp(line + 8, achievementDef(static_cast<AchievementId>(i)).key) == 0 && strcmp(value, "1") == 0) {
+                    achievements[i].claimed = true;
+                }
+            }
+            continue;
+        }
+        if (strncmp(line, "comprado_", 9) == 0) {
+            const Cosmetic* c = findCosmetic(line + 9);
+            const int i = c ? cosmeticIndex(*c) : -1;
+            if (i >= 0 && i < 32 && c->price > 0 && strcmp(value, "1") == 0) owned |= 1u << i;
             continue;
         }
         if (strncmp(line, "logro_", 6) == 0) {
@@ -174,10 +218,23 @@ bool Profile::load(const char* path) {
             continue;
         }
         for (const Field& field : kFields) {
-            if (strcmp(line, field.key) == 0 && parseCount(value, &number)) this->*field.value = number;
+            if (strcmp(line, field.key) == 0 && parseCount(value, &number)) {
+                this->*field.value = number;
+                hasVbucks |= field.value == &Profile::vbucks;
+            }
         }
     }
     fclose(f);
+    // Perfil de antes de la v0.13 (sin pavos): las victorias ya ganadas se pagan al cargarlo;
+    // los logros ya completados quedan sin recoger (se recogen en LOGROS).
+    if (!hasVbucks) vbucks = wins * kVbucksPerWin;
+    // Un recogido sin desbloquear (fichero editado a mano) no cuenta.
+    for (AchievementState& a : achievements) a.claimed &= a.unlocked;
+    // Lo equipado tiene que ser algo que se tiene.
+    for (int s = 0; s < kCosmeticSlotCount; ++s) {
+        const Cosmetic* c = findCosmetic(equipped[s]);
+        if (c && !owns(*c)) equipped[s][0] = '\0';
+    }
     if (mostKills > kills) mostKills = kills;
     if (wins > matches) wins = matches;
     return true;
@@ -193,6 +250,10 @@ bool Profile::save(const char* path) const {
             if (!achievements[i].unlocked) continue;
             ok &= fprintf(f, "logro_%s=%d\n", achievementDef(static_cast<AchievementId>(i)).key,
                           achievements[i].date > 0 ? achievements[i].date : 1) > 0;
+            if (achievements[i].claimed) ok &= fprintf(f, "cobrado_%s=1\n", achievementDef(static_cast<AchievementId>(i)).key) > 0;
+        }
+        for (int i = 0; i < cosmeticCount() && i < 32; ++i) {
+            if (owned & (1u << i)) ok &= fprintf(f, "comprado_%s=1\n", cosmetic(i).key) > 0;
         }
         for (int s = 0; s < kCosmeticSlotCount; ++s) {
             if (!equipped[s][0]) continue;

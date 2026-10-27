@@ -6,12 +6,17 @@ namespace app {
 namespace {
 
 // Catalogo. El primero de cada categoria es el de por defecto. Para anadir una skin: su
-// paleta en game::palettes (character_model.*) y una fila aqui (ver docs/TAQUILLA.md).
+// paleta en game::palettes (character_model.*) y una fila aqui (ver docs/TAQUILLA.md); con
+// precio sale en la tienda. Las claves no se cambian nunca (estan en perfil.txt).
 const Cosmetic kCatalog[] = {
-    {"traje_recluta", i18n::T::CosmeticRecruit, CosmeticSlot::Outfit, game::Rarity::Common, &game::palettes::kPlayer},
-    {"pico_defecto", i18n::T::CosmeticPickaxe, CosmeticSlot::Pickaxe, game::Rarity::Common, nullptr},
-    {"ala_defecto", i18n::T::CosmeticGlider, CosmeticSlot::Glider, game::Rarity::Common, nullptr},
-    {"baile_defecto", i18n::T::CosmeticEmote, CosmeticSlot::Emote, game::Rarity::Common, nullptr},
+    {"traje_recluta", i18n::T::CosmeticRecruit, CosmeticSlot::Outfit, game::Rarity::Common, &game::palettes::kPlayer, 0},
+    {"pico_defecto", i18n::T::CosmeticPickaxe, CosmeticSlot::Pickaxe, game::Rarity::Common, nullptr, 0},
+    {"ala_defecto", i18n::T::CosmeticGlider, CosmeticSlot::Glider, game::Rarity::Common, nullptr, 0},
+    {"baile_defecto", i18n::T::CosmeticEmote, CosmeticSlot::Emote, game::Rarity::Common, nullptr, 0},
+    // v0.13: los trajes de los bots, poco comunes, 800 pavos cada uno.
+    {"traje_comando", i18n::T::SkinCommando, CosmeticSlot::Outfit, game::Rarity::Uncommon, &game::palettes::kCommando, 800},
+    {"traje_mono", i18n::T::SkinOrange, CosmeticSlot::Outfit, game::Rarity::Uncommon, &game::palettes::kOrange, 800},
+    {"traje_guardabosques", i18n::T::SkinRanger, CosmeticSlot::Outfit, game::Rarity::Uncommon, &game::palettes::kRanger, 800},
 };
 constexpr int kCatalogSize = sizeof(kCatalog) / sizeof(kCatalog[0]);
 
@@ -61,6 +66,21 @@ const Cosmetic* findCosmetic(const char* key) {
         if (strcmp(c.key, key) == 0) return &c;
     }
     return nullptr;
+}
+
+int shopItems(int* out, int max) {
+    int n = 0;
+    for (int i = 0; i < kCatalogSize && n < max; ++i) {
+        if (kCatalog[i].price > 0) out[n++] = i;
+    }
+    return n;
+}
+
+int cosmeticIndex(const Cosmetic& item) {
+    for (int i = 0; i < kCatalogSize; ++i) {
+        if (&kCatalog[i] == &item) return i;
+    }
+    return -1;
 }
 
 const Cosmetic* defaultCosmetic(CosmeticSlot slot) {

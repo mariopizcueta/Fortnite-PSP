@@ -45,30 +45,38 @@ const Tip kTips[] = {
 constexpr int kTipCount = sizeof(kTips) / sizeof(kTips[0]);
 constexpr int kTipX = 100, kTipY = 238;
 
-// Botones del lobby (columna derecha, como el boton JUGAR de Fortnite).
+// Columna derecha del lobby (como el boton JUGAR de Fortnite). v0.13: sin navegar con la
+// cruceta; cada boton lleva el suyo: TRIANGULO juega, CUADRADO abre el modo de juego y los
+// bots, SELECT los controles y CIRCULO sale.
 constexpr float kLobbyColumnX = 312.0f;
 constexpr float kLobbyColumnW = 152.0f;
 struct LobbyButton {
     float y, h;
 };
-constexpr LobbyButton kLobbyButtons[] = {{70.0f, 42.0f}, {146.0f, 28.0f}, {180.0f, 28.0f}};
-constexpr float kBotsSelectorY = 116.0f;
+constexpr LobbyButton kPlayButton{70.0f, 38.0f};
+constexpr LobbyButton kModeBox{112.0f, 38.0f};
+constexpr LobbyButton kControlsButton{156.0f, 24.0f};
+constexpr LobbyButton kExitButton{186.0f, 24.0f};
+const ui::Hint kPlayHint[] = {{ui::Button::Triangle, T::None}};
+const ui::Hint kModeHint[] = {{ui::Button::Square, T::None}};
+const ui::Hint kControlsHint[] = {{ui::Button::Select, T::None}};
+const ui::Hint kExitHint[] = {{ui::Button::Circle, T::None}};
+// Pavos (arriba a la derecha, bajo la barra, en todas las secciones).
+constexpr float kVbucksX = 396.0f, kVbucksY = 34.0f, kVbucksW = 78.0f, kVbucksH = 16.0f;
 
 // Ayudas de controles (iconos de Recursos/Texturas PSP).
-const ui::Hint kLobbyHints[] = {{ui::Button::Dpad, T::HintSelect}, {ui::Button::Cross, T::HintAccept},
-                                {ui::Button::L, T::None},        {ui::Button::R, T::HintSections},
-                                {ui::Button::Start, T::HintSettings}};
+const ui::Hint kLobbyHints[] = {{ui::Button::Stick, T::HintRotate}, {ui::Button::L, T::None},
+                                {ui::Button::R, T::HintSections},  {ui::Button::Start, T::HintSettings}};
 const ui::Hint kExitHints[] = {{ui::Button::Cross, T::HintExit}, {ui::Button::Circle, T::HintCancel}};
 const ui::Hint kPauseHints[] = {{ui::Button::Start, T::None}, {ui::Button::Circle, T::HintContinue}};
 const ui::Hint kResultsHints[] = {{ui::Button::Cross, T::HintLobby}, {ui::Button::Square, T::HintAnotherMatch},
                                   {ui::Button::Circle, T::HintSpectate}};
-constexpr int kLobbyHintCount = 5, kExitHintCount = 2, kPauseHintCount = 2;
+constexpr int kLobbyHintCount = 4, kExitHintCount = 2, kPauseHintCount = 2;
 constexpr int kHintsY = 258;
 
-int centeredHintsX(const ui::Hint* hints, int count) { return (gfx::kScreenWidth - ui::hintsWidth(hints, count)) / 2; }
 
-// Opciones de la pausa.
-constexpr T kPauseItems[] = {T::PauseContinue, T::PauseLobby};
+// Opciones de la pausa (la tercera, MOD MENU, solo con el menu de administrador).
+constexpr T kPauseItems[] = {T::PauseContinue, T::PauseLobby, T::PauseModMenu};
 
 void drawButton(float x, float y, float w, float h, u32 fill, bool selected, float time) {
     gfx::fillRect(x, y, w, h, fill);
@@ -256,6 +264,9 @@ void App::recordMatch() {
     const int kills = m_match.playerKills();
     ++m_profile.matches;
     if (won) ++m_profile.wins;
+    // Pavos por la victoria magistral (v0.13).
+    m_matchVbucks = won ? kVbucksPerWin : 0;
+    m_profile.vbucks += m_matchVbucks;
     if (!m_match.alive(0)) ++m_profile.deaths;
     if (kills > m_profile.mostKills) m_profile.mostKills = kills;
     const int place = won ? 1 : m_match.playerPlace();
@@ -373,6 +384,7 @@ void App::overlayLogin() const {
 
 void App::updateLobby(const input::Input& in, float dt) {
     m_lobbyTime += dt;
+    if (m_lobbyMessageTime > 0.0f) m_lobbyMessageTime -= dt;
     // El stick gira el personaje sobre la plataforma.
     m_lobbyYaw -= in.analogX() * 2.6f * dt;
     game::CharacterState idle;
@@ -395,15 +407,19 @@ void App::updateLobby(const input::Input& in, float dt) {
         updateSettings(in);
         return;
     }
+    if (m_modeOpen) {
+        updateModePanel(in);
+        return;
+    }
     if (in.pressed(PSP_CTRL_START) && !in.held(PSP_CTRL_LTRIGGER) && !in.held(PSP_CTRL_RTRIGGER)) {
         openSettings();
         return;
     }
-    // L / R: seccion del lobby (jugar, logros, taquilla). En la partida L y R son apuntar
-    // y disparar: no hay conflicto, el lobby solo existe fuera de ella.
+    // L / R: seccion del lobby (jugar, logros, tienda, taquilla). En la partida L y R son
+    // apuntar y disparar: no hay conflicto, el lobby solo existe fuera de ella.
     const int tabs = static_cast<int>(LobbyTab::Count);
     const int tabStep = (in.pressed(PSP_CTRL_RTRIGGER) ? 1 : 0) - (in.pressed(PSP_CTRL_LTRIGGER) ? 1 : 0);
-    if (tabStep != 0 && !in.held(PSP_CTRL_START)) {
+    if (tabStep != 0 && !in.held(PSP_CTRL_START) && !m_shopConfirm) {
         m_lobbyTab = static_cast<LobbyTab>((static_cast<int>(m_lobbyTab) + tabs + tabStep) % tabs);
         m_lockerChoosing = false;
         playSfx(audio::Sfx::MenuMove);
@@ -412,66 +428,290 @@ void App::updateLobby(const input::Input& in, float dt) {
     switch (m_lobbyTab) {
         case LobbyTab::Play: updateLobbyPlay(in); break;
         case LobbyTab::Achievements: updateAchievementsTab(in); break;
+        case LobbyTab::Shop: updateShopTab(in); break;
         case LobbyTab::Locker: updateLockerTab(in); break;
         case LobbyTab::Count: break;
     }
 }
 
+void App::showLobbyMessage(T text, bool error) {
+    m_lobbyMessage = text;
+    m_lobbyMessageError = error;
+    m_lobbyMessageTime = 2.5f;
+}
+
 void App::updateLobbyPlay(const input::Input& in) {
-    const int count = static_cast<int>(LobbyItem::Count);
-    int item = static_cast<int>(m_lobbyItem);
-    if (in.pressed(PSP_CTRL_UP)) item = (item + count - 1) % count;
-    if (in.pressed(PSP_CTRL_DOWN)) item = (item + 1) % count;
-    if (item != static_cast<int>(m_lobbyItem)) {
-        m_lobbyItem = static_cast<LobbyItem>(item);
-        playSfx(audio::Sfx::MenuMove);
-    }
-    if (m_lobbyItem == LobbyItem::Play) {
-        const int before = m_botCount;
-        if (in.pressed(PSP_CTRL_LEFT) && m_botCount > kMinBots) m_botCount -= 5;
-        if (in.pressed(PSP_CTRL_RIGHT) && m_botCount < game::kMaxBots) m_botCount += 5;
-        if (before != m_botCount) playSfx(audio::Sfx::MenuMove);
-    }
-    if (!in.pressed(PSP_CTRL_CROSS)) return;
-    switch (m_lobbyItem) {
-        case LobbyItem::Play:
-            if (!m_worldReady) break;
-            playSfx(audio::Sfx::MenuAccept);
-            startLoading();
-            break;
-        case LobbyItem::Controls:
-            playSfx(audio::Sfx::MenuAccept);
-            m_screen = Screen::Controls;
-            break;
-        case LobbyItem::Exit:
-            playSfx(audio::Sfx::MenuAccept);
-            m_confirmExit = true;
-            break;
-        case LobbyItem::Count:
-            break;
+    // Sin navegar con la cruceta: cada accion tiene su boton.
+    if (in.pressed(PSP_CTRL_TRIANGLE)) {
+        if (!m_worldReady) return;
+        playSfx(audio::Sfx::MenuAccept);
+        startLoading();
+    } else if (in.pressed(PSP_CTRL_SQUARE)) {
+        m_modeOpen = true;
+        m_modeRow = 0;
+        playSfx(audio::Sfx::MenuAccept, 0.7f);
+    } else if (in.pressed(PSP_CTRL_SELECT)) {
+        playSfx(audio::Sfx::MenuAccept);
+        m_screen = Screen::Controls;
+    } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+        playSfx(audio::Sfx::MenuAccept);
+        m_confirmExit = true;
     }
 }
 
-// Logros: lista con su progreso (arriba / abajo la recorren).
+// Panel del modo de juego y de los bots (CUADRADO en JUGAR): arriba / abajo elige la fila,
+// izquierda / derecha cambia el valor; CUADRADO, X o CIRCULO lo cierran.
+constexpr float kModeX = 106.0f, kModeY = 64.0f, kModeW = 268.0f, kModeH = 150.0f;
+constexpr float kModeRowY[2] = {96.0f, 160.0f};
+const ui::Hint kModeHints[] = {{ui::Button::Up, T::None},   {ui::Button::Down, T::HintSelect},
+                               {ui::Button::Left, T::None}, {ui::Button::Right, T::HintChange},
+                               {ui::Button::Square, T::HintClose}};
+
+T modeName(game::GameMode mode) { return mode == game::GameMode::OneShot ? T::ModeOneShot : T::ModeBattleRoyale; }
+T modeDescription(game::GameMode mode, int line) {
+    if (mode == game::GameMode::OneShot) return line == 0 ? T::ModeOneShotDesc1 : T::ModeOneShotDesc2;
+    return line == 0 ? T::ModeBattleRoyaleDesc1 : T::ModeBattleRoyaleDesc2;
+}
+
+void App::updateModePanel(const input::Input& in) {
+    if (in.pressed(PSP_CTRL_SQUARE) || in.pressed(PSP_CTRL_CROSS) || in.pressed(PSP_CTRL_CIRCLE)) {
+        m_modeOpen = false;
+        playSfx(audio::Sfx::MenuAccept, 0.7f);
+        return;
+    }
+    if (in.pressed(PSP_CTRL_UP) || in.pressed(PSP_CTRL_DOWN)) {
+        m_modeRow = 1 - m_modeRow;
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+    const int change = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    if (change == 0) return;
+    if (m_modeRow == 0) {
+        const int modes = static_cast<int>(game::GameMode::Count);
+        m_gameMode = static_cast<game::GameMode>((static_cast<int>(m_gameMode) + modes + change) % modes);
+        playSfx(audio::Sfx::MenuMove);
+    } else {
+        const int before = m_botCount;
+        if (change < 0 && m_botCount > kMinBots) m_botCount -= 5;
+        if (change > 0 && m_botCount < game::kMaxBots) m_botCount += 5;
+        if (before != m_botCount) playSfx(audio::Sfx::MenuMove);
+    }
+}
+
+void App::renderModePanel() const {
+    gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 140));
+    gfx::fillRect(kModeX, kModeY, kModeW, kModeH, rgba(10, 20, 52, 245));
+    ui::frame(kModeX, kModeY, kModeW, kModeH, 2, rgba(90, 160, 255));
+    gfx::fillRect(kModeX, kModeY, kModeW, 20, kFortniteBlue);
+    for (int r = 0; r < 2; ++r) {
+        const float h = r == 0 ? 54.0f : 22.0f;
+        gfx::fillRect(kModeX + 10, kModeRowY[r] - 4, kModeW - 20, h, r == m_modeRow ? rgba(36, 92, 196, 230) : rgba(20, 34, 80, 200));
+        if (r == m_modeRow) ui::frame(kModeX + 9, kModeRowY[r] - 5, kModeW - 18, h + 2, 1, kWhite);
+    }
+    ui::drawHintIcons(m_atlas, centeredHintsX(kModeHints, 5), static_cast<int>(kModeY + kModeH) - 16, kModeHints, 5);
+}
+
+void App::overlayModePanel() const {
+    printCenteredAt(240, static_cast<int>(kModeY) + 6, kWhite, tr(T::ModeTitle));
+    char line[64];
+    snprintf(line, sizeof(line), "< %s >", tr(modeName(m_gameMode)));
+    printCenteredAt(240, static_cast<int>(kModeRowY[0]), kYellow, line);
+    printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 14, kLightGrey, tr(modeDescription(m_gameMode, 0)));
+    printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 25, kLightGrey, tr(modeDescription(m_gameMode, 1)));
+    snprintf(line, sizeof(line), tr(T::ModeBots), m_botCount);
+    printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, m_botCount > game::kDefaultBots ? kErrorRed : kWhite, line);
+    if (m_botCount > game::kDefaultBots) printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 22, kLightGrey, tr(T::BotsWarning));
+    ui::printHints(centeredHintsX(kModeHints, 5), static_cast<int>(kModeY + kModeH) - 16, kLightGrey, kModeHints, 5);
+}
+
+// Logros: lista con su progreso (arriba / abajo la recorren; X recoge la recompensa).
 constexpr int kAchievementRows = 6;
 constexpr float kListX = 14.0f, kListY = 52.0f, kListW = 452.0f, kRowH = 31.0f;
 
 void App::updateAchievementsTab(const input::Input& in) {
+    if (in.pressed(PSP_CTRL_CROSS)) {
+        // Recompensa de un logro completado (tambien los de antes de la v0.13).
+        if (m_profile.claim(static_cast<AchievementId>(m_achievementCursor))) {
+            saveProfile();
+            playSfx(audio::Sfx::MenuAccept);
+            playSfx(audio::Sfx::Pickup, 0.8f);
+            showLobbyMessage(T::RewardClaimed, false);
+        } else {
+            playSfx(audio::Sfx::MenuMove, 0.4f);
+        }
+        return;
+    }
     const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
     if (step == 0) return;
     m_achievementCursor = (m_achievementCursor + kAchievementCount + step) % kAchievementCount;
     playSfx(audio::Sfx::MenuMove, 0.6f);
 }
 
+// --- Tienda (v0.13; docs/TIENDA.md) -------------------------------------------------------------
+// Los trajes de los personajes de la CPU, poco comunes, por 800 pavos. Arriba / abajo eligen
+// (el personaje del lobby lo muestra), X compra (con confirmacion) o, si ya es tuyo, lo equipa.
+constexpr float kShopX = 262.0f, kShopY = 56.0f, kShopW = 208.0f, kShopCardH = 58.0f, kShopGap = 6.0f;
+const ui::Hint kShopHints[] = {{ui::Button::Up, T::None},       {ui::Button::Down, T::HintSelect},
+                               {ui::Button::Cross, T::HintBuy}, {ui::Button::L, T::None},
+                               {ui::Button::R, T::HintSections}};
+const ui::Hint kShopConfirmHints[] = {{ui::Button::Cross, T::HintBuy}, {ui::Button::Circle, T::HintCancel}};
+
+u32 rarityFill(game::Rarity rarity) {
+    switch (rarity) {
+        case game::Rarity::Uncommon: return rgba(54, 140, 46, 235);
+        case game::Rarity::Rare: return rgba(40, 110, 200, 235);
+        case game::Rarity::Epic: return rgba(130, 60, 190, 235);
+        case game::Rarity::Legendary: return rgba(200, 120, 30, 235);
+        default: return rgba(110, 116, 126, 235);
+    }
+}
+
+const game::CharacterModel& App::modelFor(const Cosmetic& outfit) const {
+    if (outfit.palette == &game::palettes::kCommando) return m_models[1];
+    if (outfit.palette == &game::palettes::kOrange) return m_models[2];
+    if (outfit.palette == &game::palettes::kRanger) return m_models[3];
+    return m_models[0];
+}
+
+void App::equipOutfit(const Cosmetic& item) {
+    const Cosmetic* before = m_profile.equippedIn(item.slot);
+    m_profile.equip(item);
+    saveProfile();
+    // Otro traje: el modelo del jugador se rehace con su paleta.
+    if (item.slot == CosmeticSlot::Outfit && item.palette && before != &item) {
+        m_models[0].destroy();
+        m_modelsReady &= m_models[0].build(*item.palette);
+    }
+}
+
+void App::updateShopTab(const input::Input& in) {
+    int items[8];
+    const int n = shopItems(items, 8);
+    if (n == 0) return;
+    if (m_shopCursor >= n) m_shopCursor = 0;
+    const Cosmetic& item = cosmetic(items[m_shopCursor]);
+    if (m_shopConfirm) {
+        if (in.pressed(PSP_CTRL_CROSS)) {
+            m_shopConfirm = false;
+            if (m_profile.buy(item)) {
+                saveProfile();
+                playSfx(audio::Sfx::MenuAccept);
+                playSfx(audio::Sfx::Pickup, 0.9f);
+                showLobbyMessage(T::ShopBought, false);
+                platform::log::write("tienda: comprado %s (quedan %d pavos)", item.key, m_profile.vbucks);
+            } else {
+                showLobbyMessage(T::ShopNoVbucks, true);
+            }
+        } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+            m_shopConfirm = false;
+            playSfx(audio::Sfx::MenuMove);
+        }
+        return;
+    }
+    const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (step != 0) {
+        m_shopCursor = (m_shopCursor + n + step) % n;
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+    if (!in.pressed(PSP_CTRL_CROSS)) return;
+    if (m_profile.owns(item)) {
+        // Ya es tuyo: X lo equipa.
+        equipOutfit(item);
+        playSfx(audio::Sfx::MenuAccept);
+        showLobbyMessage(T::ShopEquipped, false);
+    } else if (m_profile.vbucks < item.price) {
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+        showLobbyMessage(T::ShopNoVbucks, true);
+    } else {
+        m_shopConfirm = true;
+        playSfx(audio::Sfx::MenuAccept, 0.7f);
+    }
+}
+
+void App::renderShopTab() const {
+    int items[8];
+    const int n = shopItems(items, 8);
+    gfx::fillRect(kShopX - 8, 36, kShopW + 12, 214, rgba(8, 18, 48, 200));
+    for (int i = 0; i < n; ++i) {
+        const Cosmetic& c = cosmetic(items[i]);
+        const float y = kShopY + i * (kShopCardH + kShopGap);
+        gfx::fillRect(kShopX, y, kShopW, kShopCardH, rarityFill(c.rarity));
+        gfx::fillRect(kShopX, y + kShopCardH - 18, kShopW, 18, rgba(0, 0, 0, 110));
+        // Silueta del traje: los colores de su paleta en franjas (la vista previa grande es el
+        // personaje del lobby).
+        if (c.palette) {
+            gfx::fillRect(kShopX + 6, y + 6, 10, 10, c.palette->shirt);
+            gfx::fillRect(kShopX + 6, y + 18, 10, 10, c.palette->pants);
+            gfx::fillRect(kShopX + 6, y + 30, 10, 6, c.palette->skin);
+        }
+        if (!m_profile.owns(c) && m_atlas.ready()) m_atlas.draw(atlas::kPavos, kShopX + kShopW - 52, y + kShopCardH - 16);
+        const bool selected = i == m_shopCursor;
+        ui::frame(kShopX - 1, y - 1, kShopW + 2, kShopCardH + 2, selected ? 2 : 1, selected ? kYellow : rgba(255, 255, 255, 120));
+    }
+    if (m_shopConfirm) {
+        gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 140));
+        gfx::fillRect(100, 92, 280, 86, kNavy);
+        ui::frame(100, 92, 280, 86, 2, kYellow);
+        if (m_atlas.ready()) m_atlas.draw(atlas::kPavosBig, 128, 120);
+        ui::drawHintIcons(m_atlas, centeredHintsX(kShopConfirmHints, 2), 160, kShopConfirmHints, 2);
+    } else {
+        ui::drawHintIcons(m_atlas, 8, kHintsY, kShopHints, 5);
+    }
+}
+
+void App::overlayShopTab() const {
+    int items[8];
+    const int n = shopItems(items, 8);
+    gfx::text::printShadow(static_cast<int>(kShopX), 40, kWhite, "%s", tr(T::ShopTitle));
+    char line[64];
+    // Con la confirmacion abierta solo su texto (el de las tarjetas la atravesaria).
+    for (int i = 0; i < n && !m_shopConfirm; ++i) {
+        const Cosmetic& c = cosmetic(items[i]);
+        const int y = static_cast<int>(kShopY + i * (kShopCardH + kShopGap));
+        gfx::text::printShadow(static_cast<int>(kShopX) + 22, y + 8, kWhite, "%s", tr(c.name));
+        snprintf(line, sizeof(line), "%s | %s", game::rarityName(c.rarity), tr(cosmeticSlotName(c.slot)));
+        gfx::text::print(static_cast<int>(kShopX) + 22, y + 22, rgba(225, 240, 225), "%s", line);
+        const bool owned = m_profile.owns(c);
+        const bool equipped = m_profile.equippedIn(c.slot) == &c;
+        if (owned) {
+            gfx::text::printShadow(static_cast<int>(kShopX) + 8, y + static_cast<int>(kShopCardH) - 13,
+                                   equipped ? kYellow : kWhite, "%s", tr(equipped ? T::ShopEquippedTag : T::ShopOwned));
+        } else {
+            snprintf(line, sizeof(line), "%d", c.price);
+            gfx::text::printShadow(static_cast<int>(kShopX + kShopW) - 34, y + static_cast<int>(kShopCardH) - 13,
+                                   m_profile.vbucks >= c.price ? kWhite : kErrorRed, "%s", line);
+        }
+    }
+    if (m_shopConfirm && m_shopCursor < n) {
+        const Cosmetic& c = cosmetic(items[m_shopCursor]);
+        snprintf(line, sizeof(line), tr(T::ShopConfirm), tr(c.name));
+        printCentered(102, kWhite, line);
+        snprintf(line, sizeof(line), tr(T::ShopPrice), c.price, m_profile.vbucks - c.price);
+        gfx::text::printShadow(158, 128, kYellow, "%s", line);
+        ui::printHints(centeredHintsX(kShopConfirmHints, 2), 160, kWhite, kShopConfirmHints, 2);
+    } else {
+        ui::printHints(8, kHintsY, kLightGrey, kShopHints, 5);
+    }
+}
+
 // Taquilla: rejilla de 3 x 2 categorias (como Referencias/locker.jpg); X entra en una y
-// elige objeto; X equipa; CIRCULO vuelve.
+// elige objeto; X equipa; CIRCULO vuelve. Solo sale lo que se tiene (lo gratis y lo comprado).
 constexpr int kLockerCols = 3;
 constexpr float kLockerX = 262.0f, kLockerY = 64.0f, kLockerSlot = 60.0f, kLockerGap = 8.0f;
+
+int App::lockerItems(CosmeticSlot slot, int* out, int max) const {
+    int all[16];
+    const int n = cosmeticsIn(slot, all, 16);
+    int k = 0;
+    for (int i = 0; i < n && k < max; ++i) {
+        if (m_profile.owns(cosmetic(all[i]))) out[k++] = all[i];
+    }
+    return k;
+}
 
 void App::updateLockerTab(const input::Input& in) {
     const CosmeticSlot slot = static_cast<CosmeticSlot>(m_lockerSlot);
     int items[16];
-    const int n = cosmeticsIn(slot, items, 16);
+    const int n = lockerItems(slot, items, 16);
     if (m_lockerChoosing) {
         const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
         if (step != 0 && n > 0) {
@@ -479,15 +719,7 @@ void App::updateLockerTab(const input::Input& in) {
             playSfx(audio::Sfx::MenuMove, 0.6f);
         }
         if (in.pressed(PSP_CTRL_CROSS) && n > 0) {
-            const Cosmetic& item = cosmetic(items[m_lockerItem]);
-            const Cosmetic* before = m_profile.equippedIn(slot);
-            m_profile.equip(item);
-            saveProfile();
-            // Otro traje: el modelo del jugador se rehace con su paleta.
-            if (slot == CosmeticSlot::Outfit && item.palette && before != &item) {
-                m_models[0].destroy();
-                m_modelsReady &= m_models[0].build(*item.palette);
-            }
+            equipOutfit(cosmetic(items[m_lockerItem]));
             playSfx(audio::Sfx::MenuAccept);
             m_lockerChoosing = false;
         } else if (in.pressed(PSP_CTRL_CIRCLE)) {
@@ -518,11 +750,12 @@ void App::updateLockerTab(const input::Input& in) {
 }
 
 // Pestanas en la barra superior (como PLAY / LOCKER en Fortnite), con L y R a los lados.
-constexpr float kTabsX = 150.0f, kTabGap = 18.0f, kTabY = 8.0f;
+constexpr float kTabsX = 118.0f, kTabGap = 14.0f, kTabY = 8.0f;
 const ui::Hint kTabLeft[] = {{ui::Button::L, T::None}};
 const ui::Hint kTabRight[] = {{ui::Button::R, T::None}};
-const ui::Hint kAchievementHints[] = {{ui::Button::Up, T::None}, {ui::Button::Down, T::HintScroll},
-                                      {ui::Button::L, T::None}, {ui::Button::R, T::HintSections}};
+const ui::Hint kAchievementHints[] = {{ui::Button::Up, T::None},         {ui::Button::Down, T::HintScroll},
+                                      {ui::Button::Cross, T::HintClaim}, {ui::Button::L, T::None},
+                                      {ui::Button::R, T::HintSections}};
 const ui::Hint kLockerHints[] = {{ui::Button::Dpad, T::HintSelect}, {ui::Button::Cross, T::HintOpen},
                                  {ui::Button::L, T::None}, {ui::Button::R, T::HintSections}};
 const ui::Hint kLockerChooseHints[] = {{ui::Button::Up, T::None}, {ui::Button::Down, T::HintSelect},
@@ -531,7 +764,8 @@ const ui::Hint kLockerChooseHints[] = {{ui::Button::Up, T::None}, {ui::Button::D
 const assets::ui::Rect& tabLabel(int tab) {
     switch (tab) {
         case 1: return label(atlas::kTabLogros, atlas::kTabAchievements);
-        case 2: return label(atlas::kTabTaquilla, atlas::kTabLocker);
+        case 2: return label(atlas::kTabTienda, atlas::kTabShop);
+        case 3: return label(atlas::kTabTaquilla, atlas::kTabLocker);
         default: return label(atlas::kTabJugar, atlas::kTabPlay);
     }
 }
@@ -540,7 +774,7 @@ const assets::ui::Rect& tabLabel(int tab) {
 template <typename Fn>
 void forEachTab(Fn&& fn) {
     float x = kTabsX + ui::hintsWidth(kTabLeft, 1) + 8.0f;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         const assets::ui::Rect& r = tabLabel(i);
         fn(i, x, static_cast<float>(r.w));
         x += r.w + kTabGap;
@@ -551,8 +785,9 @@ void App::renderLobbyTabs() const {
     gfx::fillRect(0, 0, gfx::kScreenWidth, 30, kNavy);
     gfx::fillRect(0, 30, gfx::kScreenWidth, 1, rgba(60, 90, 160));
     if (!m_atlas.ready()) return;
-    m_atlas.draw(atlas::kLogoSmall, 8, 3, 0.7f);
+    m_atlas.draw(atlas::kLogoSmall, 6, 4, 0.62f);
     float end = 0.0f;
+    const bool rewards = m_profile.claimableCount() > 0;
     forEachTab([&](int i, float x, float w) {
         const bool on = static_cast<int>(m_lobbyTab) == i;
         if (on) {
@@ -561,53 +796,85 @@ void App::renderLobbyTabs() const {
         } else {
             m_atlas.draw(tabLabel(i), x, kTabY, 1.0f, rgba(170, 190, 230));
         }
+        // Recompensas por recoger: un punto amarillo en LOGROS.
+        if (i == 1 && rewards) gfx::fillRect(x + w + 1, 6, 5, 5, kYellow);
         end = x + w;
     });
     ui::drawHintIcons(m_atlas, static_cast<int>(kTabsX), 11, kTabLeft, 1);
     ui::drawHintIcons(m_atlas, static_cast<int>(end + 10.0f), 11, kTabRight, 1);
 }
 
-void App::overlayLobbyTabs() const {}
+void App::overlayLobbyTabs() const {
+    if (!m_modeOpen) {
+        gfx::text::printShadow(static_cast<int>(kVbucksX) + 20, static_cast<int>(kVbucksY) + 4, kWhite, "%d", m_profile.vbucks);
+    }
+    if (m_lobbyMessageTime > 0.0f) printCentered(220, m_lobbyMessageError ? kErrorRed : kYellow, tr(m_lobbyMessage));
+}
 
 void App::renderLobby() {
     // Composicion de Referencias/Lobby.png: barra superior azul marino con el logotipo y las
-    // secciones, fondo azul con reticula, suelo de arena y el personaje en su plataforma.
+    // secciones, fondo azul con reticula, suelo de arena y el personaje en su plataforma. En
+    // la tienda, el personaje es el traje elegido (vista previa).
     if (m_lobbyReady) m_lobbyScene.drawBackground(m_lobbyTime);
     if (m_lobbyReady && m_modelsReady) {
-        m_lobbyScene.drawScene(m_models[0], m_lobbyAnim, m_world.textures(), m_lobbyYaw, m_lobbyTime,
-                               &m_lobbyViewProjection);
+        const game::CharacterModel* model = &m_models[0];
+        if (m_lobbyTab == LobbyTab::Shop) {
+            int items[8];
+            const int n = shopItems(items, 8);
+            if (n > 0) model = &modelFor(cosmetic(items[m_shopCursor < n ? m_shopCursor : 0]));
+        }
+        m_lobbyScene.drawScene(*model, m_lobbyAnim, m_world.textures(), m_lobbyYaw, m_lobbyTime, &m_lobbyViewProjection);
         gfx::begin2D();
     }
     renderLobbyTabs();
     gfx::fillRect(0, 252, gfx::kScreenWidth, 20, rgba(10, 18, 44, 220));
+    if (m_lobbyMessageTime > 0.0f) gfx::fillRect(0, 216, gfx::kScreenWidth, 16, rgba(0, 0, 0, 170));
+    // Pavos, bajo la barra a la derecha (encima del panel de cada seccion).
+    auto vbucksPill = [&]() {
+        gfx::fillRect(kVbucksX, kVbucksY, kVbucksW, kVbucksH, rgba(8, 18, 48, 235));
+        ui::frame(kVbucksX, kVbucksY, kVbucksW, kVbucksH, 1, rgba(90, 160, 255));
+        if (m_atlas.ready()) m_atlas.draw(atlas::kPavos, kVbucksX + 2, kVbucksY + 1);
+    };
     if (m_lobbyTab == LobbyTab::Achievements) {
         renderAchievementsTab();
+        vbucksPill();
+    } else if (m_lobbyTab == LobbyTab::Shop) {
+        renderShopTab();
+        vbucksPill();
     } else if (m_lobbyTab == LobbyTab::Locker) {
         renderLockerTab();
+        vbucksPill();
     } else {
+        vbucksPill();
         if (m_atlas.ready()) {
             const atlas::Rect& map = label(atlas::kMapa, atlas::kMapaEn);
-            m_atlas.draw(map, kLobbyColumnX + (kLobbyColumnW - map.w * 0.82f) * 0.5f, 44, 0.82f);
+            m_atlas.draw(map, kLobbyColumnX + (kLobbyColumnW - map.w * 0.82f) * 0.5f, 53, 0.82f);
         }
-        // Columna de botones: JUGAR (amarillo), selector de bots, CONTROLES y SALIR.
-        for (int i = 0; i < static_cast<int>(LobbyItem::Count); ++i) {
-            const LobbyButton& b = kLobbyButtons[i];
-            const bool selected = static_cast<int>(m_lobbyItem) == i && !m_confirmExit;
-            const u32 fill = i == 0 ? (selected ? kYellow : kYellowDark)
-                                    : (selected ? kFortniteBlue : rgba(20, 44, 100, 220));
-            drawButton(kLobbyColumnX, b.y, kLobbyColumnW, b.h, fill, selected, m_lobbyTime);
-        }
-        gfx::fillRect(kLobbyColumnX, kBotsSelectorY, kLobbyColumnW, 22, rgba(0, 0, 0, 120));
+        // Columna: JUGAR (amarillo, late), modo y bots, CONTROLES y SALIR; cada uno con su boton.
+        drawButton(kLobbyColumnX, kPlayButton.y, kLobbyColumnW, kPlayButton.h, kYellow, !m_confirmExit && !m_modeOpen,
+                   m_lobbyTime);
+        gfx::fillRect(kLobbyColumnX, kModeBox.y, kLobbyColumnW, kModeBox.h, rgba(0, 0, 0, 150));
+        ui::frame(kLobbyColumnX, kModeBox.y, kLobbyColumnW, kModeBox.h, 1, rgba(90, 160, 255));
+        drawButton(kLobbyColumnX, kControlsButton.y, kLobbyColumnW, kControlsButton.h, rgba(20, 44, 100, 220), false,
+                   m_lobbyTime);
+        drawButton(kLobbyColumnX, kExitButton.y, kLobbyColumnW, kExitButton.h, rgba(20, 44, 100, 220), false, m_lobbyTime);
         if (m_atlas.ready()) {
-            const float cx = kLobbyColumnX + kLobbyColumnW * 0.5f;
-            m_atlas.drawCentered(label(atlas::kJugar, atlas::kPlayEn), cx, kLobbyButtons[0].y + 6);
-            m_atlas.drawCentered(label(atlas::kControles, atlas::kControlsEn), cx, kLobbyButtons[1].y + 3);
-            m_atlas.drawCentered(label(atlas::kSalir, atlas::kExitEn), cx, kLobbyButtons[2].y + 3);
+            const float cx = kLobbyColumnX + kLobbyColumnW * 0.5f + 8.0f;
+            m_atlas.drawCentered(label(atlas::kJugar, atlas::kPlayEn), cx, kPlayButton.y + 4);
+            m_atlas.drawCentered(label(atlas::kControles, atlas::kControlsEn), cx, kControlsButton.y + 1, 0.9f);
+            m_atlas.drawCentered(label(atlas::kSalir, atlas::kExitEn), cx, kExitButton.y + 1, 0.9f);
         }
+        const int bx = static_cast<int>(kLobbyColumnX) + 6;
+        ui::drawHintIcons(m_atlas, bx, static_cast<int>(kPlayButton.y) + 16, kPlayHint, 1);
+        ui::drawHintIcons(m_atlas, static_cast<int>(kLobbyColumnX + kLobbyColumnW) - 20, static_cast<int>(kModeBox.y) + 15,
+                          kModeHint, 1);
+        ui::drawHintIcons(m_atlas, bx, static_cast<int>(kControlsButton.y) + 8, kControlsHint, 1);
+        ui::drawHintIcons(m_atlas, bx, static_cast<int>(kExitButton.y) + 8, kExitHint, 1);
         ui::drawHintIcons(m_atlas, 8, kHintsY, kLobbyHints, kLobbyHintCount);
         // Panel de estadisticas del perfil (el texto, en overlayLobby).
         gfx::fillRect(kStatsX, kStatsY, kStatsW, kStatsH, rgba(8, 18, 48, 200));
         ui::frame(kStatsX, kStatsY, kStatsW, kStatsH, 1, rgba(90, 160, 255));
+        if (m_modeOpen) renderModePanel();
     }
 
     if (m_confirmExit) {
@@ -616,21 +883,28 @@ void App::renderLobby() {
         ui::frame(120, 100, 240, 72, 2, rgba(90, 160, 255));
         ui::drawHintIcons(m_atlas, centeredHintsX(kExitHints, kExitHintCount), 140, kExitHints, kExitHintCount);
     }
-    if (m_settingsOpen) renderSettings();
+    if (m_settingsOpen) {
+        if (m_modMenuOpen) renderModMenu();
+        else renderSettings();
+    }
 }
 
 void App::overlayLobby() const {
     // Con los ajustes abiertos solo se escribe su texto (el del lobby lo atravesaria: el
     // texto va por CPU encima de todo lo dibujado con GU).
     if (m_settingsOpen) {
-        overlaySettings();
+        if (m_modMenuOpen) overlayModMenu();
+        else overlaySettings();
         return;
     }
-    overlayLobbyTabs();
     if (m_lobbyTab == LobbyTab::Achievements) {
         overlayAchievementsTab();
+    } else if (m_lobbyTab == LobbyTab::Shop) {
+        overlayShopTab();
     } else if (m_lobbyTab == LobbyTab::Locker) {
         overlayLockerTab();
+    } else if (m_modeOpen) {
+        overlayModePanel();
     } else {
         // Nombre sobre la cabeza del personaje, como en la referencia.
         float x = 0.0f, y = 0.0f;
@@ -652,15 +926,16 @@ void App::overlayLobby() const {
         gfx::text::print(kStatsX + 4, kStatsY + 66, kLightGrey, "%s", tr(T::StatBestPlace));
         if (m_profile.bestPlace > 0) gfx::text::print(kStatsX + 94, kStatsY + 66, kWhite, "#%d", m_profile.bestPlace);
         else gfx::text::print(kStatsX + 110, kStatsY + 66, kWhite, "-");
-        const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f);
-        char bots[24];
+        // Modo y bots elegidos (CUADRADO los cambia).
+        const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f) - 6;
+        printCenteredAt(cx, static_cast<int>(kModeBox.y) + 7, kYellow, tr(modeName(m_gameMode)));
+        char bots[32];
         snprintf(bots, sizeof(bots), tr(T::BotsSelector), m_botCount);
-        printCenteredAt(cx, static_cast<int>(kBotsSelectorY) + 7,
-                        m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
-        if (m_botCount > game::kDefaultBots) printCenteredAt(cx, 216, kLightGrey, tr(T::BotsWarning));
-        if (!m_worldReady) printCenteredAt(cx, 232, kErrorRed, tr(T::NoMapError));
+        printCenteredAt(cx, static_cast<int>(kModeBox.y) + 21, m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
+        if (!m_worldReady) printCenteredAt(cx + 6, 232, kErrorRed, tr(T::NoMapError));
         ui::printHints(8, kHintsY, kLightGrey, kLobbyHints, kLobbyHintCount);
     }
+    overlayLobbyTabs();
     gfx::text::print(400, 258, kDimGrey, "v%s", config::kVersion);
 
     if (m_confirmExit) {
@@ -693,6 +968,11 @@ void App::renderAchievementsTab() const {
         // Insignia: dorada si esta desbloqueado.
         gfx::fillRect(kListX + 4, y + 4, 20, 20, st.unlocked ? kYellow : rgba(70, 80, 100));
         gfx::fillRect(kListX + 8, y + 8, 12, 12, st.unlocked ? rgba(255, 240, 160) : rgba(40, 46, 60));
+        // Recompensa: pavos por recoger (amarillo) o ya recogidos (atenuado).
+        if (m_atlas.ready()) {
+            m_atlas.draw(atlas::kPavos, kListX + 254, y + 4, 1.0f, st.claimed ? rgba(255, 255, 255, 90) : kWhite);
+        }
+        if (st.unlocked && !st.claimed) gfx::fillRect(kListX + 252, y + 2, 46, 18, rgba(250, 216, 40, 70));
         // Barra de progreso.
         const int value = m_profile.stat(def.stat);
         const float progress = st.unlocked ? 1.0f : math3d::clampf(static_cast<float>(value) / def.goal, 0.0f, 1.0f);
@@ -702,13 +982,17 @@ void App::renderAchievementsTab() const {
     // Barra de desplazamiento.
     const float h = 186.0f * kAchievementRows / kAchievementCount;
     gfx::fillRect(kListX + kListW + 1, kListY + 186.0f * top / kAchievementCount, 2, h, rgba(255, 255, 255, 160));
-    ui::drawHintIcons(m_atlas, 8, kHintsY, kAchievementHints, 4);
+    ui::drawHintIcons(m_atlas, 8, kHintsY, kAchievementHints, 5);
 }
 
 void App::overlayAchievementsTab() const {
     char line[64];
     snprintf(line, sizeof(line), tr(T::AchievementsTitle), m_profile.unlockedCount(), kAchievementCount);
     gfx::text::printShadow(static_cast<int>(kListX) + 2, 40, config::kColorGold, "%s", line);
+    if (m_profile.claimableCount() > 0) {
+        snprintf(line, sizeof(line), tr(T::RewardsPending), m_profile.claimableCount());
+        gfx::text::printShadow(200, 40, kYellow, "%s", line);
+    }
     const int top = achievementScroll(m_achievementCursor);
     for (int r = 0; r < kAchievementRows; ++r) {
         const int i = top + r;
@@ -718,6 +1002,8 @@ void App::overlayAchievementsTab() const {
         gfx::text::printShadow(static_cast<int>(kListX) + 30, y + 5, st.unlocked ? kWhite : kLightGrey, "%s", tr(def.name));
         gfx::text::print(static_cast<int>(kListX) + 30, y + 16, st.unlocked ? kLightGrey : kDimGrey, "%s",
                          tr(def.description));
+        gfx::text::printShadow(static_cast<int>(kListX) + 270, y + 7, st.claimed ? kDimGrey : (st.unlocked ? kYellow : kWhite),
+                               "+%d", kVbucksPerAchievement);
         if (st.unlocked) {
             if (st.date > 0) {
                 snprintf(line, sizeof(line), "%02d/%02d/%04d", st.date % 100, (st.date / 100) % 100, st.date / 10000);
@@ -731,7 +1017,7 @@ void App::overlayAchievementsTab() const {
         gfx::text::printShadow(static_cast<int>(kListX) + 440 - gfx::text::width(line), y + 5,
                                st.unlocked ? kYellow : kWhite, "%s", line);
     }
-    ui::printHints(8, kHintsY, kLightGrey, kAchievementHints, 4);
+    ui::printHints(8, kHintsY, kLightGrey, kAchievementHints, 5);
 }
 
 // --- Taquilla -----------------------------------------------------------------------------
@@ -754,7 +1040,13 @@ void App::renderLockerTab() const {
             m_atlas.draw(atlas::kPico, x + 17, y + 14);
         }
         if (static_cast<CosmeticSlot>(i) == CosmeticSlot::Outfit && m_atlas.ready()) {
-            m_atlas.draw(atlas::kIconVivos, x + 16, y + 16, 2.0f);
+            if (on && on->palette && on->price > 0) {
+                // Traje comprado: los colores de su paleta.
+                gfx::fillRect(x + 22, y + 12, 16, 14, on->palette->shirt);
+                gfx::fillRect(x + 22, y + 28, 16, 14, on->palette->pants);
+            } else {
+                m_atlas.draw(atlas::kIconVivos, x + 16, y + 16, 2.0f);
+            }
         }
         const bool selected = i == m_lockerSlot;
         ui::frame(x - 1, y - 1, kLockerSlot + 2, kLockerSlot + 2, selected ? 2 : 1,
@@ -765,7 +1057,7 @@ void App::renderLockerTab() const {
     if (m_lockerChoosing) {
         // La lista de la categoria tapa la rejilla mientras se elige.
         int items[16];
-        const int n = cosmeticsIn(static_cast<CosmeticSlot>(m_lockerSlot), items, 16);
+        const int n = lockerItems(static_cast<CosmeticSlot>(m_lockerSlot), items, 16);
         gfx::fillRect(kLockerX - 4, kLockerY - 4, 206, 144, rgba(10, 20, 50, 245));
         ui::frame(kLockerX - 4, kLockerY - 4, 206, 144, 1, kYellow);
         if (n > 0) gfx::fillRect(kLockerX, kLockerY + 14 + m_lockerItem * 14.0f, 198, 12, rgba(36, 92, 196));
@@ -790,7 +1082,7 @@ void App::overlayLockerTab() const {
         snprintf(line, sizeof(line), "%s | %s", game::rarityName(on->rarity), i18n::tr(cosmeticSlotName(slot)));
         gfx::text::print(14, 202, rgba(40, 40, 50), "%s", line);
         gfx::text::print(14, 216, rgba(16, 26, 58), "%s", tr(on->name));
-        gfx::text::print(14, 230, rgba(60, 60, 70), "%s", tr(T::LockerDefault));
+        gfx::text::print(14, 230, rgba(60, 60, 70), "%s", tr(on->price > 0 ? T::LockerBought : T::LockerDefault));
     } else {
         gfx::text::print(14, 202, rgba(40, 40, 50), "%s", i18n::tr(cosmeticSlotName(slot)));
         // Categoria sin objetos todavia: mensaje en vez de una lista vacia.
@@ -799,7 +1091,7 @@ void App::overlayLockerTab() const {
     }
     if (m_lockerChoosing) {
         int items[16];
-        const int n = cosmeticsIn(slot, items, 16);
+        const int n = lockerItems(slot, items, 16);
         const int listY = static_cast<int>(kLockerY);
         gfx::text::printShadow(static_cast<int>(kLockerX), listY, kYellow, "%s", i18n::tr(cosmeticSlotName(slot)));
         if (n == 0) {
@@ -883,8 +1175,16 @@ void App::overlayLoading() const {
 // --- Pausa ------------------------------------------------------------------------------
 
 void App::updatePause(const input::Input& in) {
-    if (in.pressed(PSP_CTRL_UP) || in.pressed(PSP_CTRL_DOWN)) {
-        m_pauseItem = 1 - m_pauseItem;
+    // Mod menu abierto desde la pausa: los trucos se aplican a la partida al momento.
+    if (m_modMenuOpen) {
+        updateModMenu(in);
+        return;
+    }
+    const int items = m_settings.admin ? 3 : 2;
+    if (m_pauseItem >= items) m_pauseItem = 0;
+    const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
+    if (step != 0) {
+        m_pauseItem = (m_pauseItem + items + step) % items;
         playSfx(audio::Sfx::MenuMove);
     }
     const bool resume = in.pressed(PSP_CTRL_START) || in.pressed(PSP_CTRL_CIRCLE) ||
@@ -892,6 +1192,8 @@ void App::updatePause(const input::Input& in) {
     if (resume) {
         m_paused = false;
         playSfx(audio::Sfx::MenuMove);
+    } else if (in.pressed(PSP_CTRL_CROSS) && m_pauseItem == 2) {
+        openModMenu();
     } else if (in.pressed(PSP_CTRL_CROSS)) {
         playSfx(audio::Sfx::MenuAccept);
         recordMatch();  // abandonar tambien cuenta
@@ -900,22 +1202,37 @@ void App::updatePause(const input::Input& in) {
 }
 
 void App::renderPause() const {
-    gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 150));
-    gfx::fillRect(140, 74, 200, 118, kNavy);
-    gfx::fillRect(140, 74, 200, 22, kFortniteBlue);
-    for (int i = 0; i < 2; ++i) {
-        const bool selected = m_pauseItem == i;
-        drawButton(156, 110 + i * 34, 168, 24, selected ? kYellow : rgba(20, 44, 100), selected, m_blinkTime);
+    if (m_modMenuOpen) {
+        renderModMenu();
+        return;
     }
-    ui::drawHintIcons(m_atlas, centeredHintsX(kPauseHints, kPauseHintCount), 176, kPauseHints, kPauseHintCount);
+    const int items = m_settings.admin ? 3 : 2;
+    const float h = 50.0f + 34.0f * items;
+    gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 150));
+    gfx::fillRect(140, 74, 200, h, kNavy);
+    gfx::fillRect(140, 74, 200, 22, kFortniteBlue);
+    for (int i = 0; i < items; ++i) {
+        const bool selected = m_pauseItem == i;
+        const u32 idle = i == 2 ? rgba(70, 20, 110) : rgba(20, 44, 100);
+        drawButton(156, 110 + i * 34, 168, 24, selected ? kYellow : idle, selected, m_blinkTime);
+    }
+    ui::drawHintIcons(m_atlas, centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(74 + h) - 16, kPauseHints,
+                      kPauseHintCount);
 }
 
 void App::overlayPause() const {
+    if (m_modMenuOpen) {
+        overlayModMenu();
+        return;
+    }
+    const int items = m_settings.admin ? 3 : 2;
+    const float h = 50.0f + 34.0f * items;
     printCentered(81, kWhite, tr(T::Pause));
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < items; ++i) {
         printCentered(118 + i * 34, m_pauseItem == i ? kNavy : kWhite, tr(kPauseItems[i]));
     }
-    ui::printHints(centeredHintsX(kPauseHints, kPauseHintCount), 176, kLightGrey, kPauseHints, kPauseHintCount);
+    ui::printHints(centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(74 + h) - 16, kLightGrey, kPauseHints,
+                   kPauseHintCount);
 }
 
 // --- Resultados -------------------------------------------------------------------------
@@ -984,6 +1301,12 @@ void App::renderResults() const {
 
     // Tres columnas: puesto, bajas y tiempo.
     gfx::fillRect(84, 124, 312, 64, kPanel);
+    // Pavos ganados (victoria magistral), bajo las bajas.
+    if (victory && m_matchVbucks > 0 && m_atlas.ready()) {
+        char line[48];
+        snprintf(line, sizeof(line), tr(T::ResultVbucks), m_matchVbucks);
+        m_atlas.draw(atlas::kPavos, 258 - gfx::text::width(line) / 2 - 17, 173);
+    }
     for (int i = 1; i < 3; ++i) gfx::fillRect(84 + 104 * i, 130, 1, 52, rgba(255, 255, 255, 60));
     const int place = victory ? 1 : m_match.playerPlace();
     const u32 gold = config::kColorGold;
@@ -1016,6 +1339,10 @@ void App::overlayResults() const {
 
     if (victory) {
         printCentered(196, config::kColorGold, tr(T::ResultSurvived));
+        if (m_matchVbucks > 0) {
+            snprintf(line, sizeof(line), tr(T::ResultVbucks), m_matchVbucks);
+            gfx::text::printShadow(258 - gfx::text::width(line) / 2, 176, kYellow, "%s", line);
+        }
     } else {
         if (m_playerKiller > 0) {
             snprintf(line, sizeof(line), tr(T::ResultKilledBy), m_match.name(m_playerKiller));

@@ -32,6 +32,33 @@ const ButtonName kButtonNames[] = {{PSP_CTRL_CROSS, "X"},          {PSP_CTRL_CIR
                                    {PSP_CTRL_RTRIGGER, "R"},       {PSP_CTRL_LTRIGGER, "L"},
                                    {PSP_CTRL_DOWN, "ABAJO"},       {PSP_CTRL_UP, "ARRIBA"}};
 
+const CheatDef kCheats[] = {
+    {"modo_dios", i18n::T::CheatGod, i18n::T::CheatGodDesc, &game::Cheats::godMode},
+    {"aimbot", i18n::T::CheatAimbot, i18n::T::CheatAimbotDesc, &game::Cheats::aimbot},
+    {"wallhack", i18n::T::CheatWallhack, i18n::T::CheatWallhackDesc, &game::Cheats::wallhack},
+    {"municion_infinita", i18n::T::CheatAmmo, i18n::T::CheatAmmoDesc, &game::Cheats::infiniteAmmo},
+    {"sin_recarga", i18n::T::CheatNoReload, i18n::T::CheatNoReloadDesc, &game::Cheats::noReload},
+    {"cadencia", i18n::T::CheatRapidFire, i18n::T::CheatRapidFireDesc, &game::Cheats::rapidFire},
+    {"sin_dispersion", i18n::T::CheatNoSpread, i18n::T::CheatNoSpreadDesc, &game::Cheats::noSpread},
+    {"un_tiro", i18n::T::CheatOneShot, i18n::T::CheatOneShotDesc, &game::Cheats::oneShot},
+    {"balas_explosivas", i18n::T::CheatExplosive, i18n::T::CheatExplosiveDesc, &game::Cheats::explosiveAmmo},
+    {"atravesar_paredes", i18n::T::CheatWallbang, i18n::T::CheatWallbangDesc, &game::Cheats::wallbang},
+    {"volar", i18n::T::CheatFly, i18n::T::CheatFlyDesc, &game::Cheats::fly},
+    {"supervelocidad", i18n::T::CheatSpeed, i18n::T::CheatSpeedDesc, &game::Cheats::superSpeed},
+    {"supersalto", i18n::T::CheatJump, i18n::T::CheatJumpDesc, &game::Cheats::superJump},
+    {"gravedad_lunar", i18n::T::CheatGravity, i18n::T::CheatGravityDesc, &game::Cheats::lowGravity},
+    {"materiales_infinitos", i18n::T::CheatMaterials, i18n::T::CheatMaterialsDesc, &game::Cheats::infiniteMaterials},
+    {"invisible", i18n::T::CheatInvisible, i18n::T::CheatInvisibleDesc, &game::Cheats::invisible},
+    {"sin_tormenta", i18n::T::CheatNoStorm, i18n::T::CheatNoStormDesc, &game::Cheats::noStorm},
+    {"bots_congelados", i18n::T::CheatFreeze, i18n::T::CheatFreezeDesc, &game::Cheats::freezeBots},
+    {"fiesta", i18n::T::CheatParty, i18n::T::CheatPartyDesc, &game::Cheats::partyBots},
+    {"radar_botin", i18n::T::CheatRadar, i18n::T::CheatRadarDesc, &game::Cheats::lootRadar},
+    {"tiempo_bala", i18n::T::CheatSlowMo, i18n::T::CheatSlowMoDesc, &game::Cheats::slowMotion},
+    {"llama_siempre", i18n::T::CheatLlama, i18n::T::CheatLlamaDesc, &game::Cheats::alwaysLlama},
+    {"kit_legendario", i18n::T::CheatKit, i18n::T::CheatKitDesc, &game::Cheats::legendaryKit},
+};
+constexpr int kCheatCount = sizeof(kCheats) / sizeof(kCheats[0]);
+
 bool readInt(const char* text, int lo, int hi, int* out) {
     char* end = nullptr;
     const long v = strtol(text, &end, 10);
@@ -55,6 +82,10 @@ void tempPath(const char* path, char* out, size_t size) {
 }
 
 }  // namespace
+
+int cheatCount() { return kCheatCount; }
+
+const CheatDef& cheatDef(int index) { return kCheats[index >= 0 && index < kCheatCount ? index : 0]; }
 
 const char* buttonKey(u32 mask) {
     for (const ButtonName& b : kButtonNames) {
@@ -154,6 +185,12 @@ bool Settings::load(const char* path) {
             readInt(v, 10, 35, &deadzone);
         } else if (strcmp(line, "invertir_y") == 0) {
             readBool(v, &invertY);
+        } else if (strcmp(line, "admin") == 0) {
+            readBool(v, &admin);
+        } else if (strncmp(line, "truco_", 6) == 0) {
+            for (const CheatDef& c : kCheats) {
+                if (strcmp(line + 6, c.key) == 0) readBool(v, &(cheats.*c.flag));
+            }
         } else if (strncmp(line, "boton_", 6) == 0) {
             for (int i = 0; i < kActionCount; ++i) {
                 if (strcmp(line + 6, kActionKeys[i]) != 0) continue;
@@ -165,6 +202,8 @@ bool Settings::load(const char* path) {
     fclose(f);
     // Botones repetidos o desconocidos (fichero editado a mano o roto): los de siempre.
     if (!controlsValid()) resetControls();
+    // Sin el menu de administrador desbloqueado no hay trucos (fichero editado a mano).
+    if (!admin) cheats = game::Cheats{};
     return true;
 }
 
@@ -179,6 +218,12 @@ bool Settings::save(const char* path) const {
         ok &= fprintf(f, "sensibilidad_camara=%d\nsensibilidad_mirilla=%d\nzona_muerta=%d\ninvertir_y=%d\n",
                       cameraSensitivity, scopeSensitivity, deadzone, invertY ? 1 : 0) > 0;
         for (int i = 0; i < kActionCount; ++i) ok &= fprintf(f, "boton_%s=%s\n", kActionKeys[i], buttonKey(buttons[i])) > 0;
+        if (admin) {
+            ok &= fprintf(f, "admin=1\n") > 0;
+            for (const CheatDef& c : kCheats) {
+                if (cheats.*c.flag) ok &= fprintf(f, "truco_%s=1\n", c.key) > 0;
+            }
+        }
         ok &= fflush(f) == 0;
         ok &= fclose(f) == 0;
         return ok;

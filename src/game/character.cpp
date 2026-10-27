@@ -152,7 +152,7 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
     }
     const bool flying = !wasGrounded && intent.airSpeed > 0.0f;
     const Vec3 target = wish * (flying ? intent.airSpeed : kRunSpeed * intent.speedScale);
-    const float accel = wasGrounded ? (amount > 0.0f ? kGroundAccel : kGroundBrake) : (flying ? 16.0f : kAirAccel);
+    const float accel = wasGrounded || intent.fly ? (amount > 0.0f ? kGroundAccel : kGroundBrake) : (flying ? 16.0f : kAirAccel);
     const float dvx = target.x - s.velocity.x;
     const float dvz = target.z - s.velocity.z;
     const float dv = sqrtf(dvx * dvx + dvz * dvz);
@@ -165,7 +165,7 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         s.velocity.z += dvz / dv * maxChange;
     }
     const float hs = s.horizontalSpeed();
-    const float maxSpeed = flying ? intent.airSpeed : kRunSpeed;
+    const float maxSpeed = flying ? intent.airSpeed : kRunSpeed * intent.maxSpeedScale;
     if (hs > maxSpeed) {
         s.velocity.x *= maxSpeed / hs;
         s.velocity.z *= maxSpeed / hs;
@@ -180,8 +180,8 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
 
     // --- Salto ---------------------------------------------------------------------------
     m_coyote = wasGrounded ? kCoyoteTime : m_coyote - dt;
-    if (m_jumpBuffer > 0.0f && m_coyote > 0.0f) {
-        s.velocity.y = kJumpSpeed;
+    if (m_jumpBuffer > 0.0f && m_coyote > 0.0f && !intent.fly) {
+        s.velocity.y = kJumpSpeed * intent.jumpScale;
         s.jumpState = JumpState::Rising;
         m_jumpBuffer = 0.0f;
         m_coyote = 0.0f;
@@ -211,6 +211,28 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
 
     // --- Vertical: gravedad, apoyo y techo -------------------------------------------------
     const float feetBefore = s.position.y;
+    if (intent.fly) {
+        // Vuelo (truco): sin gravedad, sube o baja a voluntad sin atravesar suelos ni techos.
+        constexpr float kFlySpeed = 9.0f;
+        s.velocity.y = intent.flyVertical * kFlySpeed;
+        float y = feetBefore + s.velocity.y * dt;
+        const float support = world.supportHeight(s.position.x, s.position.z, kFootRadius, feetBefore + 0.01f);
+        if (s.velocity.y > 0.0f) {
+            const float ceiling = world.ceilingHeight(s.position.x, s.position.z, kFootRadius, feetBefore + kBodyHeight - 0.05f);
+            if (y + kBodyHeight > ceiling) y = ceiling - kBodyHeight;
+        }
+        if (y <= support) {
+            y = support;
+            s.velocity.y = 0.0f;
+            s.jumpState = JumpState::Grounded;
+            s.airTime = 0.0f;
+        } else {
+            s.jumpState = s.velocity.y > 0.0f ? JumpState::Rising : JumpState::Falling;
+            s.airTime += dt;
+        }
+        s.position.y = y;
+        return;
+    }
     if (s.grounded()) {
         // Pegado al suelo: sube escalones y baja escaleras; si debajo no hay nada a
         // menos de un escalon, empieza a caer.
@@ -224,7 +246,7 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         }
     }
     if (!s.grounded()) {
-        s.velocity.y -= kGravity * dt;
+        s.velocity.y -= kGravity * intent.gravityScale * dt;
         if (intent.fallSpeed > 0.0f && s.velocity.y < -intent.fallSpeed) {
             // Ala delta (o caida libre): frena hasta su velocidad de caida en ~0.5 s.
             s.velocity.y += fminf(-intent.fallSpeed - s.velocity.y, 30.0f * dt + kGravity * dt);
