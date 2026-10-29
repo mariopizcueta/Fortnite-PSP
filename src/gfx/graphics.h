@@ -51,6 +51,10 @@ void bindTexture(const Texture* texture);
 void drawMesh(const Mesh& mesh);
 // Mezcla alfa con el alfa del color de vertice (p. ej. sombras). Por defecto en 3D: no.
 void setBlend(bool enabled);
+// Niebla de begin3D encendida o apagada para lo siguiente (el cielo se dibuja sin ella).
+void setFog(bool enabled);
+// Escritura de profundidad (el cielo no escribe: no tapa nada de lo que se dibuja despues).
+void setDepthWrite(bool enabled);
 
 // Lineas 3D de color (trazadoras de disparos). Se copian a la lista de comandos del frame.
 struct LineVertex {

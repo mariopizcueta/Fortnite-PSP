@@ -23,6 +23,8 @@ const char* botStateName(BotState state) {
         case BotState::Loot: return i18n::tr(i18n::T::BotLoot);
         case BotState::Harvest: return i18n::tr(i18n::T::BotHarvest);
         case BotState::Flee: return i18n::tr(i18n::T::BotFlee);
+        case BotState::Camp: return i18n::tr(i18n::T::BotCamp);
+        case BotState::Idle: return i18n::tr(i18n::T::BotIdle);
         case BotState::Eliminated: return i18n::tr(i18n::T::BotEliminated);
     }
     return "?";
@@ -95,21 +97,9 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_useError = UseError::None;
     m_sinceUseError = 99.0f;
     m_swingCooldown = 0.0f;
-    if (m_harvestables) {
-        // Todo vuelve a estar en pie: las cajas de lo destruido colisionan otra vez y la
-        // navegacion de esas zonas se recalcula.
-        // (Tambien los que rompio otra partida que compartia el mundo: pruebas de host.)
-        for (size_t i = 0; i < m_harvestables->size(); ++i) {
-            const world::Harvestable& h = (*m_harvestables)[i];
-            m_objectHealth[i] = h.health;
-            bool disabled = m_objectDestroyed[i] != 0;
-            for (int k = 0; k < h.colliderCount; ++k) disabled |= !m_world->staticEnabled(h.collider + k);
-            m_objectDestroyed[i] = 0;
-            if (!disabled) continue;
-            for (int k = 0; k < h.colliderCount; ++k) m_world->setStaticEnabled(h.collider + k, true);
-            m_nav->updateRegion(*m_world, h.box);
-        }
-    }
+    // Objetos del mapa: todo en pie (lo que rompio la partida anterior, otra vez), salvo los
+    // del modo zombi fuera de el y, en el modo zombi, las ruinas (v0.14).
+    applyMapState();
     m_playerAiming = false;
     m_playerKills = 0;
     for (DamageNumber& d : m_damageNumbers) d.age = 99.0f;
@@ -120,10 +110,12 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
 
     m_bots.assign(m_config.botCount, Bot{});
     for (int i = 0; i < m_config.botCount; ++i) snprintf(m_names[i + 1], sizeof(m_names[0]), i18n::tr(i18n::T::BotName), i + 1);
-    spawnBots(playerSpawn);
+    m_alive = 1 + m_config.botCount;
+    // Modo zombi: zombis (aparecen con el tiempo) y supervivientes en sus campamentos.
+    if (zombieMode()) startZombies();
+    else spawnBots(playerSpawn);
 
     m_phase = MatchPhase::Playing;
-    m_alive = 1 + m_config.botCount;
     m_winner = -1;
     m_playerPlace = 0;
     m_time = 0.0f;
@@ -163,7 +155,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     spawnLoot();
     if (m_config.loot && (m_config.forceLlama || m_rng.chance(m_config.llamaChance))) spawnLlama();
     if (m_config.startInBus) startBus();
-    if (m_alive <= 1) {
+    if (m_alive <= 1 && !zombieMode()) {
         m_phase = MatchPhase::Finished;
         m_winner = 0;
         m_playerPlace = 1;
@@ -223,8 +215,11 @@ Vec3 Match::chestOf(int id) const {
 
 world::Aabb Match::hitBox(int id) const {
     const Vec3 p = body(id).state().position;
-    const float h = id == 0 && m_playerCrouched ? kCrouchHitHeight : kHitHeight;
-    return {{p.x - kHitHalfWidth, p.y, p.z - kHitHalfWidth}, {p.x + kHitHalfWidth, p.y + h, p.z + kHitHalfWidth}};
+    // Los brutos del modo zombi son mas grandes (v0.14).
+    const float scale = entityScale(id);
+    const float h = (id == 0 && m_playerCrouched ? kCrouchHitHeight : kHitHeight) * scale;
+    const float w = kHitHalfWidth * scale;
+    return {{p.x - w, p.y, p.z - w}, {p.x + w, p.y + h, p.z + w}};
 }
 
 bool Match::lineOfSight(const Vec3& from, const Vec3& to) const {
@@ -246,7 +241,7 @@ int Match::findLockTarget(const Vec3& eye, const Vec3& forward, float maxAngleDe
     int best = -1;
     float bestCos = cosf(math3d::toRadians(maxAngleDegrees));
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id) || m_air[id] == AirState::Bus) continue;
+        if (!alive(id) || m_air[id] == AirState::Bus || !hostile(0, id)) continue;
         const Vec3 chest = chestOf(id);
         const Vec3 v = chest - eye;
         const float d = math3d::length(v);
@@ -306,6 +301,7 @@ void Match::step(float dt) {
 
     updatePlayer(dt);
     autoPickupAmmo(0);
+    if (zombieMode()) updateZombieMode(dt);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
     updateProjectiles(dt);
     updateTraps(dt);
@@ -715,7 +711,7 @@ void Match::swingPickaxe() {
     float bestT = 2.0f;
     int victim = -1;
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id)) continue;
+        if (!alive(id) || !hostile(0, id)) continue;
         float t;
         if (world::segmentVsAabb(chest, end - chest, bodyBounds(id), &t) && t < bestT) {
             bestT = t;
@@ -846,7 +842,7 @@ int Match::aimbotTarget(const Vec3& eye, const Vec3& direction, float range) con
     int best = -1;
     float bestCos = cosf(math3d::toRadians(35.0f));
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id) || m_air[id] == AirState::Bus) continue;
+        if (!alive(id) || m_air[id] == AirState::Bus || !hostile(0, id)) continue;
         const world::Aabb box = hitBox(id);
         const Vec3 head{(box.min.x + box.max.x) * 0.5f, box.max.y - 0.12f, (box.min.z + box.max.z) * 0.5f};
         const Vec3 v = head - eye;
@@ -876,7 +872,7 @@ Vec3 Match::aimPoint(const Vec3& eye, const Vec3& dir, float range) const {
     float best = !m_config.cheats.wallbang && m_world->raycast(start, end, world::kBlocksShots, &wallHit) ? wallHit.t : 1.0f;
     const Vec3 seg = end - start;
     for (int id = 1; id < entityCount(); ++id) {
-        if (!alive(id) || m_air[id] == AirState::Bus) continue;
+        if (!alive(id) || m_air[id] == AirState::Bus || !hostile(0, id)) continue;
         float t;
         if (world::segmentVsAabb(start, seg, hitBox(id), &t) && t < best) best = t;
     }
@@ -916,6 +912,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
     int victim = -1;
     for (int id = 0; id < entityCount(); ++id) {
         if (id == shooter || !alive(id) || m_air[id] == AirState::Bus) continue;
+        if (shooter >= 0 && !hostile(shooter, id)) continue;  // los aliados no se dan (modo zombi)
         const world::Aabb box = hitBox(id);
         float t;
         if (world::segmentVsAabb(origin, seg, box, &t) && t < best) {
@@ -1132,6 +1129,8 @@ void Match::commandBotTravel(int botIndex, const Vec3& destination) {
 
 void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShield) {
     if (!alive(victim) || amount <= 0.0f) return;
+    // Sin fuego amigo (modo zombi): explosiones y trampas no hieren a los aliados.
+    if (attacker >= 0 && attacker != victim && !hostile(attacker, victim)) return;
     if (victim == 0 && (m_config.invulnerablePlayer || m_config.cheats.godMode)) return;
     CharacterState& s = mutableBody(victim).state();
     // El escudo absorbe primero; lo que sobra pasa a la vida.
@@ -1176,8 +1175,12 @@ void Match::eliminate(int victim, int killer) {
     m_events[(m_eventCount - 1) % kMaxEvents].amount = m_damageSource + 1;
     if (victim > 0) {
         Bot& b = m_bots[victim - 1];
-        // Su inventario (y materiales) quedan en el suelo, una sola vez por eliminacion.
-        if (m_config.loot && !b.lootDropped) {
+        // Su inventario (y materiales) quedan en el suelo, una sola vez por eliminacion. Los
+        // zombis sueltan a veces chatarra, municion o vendas.
+        if (b.kind == BotKind::Zombie) {
+            zombieDrops(victim - 1);
+            if (killer == 0) ++m_zombieKills;
+        } else if (m_config.loot && !b.lootDropped) {
             b.lootDropped = true;
             dropBotWeapon(victim - 1);
         }
@@ -1196,6 +1199,14 @@ void Match::eliminate(int victim, int killer) {
     m_killFeed[0] = {killer, victim, m_time};
     if (m_killFeedCount < kMaxKillFeed) ++m_killFeedCount;
 
+    if (zombieMode()) {
+        // Supervivencia: la partida acaba cuando cae el jugador (no hay ganador).
+        if (victim == 0) {
+            m_phase = MatchPhase::Finished;
+            m_winner = -1;
+        }
+        return;
+    }
     if (victim == 0 && m_phase == MatchPhase::Playing) m_phase = MatchPhase::Spectating;
     if (m_alive <= 1) {
         m_phase = MatchPhase::Finished;

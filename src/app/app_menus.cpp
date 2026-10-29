@@ -41,6 +41,7 @@ const Tip kTips[] = {
     {false, {ui::Button::Cross, T::TipWalls}},
     {true, {ui::Button::Pickaxe, T::TipPickaxe}},
     {false, {ui::Button::Cross, T::TipTraps}},
+    {false, {ui::Button::Cross, T::TipZombies}},
 };
 constexpr int kTipCount = sizeof(kTips) / sizeof(kTips[0]);
 constexpr int kTipX = 100, kTipY = 238;
@@ -260,6 +261,22 @@ void App::recordMatch() {
     // sumado durante la partida (App::processEvents).
     if (m_matchRecorded) return;
     m_matchRecorded = true;
+    // Partida de practica (menos de 30 bots, v0.14): no cuenta para nada (ni pavos ni logros).
+    m_matchVbucks = 0;
+    if (!m_rewardsActive) {
+        platform::log::write("partida de practica (%d bots): sin pavos ni logros", m_botCount);
+        return;
+    }
+    if (m_match.zombieMode()) {
+        // Supervivencia: sus propios contadores (noches, zombis...), no los del battle royale.
+        ++m_profile.matches;
+        if (!m_match.alive(0)) ++m_profile.deaths;
+        m_profile.seconds += static_cast<int>(m_match.elapsed());
+        recordZombieMatch();
+        checkAchievements();
+        saveProfile();
+        return;
+    }
     const bool won = m_match.phase() == game::MatchPhase::Finished && m_match.winner() == 0;
     const int kills = m_match.playerKills();
     ++m_profile.matches;
@@ -287,6 +304,7 @@ void App::saveProfile() {
 
 void App::addStat(Stat stat, int amount) {
     if (amount <= 0 || !m_profile.hasName()) return;
+    if (m_screen == Screen::Game && !m_rewardsActive) return;  // partida de practica: nada cuenta
     m_profile.mutableStat(stat) += amount;
     m_profileDirty = true;
     checkAchievements();
@@ -467,9 +485,14 @@ const ui::Hint kModeHints[] = {{ui::Button::Up, T::None},   {ui::Button::Down, T
                                {ui::Button::Left, T::None}, {ui::Button::Right, T::HintChange},
                                {ui::Button::Square, T::HintClose}};
 
-T modeName(game::GameMode mode) { return mode == game::GameMode::OneShot ? T::ModeOneShot : T::ModeBattleRoyale; }
+T modeName(game::GameMode mode) {
+    return mode == game::GameMode::OneShot   ? T::ModeOneShot
+           : mode == game::GameMode::Zombies ? T::ModeZombies
+                                             : T::ModeBattleRoyale;
+}
 T modeDescription(game::GameMode mode, int line) {
     if (mode == game::GameMode::OneShot) return line == 0 ? T::ModeOneShotDesc1 : T::ModeOneShotDesc2;
+    if (mode == game::GameMode::Zombies) return line == 0 ? T::ModeZombiesDesc1 : T::ModeZombiesDesc2;
     return line == 0 ? T::ModeBattleRoyaleDesc1 : T::ModeBattleRoyaleDesc2;
 }
 
@@ -489,7 +512,7 @@ void App::updateModePanel(const input::Input& in) {
         const int modes = static_cast<int>(game::GameMode::Count);
         m_gameMode = static_cast<game::GameMode>((static_cast<int>(m_gameMode) + modes + change) % modes);
         playSfx(audio::Sfx::MenuMove);
-    } else {
+    } else if (m_gameMode != game::GameMode::Zombies) {  // en el modo zombi no hay bots
         const int before = m_botCount;
         if (change < 0 && m_botCount > kMinBots) m_botCount -= 5;
         if (change > 0 && m_botCount < game::kMaxBots) m_botCount += 5;
@@ -517,9 +540,15 @@ void App::overlayModePanel() const {
     printCenteredAt(240, static_cast<int>(kModeRowY[0]), kYellow, line);
     printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 14, kLightGrey, tr(modeDescription(m_gameMode, 0)));
     printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 25, kLightGrey, tr(modeDescription(m_gameMode, 1)));
-    snprintf(line, sizeof(line), tr(T::ModeBots), m_botCount);
-    printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, m_botCount > game::kDefaultBots ? kErrorRed : kWhite, line);
-    if (m_botCount > game::kDefaultBots) printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 22, kLightGrey, tr(T::BotsWarning));
+    if (m_gameMode == game::GameMode::Zombies) {
+        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, kDimGrey, tr(T::ModeBotsZombies));
+    } else {
+        // Con menos de 30 bots, partida de practica: sin pavos ni logros (v0.14).
+        snprintf(line, sizeof(line), tr(T::ModeBots), m_botCount);
+        const bool practice = m_botCount < game::kRewardBots;
+        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, practice ? kErrorRed : kWhite, line);
+        if (practice) printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 22, kErrorRed, tr(T::BotsWarning));
+    }
     ui::printHints(centeredHintsX(kModeHints, 5), static_cast<int>(kModeY + kModeH) - 16, kLightGrey, kModeHints, 5);
 }
 
@@ -930,8 +959,11 @@ void App::overlayLobby() const {
         const int cx = static_cast<int>(kLobbyColumnX + kLobbyColumnW * 0.5f) - 6;
         printCenteredAt(cx, static_cast<int>(kModeBox.y) + 7, kYellow, tr(modeName(m_gameMode)));
         char bots[32];
-        snprintf(bots, sizeof(bots), tr(T::BotsSelector), m_botCount);
-        printCenteredAt(cx, static_cast<int>(kModeBox.y) + 21, m_botCount > game::kDefaultBots ? kErrorRed : kWhite, bots);
+        if (m_gameMode == game::GameMode::Zombies) snprintf(bots, sizeof(bots), "%s", tr(T::BotsZombies));
+        else snprintf(bots, sizeof(bots), tr(T::BotsSelector), m_botCount);
+        const bool practice = m_gameMode != game::GameMode::Zombies && m_botCount < game::kRewardBots;
+        printCenteredAt(cx, static_cast<int>(kModeBox.y) + 21, practice ? kErrorRed : kWhite, bots);
+        if (practice) printCenteredAt(240, 222, kErrorRed, tr(T::PracticeShort));
         if (!m_worldReady) printCenteredAt(cx + 6, 232, kErrorRed, tr(T::NoMapError));
         ui::printHints(8, kHintsY, kLightGrey, kLobbyHints, kLobbyHintCount);
     }
@@ -1169,7 +1201,8 @@ void App::overlayLoading() const {
     const Tip& tip = kTips[m_tip];
     if (tip.hasButton) ui::printHints(kTipX, kTipY, kLightGrey, &tip.hint, 1);
     else gfx::text::printShadow(kTipX, kTipY, kLightGrey, "%s", tip.hint.label());
-    gfx::text::printShadow(100, 262, kDimGrey, tr(T::LoadingMap), m_botCount);
+    if (m_gameMode == game::GameMode::Zombies) gfx::text::printShadow(100, 262, kDimGrey, "%s", tr(T::LoadingZombies));
+    else gfx::text::printShadow(100, 262, kDimGrey, tr(T::LoadingMap), m_botCount);
 }
 
 // --- Pausa ------------------------------------------------------------------------------
@@ -1288,6 +1321,12 @@ int App::resultsHintCount() const {
 }
 
 void App::renderResults() const {
+    if (m_match.zombieMode()) {
+        renderZombieResults();
+        gfx::fillRect(0, 222, gfx::kScreenWidth, 30, rgba(0, 0, 0, 150));
+        if (m_resultsTime >= kResultsInputDelay) ui::drawHintIcons(m_atlas, centeredHintsX(kResultsHints, 2), 233, kResultsHints, 2);
+        return;
+    }
     const bool victory = m_results == Results::Victory;
     gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 90));
     gfx::fillRect(0, 34, gfx::kScreenWidth, 82, victory ? rgba(20, 44, 120, 200) : rgba(70, 8, 8, 200));
@@ -1324,6 +1363,11 @@ void App::renderResults() const {
 }
 
 void App::overlayResults() const {
+    if (m_match.zombieMode()) {
+        overlayZombieResults();
+        if (m_resultsTime >= kResultsInputDelay) ui::printHints(centeredHintsX(kResultsHints, 2), 233, kWhite, kResultsHints, 2);
+        return;
+    }
     const bool victory = m_results == Results::Victory;
     const game::MatchPhase phase = m_match.phase();
     gfx::text::printShadow(98, 130, kLightGrey, "%s", tr(T::ResultPlace));
@@ -1361,6 +1405,7 @@ void App::overlayResults() const {
         printCentered(206, kWhite, line);
     }
 
+    if (!m_rewardsActive) printCentered(214, kErrorRed, tr(T::PracticeMatch));  // menos de 30 bots
     if (m_resultsTime < kResultsInputDelay) return;
     const int n = resultsHintCount();
     ui::printHints(centeredHintsX(kResultsHints, n), 233, kWhite, kResultsHints, n);

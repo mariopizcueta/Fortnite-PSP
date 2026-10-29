@@ -52,6 +52,23 @@ const CharacterPalette kRanger = {
     rgba(44, 44, 54),    rgba(110, 124, 172),
     rgba(44, 44, 54),    rgba(232, 212, 84),
     false, true, true};
+// v0.14: zombis. Piel verdosa y enferma, ropa sucia y rota; sin mochila.
+const CharacterPalette kZombie = {
+    rgba(134, 152, 112), rgba(52, 46, 40),    rgba(40, 36, 30),
+    rgba(124, 110, 94),  rgba(84, 74, 64),    rgba(110, 100, 90),
+    rgba(50, 44, 38),    rgba(120, 118, 108),
+    rgba(66, 76, 98),    rgba(40, 36, 32),
+    rgba(46, 40, 34),    rgba(66, 76, 98),
+    rgba(126, 144, 106), rgba(116, 40, 36),
+    false, false, false, true, false};
+const CharacterPalette kZombieWorker = {
+    rgba(118, 140, 102), rgba(196, 164, 52),  rgba(28, 26, 24),
+    rgba(170, 118, 56),  rgba(116, 82, 42),   rgba(150, 140, 120),
+    rgba(56, 48, 40),    rgba(150, 150, 140),
+    rgba(162, 112, 52),  rgba(70, 56, 42),
+    rgba(40, 36, 30),    rgba(116, 82, 42),
+    rgba(62, 58, 52),    rgba(126, 38, 32),
+    false, true, false, true, false};
 }  // namespace palettes
 
 namespace {
@@ -67,8 +84,9 @@ constexpr float kElbowDrop = 0.285f;  // hombro -> codo
 constexpr float kArmSpread = 0.12f;   // rad: los brazos no cuelgan pegados al cuerpo
 constexpr float kStrideLength = 1.6f; // metros por ciclo completo de pasos
 
-// Lados de los anillos en cada nivel de detalle y distancia a partir de la que se usa.
-constexpr int kLodSides[2] = {8, 4};
+// Lados de los anillos en cada nivel de detalle. v0.14: 10 en el de cerca (antes 8): las
+// siluetas de cabeza, brazos y piernas son mas redondas.
+constexpr int kLodSides[2] = {10, 4};
 
 // Mano derecha -> espacio del arma (item_models.h): la palma esta a 0.255 m del codo; el
 // arma, 5 cm hacia dentro (como el SCAR de antes) y girada para que su -Z siga los dedos.
@@ -192,6 +210,42 @@ bool buildSkinTexture(gfx::Texture& tex, const CharacterPalette& p) {
     for (int x = 14; x <= 17; ++x) grey(face.x + x, face.y + 25, 0.88f);
     // Barbilla marcada.
     for (int x = 13; x <= 18; ++x) grey(face.x + x, face.y + 29, 0.88f);
+
+    if (p.zombie) {
+        // v0.14, zombi: manchas en la piel, cuencas oscuras con pupilas amarillas que brillan,
+        // boca abierta con dientes y una cicatriz cosida en la mejilla.
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                const u32 h = hash32(static_cast<u32>(x * 131 + y * 71 + 7));
+                if ((h & 15) == 0) faceDot(x, y, rgba(96, 104, 86));
+                else if ((h & 63) == 1) faceDot(x, y, rgba(120, 70, 86));
+            }
+        }
+        for (int sdx = 0; sdx < 2; ++sdx) {
+            const int ex = sdx == 0 ? 10 : 20;
+            for (int y = 11; y <= 15; ++y)
+                for (int x = ex - 2; x <= ex + 3; ++x) faceDot(x, y, rgba(46, 40, 44));
+            faceDot(ex, 13, rgba(250, 230, 90));
+            faceDot(ex + 1, 13, rgba(250, 230, 90));
+            faceDot(ex, 14, rgba(200, 160, 40));
+        }
+        for (int y = 23; y <= 26; ++y)
+            for (int x = 12; x <= 19; ++x) faceDot(x, y, rgba(40, 20, 22));
+        for (int x = 12; x <= 19; x += 2) faceDot(x, 23, rgba(220, 210, 170));
+        for (int x = 13; x <= 19; x += 2) faceDot(x, 26, rgba(200, 190, 150));
+        for (int k = 0; k < 6; ++k) faceDot(4 + k, 18 + k / 2, rgba(90, 30, 34));
+        for (int k = 0; k < 3; ++k) faceDot(5 + 2 * k, 17 + k, rgba(30, 26, 24));
+        // Ropa rota: desgarrones y manchas en el tejido y en el camuflaje.
+        for (int t = 1; t <= 2; ++t) {
+            const Tile& tile = kTiles[t];
+            for (int y = 0; y < 16; ++y)
+                for (int x = 0; x < 16; ++x) {
+                    const u32 h = hash32(static_cast<u32>(x * 37 + y * 101 + t * 977));
+                    if ((h & 15) == 0) grey(tile.x + x, tile.y + y, 0.42f);
+                    else if ((h & 31) == 1) put(tile.x + x, tile.y + y, 0.62f, 0.30f, 0.30f);
+                }
+        }
+    }
 
     gfx::uploadTexture(tex);
     return true;
@@ -429,8 +483,47 @@ void buildBody(MeshBuilder& b, const CharacterPalette& p) {
                   Uv::Cloth);
         b.spike({0.0f, 1.47f, -0.118f}, 0.075f, 0.022f, {0.0f, 1.33f, -0.152f}, p.scarf, Uv::Cloth);
     }
+    if (p.backpack) {
+        // Mochila (v0.14): bolsa redondeada a la espalda con su tapa, el saco de dormir
+        // enrollado encima y las correas por los hombros. Es lo que ve la camara del jugador.
+        const Ring pack[] = {ring(1.06f, 0.150f, 0.075f, 0.0f, 0.215f), ring(1.18f, 0.165f, 0.090f, 0.0f, 0.228f),
+                             ring(1.36f, 0.160f, 0.088f, 0.0f, 0.224f), ring(1.46f, 0.135f, 0.072f, 0.0f, 0.212f)};
+        for (int i = 0; i + 1 < 4; ++i) b.segment(pack[i], pack[i + 1], p.vest, Uv::Cloth);
+        b.cap(pack[3], {0.0f, 1.48f, 0.21f}, p.vest);
+        b.cap(pack[0], {0.0f, 1.04f, 0.215f}, p.vest);
+        if (b.details()) {
+            b.box({-0.13f, 1.30f, 0.30f}, {0.13f, 1.44f, 0.322f}, p.strap);       // tapa
+            b.box({-0.10f, 1.10f, 0.305f}, {0.10f, 1.24f, 0.33f}, p.vest);        // bolsillo
+            b.box({-0.03f, 1.22f, 0.325f}, {0.03f, 1.26f, 0.335f}, p.buckle);     // cierre
+            b.setTransform(Mat4::translation({0.0f, 1.505f, 0.215f}) * Mat4::rotationZ(0.5f * math3d::kPi));
+            b.segment(ring(-0.19f, 0.055f, 0.055f), ring(0.19f, 0.055f, 0.055f), p.scarf, Uv::Cloth);
+            b.cap(ring(0.19f, 0.055f, 0.055f), {0.0f, 0.20f, 0.0f}, p.strap);
+            b.cap(ring(-0.19f, 0.055f, 0.055f), {0.0f, -0.20f, 0.0f}, p.strap);
+            b.resetTransform();
+        }
+        for (float sx : {-0.11f, 0.11f}) {
+            b.box({sx - 0.025f, 1.18f, -0.138f}, {sx + 0.025f, 1.47f, -0.120f}, p.strap);  // correas delante
+        }
+    }
+    if (p.zombie && b.details()) {
+        // Camisa rota: jirones colgando del bajo y heridas en el pecho y la espalda.
+        for (int k = 0; k < 7; ++k) {
+            const float a = k * (2.0f * math3d::kPi / 7.0f) + 0.3f;
+            const float x = 0.165f * sinf(a), z = -0.122f * cosf(a);
+            b.spike({x, 1.07f, z}, 0.035f, 0.02f, {x * 1.08f, 0.93f - 0.02f * (k % 3), z * 1.08f}, p.shirt, Uv::Cloth);
+        }
+        b.box({0.04f, 1.22f, -0.146f}, {0.11f, 1.30f, -0.128f}, rgba(110, 30, 30));
+        b.box({-0.12f, 1.12f, 0.122f}, {-0.03f, 1.18f, 0.138f}, rgba(96, 28, 28));
+        b.spike({0.05f, 1.86f, 0.03f}, 0.03f, 0.03f, {0.08f, 1.97f, 0.06f}, p.hair, Uv::Hair);
+        b.spike({-0.06f, 1.86f, -0.02f}, 0.03f, 0.03f, {-0.10f, 1.95f, -0.04f}, p.hair, Uv::Hair);
+    }
     if (b.details()) {
+        // Cuello de la camiseta (v0.14).
+        b.segment(ring(1.47f, 0.118f, 0.098f, 0.0f, 0.002f), ring(1.50f, 0.092f, 0.084f, 0.0f, 0.004f), p.shirt, Uv::Cloth);
         b.box({-0.046f, 0.992f, -0.146f}, {0.046f, 1.052f, -0.128f}, p.buckle);  // hebilla
+        // Bolsas del cinturon (v0.14).
+        b.box({0.10f, 0.94f, -0.15f}, {0.16f, 1.03f, -0.10f}, p.vest);
+        b.box({0.155f, 0.93f, 0.02f}, {0.20f, 1.02f, 0.10f}, p.vest);
         // Correa en bandolera por delante y bolsa en la cadera izquierda.
         b.setTransform(Mat4::translation({0.0f, 1.27f, -0.146f}) * Mat4::rotationZ(0.78f));
         b.box({-0.25f, -0.022f, -0.008f}, {0.25f, 0.022f, 0.006f}, p.vest);
@@ -477,8 +570,17 @@ void buildForearm(MeshBuilder& b, const CharacterPalette& p, float side) {
     b.segment(g1, g2, p.glove);
     b.segment(g2, g3, p.skin);
     b.cap(g3, {0.0f, -0.315f, -0.004f}, p.skin);
-    if (side < 0.0f && b.details()) {
+    if (side < 0.0f && b.details() && !p.zombie) {
         b.box({-0.03f, -0.13f, -0.068f}, {0.03f, -0.09f, -0.052f}, rgba(80, 200, 230));  // pantallita azul
+    }
+    if (b.details()) {
+        // Pulgar (v0.14) y nudillos del guante.
+        b.box({-0.022f * side - 0.016f, -0.27f, -0.07f}, {-0.022f * side + 0.016f, -0.215f, -0.045f}, p.skin);
+        b.box({-0.05f, -0.258f, -0.068f}, {0.05f, -0.245f, -0.055f}, p.glove);
+    }
+    if (p.zombie && b.details()) {
+        // Unas largas y sucias.
+        b.box({-0.035f, -0.33f, -0.03f}, {0.035f, -0.31f, 0.02f}, rgba(60, 56, 44));
     }
 }
 
@@ -662,12 +764,18 @@ void CharacterAnim::update(const CharacterState& state, const AnimInput& in, flo
     swing = smoothToward(swing, 0.0f, 6.0f, dt);
     landing = smoothToward(landing, 0.0f, 9.0f, dt);
     if (!in.alive) {
+        // Hacia donde cae: de espaldas casi siempre, a veces de bruces (v0.14).
+        if (deathSeconds <= 0.0f) deathSide = fmodf(idleTime * 7.31f, 1.0f) < 0.3f ? -1.0f : 1.0f;
         deathSeconds += dt;
         return;
     }
     deathSeconds = 0.0f;
     const float speed = state.horizontalSpeed();
     const bool air = !state.grounded();
+    // v0.14: giro hacia la curva (con la velocidad de giro), balanceo y agua.
+    const float yawRate = dt > 0.0f ? wrapAngle(state.yaw - lastYaw) / dt : 0.0f;
+    lastYaw = state.yaw;
+    wadeBlend = smoothToward(wadeBlend, state.wading ? 1.0f : 0.0f, 6.0f, dt);
 
     // Mezclas: ningun cambio de postura es instantaneo.
     if (!air && airBlend > 0.6f) landing = 1.0f;  // acaba de tocar el suelo tras un salto
@@ -693,18 +801,27 @@ void CharacterAnim::update(const CharacterState& state, const AnimInput& in, flo
     const float strideLength = kStrideLength * (0.8f + 0.3f * runBlend);
     if (!air) {
         const float before = walkPhase;
-        walkPhase += speed * dt * (2.0f * math3d::kPi / strideLength) * (stride < 0.0f ? -1.0f : 1.0f);
+        walkPhase += speed * (1.0f + wadeBlend) * dt * (2.0f * math3d::kPi / strideLength) * (stride < 0.0f ? -1.0f : 1.0f);
         if (speed > 1.0f && floorf(walkPhase / math3d::kPi) != floorf(before / math3d::kPi)) ++footsteps;
         if (walkPhase > 2.0f * math3d::kPi) walkPhase -= 2.0f * math3d::kPi;
         if (walkPhase < 0.0f) walkPhase += 2.0f * math3d::kPi;
     }
-    const float amplitude = 0.70f * math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f) * (1.0f - 0.3f * crouchBlend);
+    // En el agua el paso va a la mitad de velocidad: se cuenta como si fuera el doble de
+    // rapido para que la zancada se vea amplia (rodillas arriba, como quien vadea).
+    const float stepSpeed = speed * (1.0f + wadeBlend);
+    const float amplitude = 0.70f * math3d::clampf(stepSpeed / tuning::kRunSpeed, 0.0f, 1.0f) * (1.0f - 0.3f * crouchBlend);
     const float sn = sinf(walkPhase) * amplitude;
     const float c = cosf(walkPhase);
     // En el suelo.
     float legL = sn, legR = -sn;
-    float kneeL = 0.06f + amplitude * 1.6f * (c > 0.0f ? c : 0.0f);
-    float kneeR = 0.06f + amplitude * 1.6f * (c < 0.0f ? -c : 0.0f);
+    float kneeL = 0.06f + amplitude * (1.6f + 0.9f * wadeBlend) * (c > 0.0f ? c : 0.0f);
+    float kneeR = 0.06f + amplitude * (1.6f + 0.9f * wadeBlend) * (c < 0.0f ? -c : 0.0f);
+    // Tronco: gira con cada zancada (los hombros al contrario que las caderas), se balancea
+    // de lado al andar, cambia el peso de pierna en reposo y se inclina hacia las curvas.
+    const float run = math3d::clampf(speed / tuning::kRunSpeed, 0.0f, 1.0f);
+    twist = smoothToward(twist, air ? 0.0f : 0.11f * run * sinf(walkPhase) * (1.0f - 0.6f * aimBlend), 12.0f, dt);
+    sway = smoothToward(sway, air ? 0.0f : 0.045f * run * sinf(walkPhase) + 0.022f * (1.0f - run) * sinf(idleTime * 0.9f), 10.0f, dt);
+    turnLean = smoothToward(turnLean, air ? 0.0f : math3d::clampf(-yawRate * 0.035f * run, -0.16f, 0.16f), 6.0f, dt);
     // En el aire: subiendo, una pierna encogida; cayendo, las dos algo adelantadas para caer.
     const float up = 0.5f + 0.5f * rise;
     legL = lerpf(legL, lerpf(0.30f, 0.75f, up), airBlend);
@@ -723,6 +840,9 @@ void CharacterAnim::update(const CharacterState& state, const AnimInput& in, flo
     float armL = -sn * 0.85f + 0.06f, armR = sn * 0.85f + 0.06f;
     float elbowL = 0.22f + 0.95f * runBlend * (amplitude > 0.05f ? 1.0f : 0.0f) + 0.1f;
     float elbowR = elbowL, inL = 0.0f, inR = 0.0f;
+    // El codo se dobla mas cuando el brazo va hacia delante (v0.14: brazada mas natural).
+    elbowL += 0.35f * fmaxf(0.0f, armL) * runBlend;
+    elbowR += 0.35f * fmaxf(0.0f, armR) * runBlend;
     armL = lerpf(armL, 0.55f, airBlend);
     armR = lerpf(armR, 0.45f, airBlend);
     elbowL = lerpf(elbowL, 0.6f, airBlend);
@@ -816,9 +936,11 @@ void CharacterModel::destroy() {
 
 void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim,
                           const world::TextureLibrary& /*textures*/, bool eliminated, ItemModel held,
-                          bool lowDetail, BodyPose pose, const ItemModels* items) const {
+                          bool lowDetail, BodyPose pose, const ItemModels* items, float scale) const {
     const Vec3& pos = state.position;
     const bool dance = pose == BodyPose::Dance;
+    const bool zombie = pose == BodyPose::Zombie;
+    if (zombie) held = ItemModel::None;
     const bool skydive = pose == BodyPose::Skydive, glide = pose == BodyPose::Glide;
     // Agachado: con la mezcla suavizada (si la animacion no la lleva, de golpe).
     const float crouch = pose == BodyPose::Crouch ? fmaxf(anim.crouchBlend, anim.crouchBlend > 0.01f ? 0.0f : 1.0f)
@@ -830,20 +952,23 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         const float groundY = state.grounded() ? pos.y : world::groundHeightAt(pos.x, pos.z);
         const float shrink = math3d::clampf(1.0f - (pos.y - groundY) / 6.0f, 0.4f, 1.0f);
         gfx::setBlend(true);
-        gfx::setModelMatrix(Mat4::translation({pos.x, groundY + 0.04f, pos.z}) * Mat4::scale({shrink, 1.0f, shrink}));
+        gfx::setModelMatrix(Mat4::translation({pos.x, groundY + 0.04f, pos.z}) * Mat4::scale({shrink * scale, 1.0f, shrink * scale}));
         gfx::bindTexture(nullptr);
         gfx::drawMesh(m_shadow);
         gfx::setBlend(false);
     }
 
     Mat4 root = Mat4::translation(pos) * Mat4::rotationY(state.yaw);
+    if (scale != 1.0f) root = root * Mat4::scale({scale, scale, scale});
     float torsoPitch = 0.0f;  // inclinacion hacia delante del tronco (para compensar el arma)
+    float bodyTwist = 0.0f;   // giro del tronco con la zancada (solo la pieza del cuerpo)
     if (eliminated) {
-        // Cae de espaldas en 0.45 s (acelerando, como con gravedad) y queda tumbado:
-        // rotationX(+90) lleva la cabeza (+Y) hacia +Z (detras).
+        // Cae en 0.45 s (acelerando, como con gravedad) y queda tumbado: de espaldas
+        // (rotationX(+90) lleva la cabeza (+Y) hacia +Z, detras) o, a veces, de bruces.
         const float k = anim.deathSeconds > 0.0f ? math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f) : 1.0f;
         const float fall = k * k;
-        root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) * Mat4::rotationX(math3d::kPi * 0.5f * fall);
+        root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) *
+               Mat4::rotationX(math3d::kPi * 0.5f * fall * anim.deathSide) * Mat4::rotationY(0.25f * fall * anim.deathSide);
     } else if (skydive) {
         // Caida libre: boca abajo (la cabeza hacia delante), girando sobre la cadera.
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-1.35f) *
@@ -856,17 +981,28 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         const float beat = sinf(t * 6.0f);
         root = root * Mat4::translation({0.0f, 0.07f * fabsf(beat), 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
                Mat4::rotationZ(0.14f * sinf(t * 3.0f)) * Mat4::translation({0.0f, -kHipY, 0.0f});
+    } else if (zombie) {
+        // Zombi (v0.14): encorvado, cabeceando y dando bandazos de lado al andar; al golpear,
+        // el tronco acompana el zarpazo.
+        const float lurch = sinf(anim.walkPhase * 0.5f);
+        torsoPitch = 0.32f + 0.05f * sinf(t * 1.7f) + 0.2f * anim.swing;
+        root = root * Mat4::translation({0.0f, -0.05f, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
+               Mat4::rotationZ(0.07f * lurch + 0.05f * sinf(t * 0.8f)) * Mat4::rotationX(-torsoPitch) *
+               Mat4::translation({0.0f, -kHipY, 0.0f}) * Mat4::rotationX(-0.25f * anim.flinch);
+        bodyTwist = 0.12f * lurch;
     } else {
         // De pie, andando, corriendo o agachado (mezclados): la cadera baja al agacharse y al
         // aterrizar, rebota un poco con cada zancada y el tronco se inclina al correr y al
         // agacharse. Respiracion en reposo y sacudida hacia atras al recibir un impacto.
+        // v0.14: balanceo de lado, inclinacion hacia las curvas y giro del tronco.
         const float breath = 0.012f * sinf(t * 2.4f) * (1.0f - anim.runBlend);
         const float bob = -0.035f * fabsf(cosf(anim.walkPhase)) * anim.runBlend * (1.0f - anim.airBlend);
         const float drop = -kCrouchDrop * crouch - 0.08f * anim.landing + bob + breath;
         torsoPitch = 0.22f * crouch + anim.lean;
         root = root * Mat4::translation({0.0f, drop, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
-               Mat4::rotationX(-torsoPitch) * Mat4::translation({0.0f, -kHipY, 0.0f}) *
-               Mat4::rotationX(-0.22f * anim.flinch);
+               Mat4::rotationZ(anim.sway + anim.turnLean) * Mat4::rotationX(-torsoPitch) *
+               Mat4::translation({0.0f, -kHipY, 0.0f}) * Mat4::rotationX(-0.22f * anim.flinch);
+        bodyTwist = anim.twist;
     }
 
     const Lod& lod = m_lods[lowDetail ? 1 : 0];
@@ -875,7 +1011,7 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         gfx::setModelMatrix(m);
         gfx::drawMesh(lod.parts[id]);
     };
-    part(kBody, root);
+    part(kBody, bodyTwist != 0.0f ? root * Mat4::rotationY(bodyTwist) : root);
     const bool still = eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f);
     // Piernas: rotationX(+a) lleva el extremo hacia delante (-Z); la rodilla se dobla hacia atras.
     for (int s = 0; s < 2; ++s) {
@@ -894,11 +1030,19 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             hip = 0.35f * sinf(t * 6.0f + (s == 0 ? 0.0f : math3d::kPi));
             knee = 0.25f + 0.25f * fabsf(sinf(t * 6.0f + s));
             legSpread = 0.12f;
+        } else if (zombie && !eliminated) {
+            // Cojea: la pierna izquierda apenas se dobla y da pasos cortos.
+            if (s == 0) {
+                hip *= 0.55f;
+                knee = 0.08f + knee * 0.3f;
+            }
+            hip += 0.12f;
         } else if (crouch > 0.0f) {
             // Muslos hacia delante y rodillas muy dobladas (el paso, mas corto).
             hip = lerpf(hip, 1.25f + hip * 0.4f, crouch);
             knee = lerpf(knee, 1.7f + knee * 0.2f, crouch);
         }
+        if (eliminated && !still) knee += 0.6f * math3d::clampf(anim.deathSeconds / 0.45f, 0.0f, 1.0f);  // se le doblan
         const Mat4 thigh = root * Mat4::translation({side * kHipX, kHipY, 0.0f}) * Mat4::rotationX(hip) *
                            Mat4::rotationZ(side * legSpread);
         part(s == 0 ? kThighL : kThighR, thigh);
@@ -965,6 +1109,12 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             elbow = 0.25f;
             inward = 0.0f;
             spread = 0.3f;
+        } else if (zombie && !eliminated) {
+            // Brazos al frente, buscando a tientas; el zarpazo baja desde arriba (swing 1 -> 0).
+            shoulder = 1.30f + 0.12f * sinf(t * 2.1f + s * 1.7f) + (s == 1 ? 1.3f * anim.swing : 0.5f * anim.swing);
+            elbow = 0.30f + 0.15f * sinf(t * 1.3f + s);
+            inward = 0.08f;
+            spread = 0.16f;
         } else if (s == 1 && grip == GripStyle::Throw && anim.swing < 0.03f) {
             // Granada lista: la mano derecha arriba, junto al hombro.
             shoulder = 1.9f;

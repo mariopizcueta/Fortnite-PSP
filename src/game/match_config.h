@@ -4,20 +4,23 @@
 #include "game/inventory.h"
 #include "game/structures.h"
 #include "game/weapon.h"
+#include "game/zombies.h"
 #include "math/math3d.h"
 
 #include <psptypes.h>
 
 namespace game {
 
-// Capacidad maxima. La partida empieza con 10 bots (MatchConfig::botCount); 30 solo
-// tras medir el rendimiento en la PSP (ver docs/BOTS.md).
+// Capacidad maxima. v0.14: las partidas empiezan con 30 bots (el usuario los ha medido en
+// su PSP-2000). Con menos de kRewardBots la partida es de practica: ni pavos ni logros.
 constexpr int kMaxBots = 30;
-constexpr int kDefaultBots = 10;
+constexpr int kDefaultBots = 30;
+constexpr int kRewardBots = 30;
 
 // Modos de juego (CUADRADO en el lobby). Monodisparo: en el botin solo hay francotiradores,
-// armas con mirilla y granadas (y curativos); ni trampas ni el resto de armas.
-enum class GameMode : u8 { BattleRoyale, OneShot, Count };
+// armas con mirilla y granadas (y curativos); ni trampas ni el resto de armas. Zombis
+// (v0.14, docs/ZOMBIS.md): supervivencia en el mapa en ruinas, sin tormenta ni bots.
+enum class GameMode : u8 { BattleRoyale, OneShot, Zombies, Count };
 
 // Trucos del menu de administrador (ajustes > admin, con contrasena). Los marcados (app) los
 // aplica la aplicacion al dibujar; el resto, la partida. Salvo los de los bots, todos son
@@ -183,6 +186,19 @@ struct MatchConfig {
 
     bool invulnerablePlayer = false;  // solo para pruebas
 
+    // v0.14: tacticas de los bots del battle royale. Acampan los airdrops que caen cerca
+    // (como mucho botCampers por airdrop), levantan estructuras pequenas (caja de paredes al
+    // recibir disparos, rampa para ganar altura contra quien esta mas alto) y, al final de la
+    // partida (lateGameAlive vivos o menos), rotan antes a la zona y mantienen la posicion.
+    bool botsCampAirdrops = true;
+    int botCampers = 3;
+    float botCampRange = 60.0f;
+    bool botsSmallBuilds = true;
+    int lateGameAlive = 8;
+
+    // Modo zombi (GameMode::Zombies, ver zombies()).
+    ZombieConfig zombie;
+
     static WeaponConfig botRifle() {
         WeaponConfig w;
         w.name = "Fusil";
@@ -194,6 +210,30 @@ struct MatchConfig {
         w.reloadTime = 2.5f;
         w.range = 60.0f;
         return w;
+    }
+
+    // Supervivencia zombi (v0.14): sin autobus, sin tormenta que se cierre y sin bots del
+    // battle royale; zombis y supervivientes (botCount = sus entidades), botin propio y
+    // planos. El jugador despierta en la base (world/zombie_sites.h).
+    static MatchConfig zombies() {
+        MatchConfig c;
+        c.mode = GameMode::Zombies;
+        c.botCount = kZombieSlots + kSurvivorCount;
+        c.startInBus = false;
+        c.stormCloses = false;
+        c.zoneStartRadius = c.zoneEndRadius = 300.0f;
+        c.botsBuild = false;
+        c.botsHarvest = false;
+        c.botsFlee = false;
+        c.botsCampAirdrops = false;
+        c.botsSmallBuilds = false;
+        c.airdropTimes[0] = c.airdropTimes[1] = 1.0e9f;
+        c.llamaChance = 0.0f;
+        c.chestCount = 18;
+        c.floorLootCount = 46;
+        c.ammoBoxCount = 14;
+        c.build.maxWalls = 30;
+        return c;
     }
 
     // Reglas de las fases 4-6 (para las pruebas de regresion): sin autobus ni botin, el
@@ -212,6 +252,9 @@ struct MatchConfig {
         c.botsHarvest = false;
         c.botsFreeBuild = true;
         c.botsFlee = false;
+        c.botsCampAirdrops = false;
+        c.botsSmallBuilds = false;
+        c.lateGameAlive = 0;
         c.shotObjectDamageScale = 0.0f;
         c.startItems[0] = {ItemType::AssaultRifle, 1, Rarity::Legendary};
         c.startItems[1] = {ItemType::Bandage, 5, Rarity::Common};

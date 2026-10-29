@@ -281,6 +281,25 @@ int StructureSystem::place(const WallPlacement& placement, int owner) {
     return -1;
 }
 
+int StructureSystem::placeForced(const WallPlacement& placement, int owner, float healthScale) {
+    if (duplicates(placement) || m_count >= kMaxWallCapacity) return -1;
+    WallPlacement p = placement;
+    p.valid = true;
+    // place() con un dueno negativo no mira los limites de los bots (el de la pieza es suyo).
+    const int maxBots = m_config.maxBotWalls;
+    m_config.maxBotWalls = kMaxWallCapacity;
+    const int maxPerBot = m_config.maxWallsPerBot;
+    m_config.maxWallsPerBot = kMaxWallCapacity;
+    const int index = place(p, owner);
+    m_config.maxBotWalls = maxBots;
+    m_config.maxWallsPerBot = maxPerBot;
+    if (index >= 0) {
+        m_walls[index].maxHealth *= healthScale;
+        m_walls[index].health = m_walls[index].maxHealth;
+    }
+    return index;
+}
+
 bool StructureSystem::remove(int index) {
     if (index < 0 || index >= kMaxWallCapacity || !m_walls[index].active) return false;
     BuiltWall& w = m_walls[index];

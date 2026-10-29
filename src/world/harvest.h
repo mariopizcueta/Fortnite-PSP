@@ -29,6 +29,11 @@ struct Harvestable {
     Aabb box;               // engloba todas sus cajas
     int perHit = 0;         // material por golpe de pico
     float health = 0.0f;    // vida inicial (cada golpe quita MatchConfig::pickaxeObjectDamage)
+    // Modo zombi (v0.14): probabilidad (0-100) de que el objeto ya este derruido al empezar
+    // (tejados, paneles, vallas...), y objetos que solo existen en ese modo (la base, los
+    // campamentos de supervivientes y los centros de crafteo; en el resto, no estan).
+    u8 ruinChance = 0;
+    bool zombieOnly = false;
 
     bool owns(int c) const { return c >= collider && c < collider + colliderCount; }
 };

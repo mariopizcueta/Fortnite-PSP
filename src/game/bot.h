@@ -11,7 +11,13 @@
 //                   pica con el pico hasta tener bastantes
 //   Huir            (v0.13) con poca vida: se aleja a donde el rival no le vea, se cubre
 //                   con una pared y se cura (o busca curas); solo pelea si le acorralan
+//   Acampar         (v0.14) un airdrop ha caido cerca: espera a cubierto mirandolo y
+//                   dispara a quien vaya a por el (despues lo abre)
+//   Esperar         (v0.14, modo zombi) superviviente aun sin rescatar, en su campamento
 //   Eliminado       no actua, no colisiona y no se le puede disparar
+//
+// v0.14: ademas de los luchadores del battle royale, un Bot puede ser un zombi o un
+// superviviente (modo zombi, game/zombies.h); los dos usan estos mismos estados.
 //
 // La IA "piensa" (percepcion + cambios de estado + caminos) solo cada
 // MatchConfig::aiDecisionInterval segundos; en los pasos intermedios ejecuta el plan.
@@ -20,10 +26,14 @@
 #include "game/character.h"
 #include "game/inventory.h"
 #include "game/weapon.h"
+#include "game/zombies.h"
 
 namespace game {
 
-enum class BotState { Explore, Travel, Search, Attack, Loot, Harvest, Flee, Eliminated };
+enum class BotState { Explore, Travel, Search, Attack, Loot, Harvest, Flee, Camp, Idle, Eliminated };
+
+// Que es la entidad (v0.14): luchador del battle royale, zombi o superviviente.
+enum class BotKind : u8 { Fighter, Zombie, Survivor };
 
 const char* botStateName(BotState state);
 
@@ -104,6 +114,27 @@ struct Bot {
     float sidestepTimer = 0.0f;
     float sidestepSign = 1.0f;
     bool wantsJump = false;
+
+    // v0.14: tacticas. Acampar un airdrop (indice del contenedor) y quedarse en lo alto de
+    // una rampa propia (no bajar mientras dure), y la siguiente pieza de una estructura
+    // pequena (caja de cuatro paredes o rampa) que esta levantando.
+    int campContainer = -1;
+    float perchTimer = 0.0f;
+    int buildStep = 0;          // piezas que le quedan por poner (0: nada)
+    int buildKind = 0;          // 1: caja de paredes, 2: rampa con pared delante
+    float buildYaw = 0.0f;      // hacia donde (amenaza o zona)
+    float buildTimer = 0.0f;    // s hasta la siguiente pieza
+    bool holding = false;       // final de partida: mantiene la posicion en la zona
+    float climbTimer = 0.0f;    // > 0: subiendo por la rampa que acaba de poner
+    float boxTimer = 0.0f;      // > 0: dentro de su caja; al acabar quita sus paredes (sale)
+
+    // v0.14, modo zombi.
+    BotKind kind = BotKind::Fighter;
+    ZombieType zombieType = ZombieType::Walker;
+    float attackTimer = 0.0f;   // zombi: s hasta el siguiente golpe
+    bool rescued = false;       // superviviente: ya se ha unido al jugador
+    bool discovered = false;    // superviviente: el jugador ha pasado cerca (minimapa)
+    math3d::Vec3 home;          // superviviente: su campamento
 
     // Marcador y aspecto.
     int kills = 0;

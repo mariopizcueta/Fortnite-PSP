@@ -39,6 +39,13 @@ struct Profile {
     int explosiveKills = 0;
     int itemsUsed = 0;
     AchievementState achievements[kAchievementCount];
+    // v0.14: modo zombi (record de noches seguidas, zombis abatidos, supervivientes
+    // rescatados, planos completados y objetos fabricados).
+    int zombieBestNights = 0;
+    int zombieKills = 0;
+    int survivorsRescued = 0;
+    int blueprintsDone = 0;
+    int itemsCrafted = 0;
     // v0.13: pavos y trajes comprados en la tienda (bit = indice del catalogo).
     int vbucks = 0;
     u32 owned = 0;

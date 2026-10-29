@@ -367,13 +367,14 @@ def ui_atlas():
 # --- Texturas del mundo -------------------------------------------------------------------------
 
 def texture_atlas():
+    # v0.14: 24 texturas de 64x64 (16 normales y 8 del modo zombi) en un atlas de 256x384.
     files = sorted((RES / "Texturas").glob("*.png"))
-    assert len(files) == 16, "se esperan 16 texturas (00..15) en Recursos/Texturas"
-    atlas = Image.new("RGB", (128, 128))
+    assert len(files) == 24, "se esperan 24 texturas (00..23) en Recursos/Texturas"
+    atlas = Image.new("RGB", (256, 384))
     for i, f in enumerate(files):
         tile = Image.open(f).convert("RGB")
-        assert tile.size == (32, 32), f"{f.name} debe medir 32x32"
-        atlas.paste(tile, ((i % 4) * 32, (i // 4) * 32))
+        assert tile.size == (64, 64), f"{f.name} debe medir 64x64"
+        atlas.paste(tile, ((i % 4) * 64, (i // 4) * 64))
     save(atlas, ASSETS / "images" / "textures.png")
 
 

@@ -4,6 +4,9 @@
 // se abre o recoge con CUADRADO. Los bots tambien abren cofres y recogen armas.
 #include "game/match.h"
 
+#include "world/water.h"
+#include "world/zombie_sites.h"
+
 #include "game/match_internal.h"
 #include "world/storm.h"
 
@@ -56,6 +59,10 @@ constexpr WeaponWeight kWeaponWeights[] = {
     {ItemType::Sniper, 4},        {ItemType::SemiAutoSniper, 4},  {ItemType::RocketLauncher, 3},
     {ItemType::GrenadeLauncher, 3},
 };
+// Modo zombi (v0.14): solo escopetas y pistolas (el resto se fabrica).
+constexpr WeaponWeight kZombieWeights[] = {
+    {ItemType::Shotgun, 4}, {ItemType::TacticalShotgun, 4}, {ItemType::Pistol, 6}, {ItemType::Revolver, 3},
+};
 // Monodisparo: solo francotiradores y armas con mirilla.
 constexpr WeaponWeight kOneShotWeights[] = {
     {ItemType::Sniper, 5}, {ItemType::SemiAutoSniper, 5}, {ItemType::ScopedRifle, 4},
@@ -91,9 +98,11 @@ Pickup Match::randomWeaponPickup(bool chest) {
     p.active = true;
     p.kind = PickupKind::Item;
     const bool oneShot = m_config.mode == GameMode::OneShot;
-    const WeaponWeight* weights = oneShot ? kOneShotWeights : kWeaponWeights;
-    const int count = oneShot ? static_cast<int>(sizeof(kOneShotWeights) / sizeof(kOneShotWeights[0]))
-                              : static_cast<int>(sizeof(kWeaponWeights) / sizeof(kWeaponWeights[0]));
+    const bool zombies = m_config.mode == GameMode::Zombies;
+    const WeaponWeight* weights = oneShot ? kOneShotWeights : (zombies ? kZombieWeights : kWeaponWeights);
+    const int count = oneShot   ? static_cast<int>(sizeof(kOneShotWeights) / sizeof(kOneShotWeights[0]))
+                      : zombies ? static_cast<int>(sizeof(kZombieWeights) / sizeof(kZombieWeights[0]))
+                                : static_cast<int>(sizeof(kWeaponWeights) / sizeof(kWeaponWeights[0]));
     float total = 0.0f;
     for (int i = 0; i < count; ++i) total += weights[i].weight;
     float r = m_rng.range(0.0f, total);
@@ -116,6 +125,11 @@ AmmoType Match::randomAmmoType() {
     // Monodisparo: solo la de sus armas (pesada para los francotiradores, media para el
     // fusil con mira).
     if (m_config.mode == GameMode::OneShot) return m_rng.chance(0.6f) ? AmmoType::Heavy : AmmoType::Medium;
+    // Modo zombi: la de las escopetas y pistolas que hay; algo de la del resto (se fabrican).
+    if (m_config.mode == GameMode::Zombies) {
+        const float r = m_rng.uniform();
+        return r < 0.4f ? AmmoType::Shells : (r < 0.8f ? AmmoType::Light : (r < 0.93f ? AmmoType::Medium : AmmoType::Heavy));
+    }
     return static_cast<AmmoType>(m_rng.index(4));
 }
 
@@ -126,6 +140,8 @@ Pickup Match::randomConsumablePickup() {
     float r = m_rng.uniform();
     // Monodisparo: las granadas son la mitad del botin que no es un arma.
     if (m_config.mode == GameMode::OneShot) r = r < 0.5f ? 0.35f : (r - 0.5f) * 2.0f;
+    // Modo zombi: solo curativos (las granadas se fabrican).
+    if (m_config.mode == GameMode::Zombies && r >= 0.30f && r < 0.40f) r = 0.15f;
     if (r < 0.30f) {
         p.item = ItemType::Bandage;
         p.count = 5;
@@ -171,8 +187,11 @@ Vec3 Match::lootSpot(float minSpacing, bool nearPoi) {
         Vec3 p;
         const Vec3 center = nearPoi && !m_pois.empty() ? m_pois[m_rng.index(static_cast<int>(m_pois.size()))]
                                                        : m_config.zoneCenter;
-        if (!m_nav->randomPointNear(center, nearPoi ? 8.0f : m_config.zoneStartRadius + 2.0f, m_rng, &p)) continue;
+        if (!m_nav->randomPointNear(center, nearPoi ? 8.0f : fminf(m_config.zoneStartRadius, 80.0f) + 2.0f, m_rng, &p)) continue;
         if (world::stormDepth(p.x, p.z) > -6.0f) continue;
+        // Ni en el lago (se ve bajo el agua; v0.14) ni, en el modo zombi, dentro de la base.
+        if (world::inWater(p.x, p.z)) continue;
+        if (m_config.mode == GameMode::Zombies && world::zsites::insideBase(p.x, p.z, 2.0f)) continue;
         bool ok = true;
         for (const Vec3& q : m_lootSpots) {
             if (distXZ(p, q) < minSpacing) {
@@ -195,6 +214,7 @@ void Match::spawnLoot() {
     m_lootSpots.clear();
     m_nextAirdrop = 0;
     if (!m_config.loot) return;
+    if (m_config.mode == GameMode::Zombies) spawnZombieSites();
     for (int i = 0; i < m_config.chestCount; ++i) {
         const Vec3 p = lootSpot(9.0f, i % 2 == 0);
         addContainer(ContainerKind::Chest, p, 0.5f * math3d::kPi * static_cast<float>(m_rng.index(4)));
@@ -211,7 +231,7 @@ void Match::spawnLoot() {
             Pickup w = randomWeaponPickup(false);
             dropAround(p, w, 0, 2);
             dropAround(p, ammoPickup(static_cast<AmmoType>(weaponConfig(w.item, w.rarity).ammoType)), 1, 2);
-        } else if (r < 0.81f || (r < 0.85f && m_config.mode == GameMode::OneShot)) {
+        } else if (r < 0.81f || (r < 0.85f && m_config.mode != GameMode::BattleRoyale)) {
             dropAround(p, randomConsumablePickup(), 0, 1);
         } else if (r < 0.85f) {
             dropAround(p, trapPickup(1), 0, 1);
@@ -219,6 +239,36 @@ void Match::spawnLoot() {
             dropAround(p, ammoPickup(randomAmmoType()), 0, 1);
         }
     }
+}
+
+void Match::spawnZombieSites() {
+    // Modo zombi (v0.14): centros de crafteo, planos y, junto al catre donde despierta el
+    // jugador, una pistola y unas vendas; y un cofre en la base.
+    using namespace world::zsites;
+    for (const Vec3& w : kWorkbenches) addContainer(ContainerKind::Workbench, w, 0.0f);
+    for (int i = 0; i < kBlueprintSpots; ++i) {
+        Pickup bp;
+        bp.active = true;
+        bp.kind = PickupKind::Blueprint;
+        bp.count = i;
+        bp.position = kBlueprints[i];
+        bp.position.y = m_world->supportHeight(bp.position.x, bp.position.z, 0.2f, 0.5f);
+        dropPickup(bp);
+    }
+    Pickup pistol;
+    pistol.active = true;
+    pistol.kind = PickupKind::Item;
+    pistol.item = ItemType::Pistol;
+    pistol.rarity = Rarity::Common;
+    pistol.count = 1;
+    const Vec3 wake = kWakeSpot + Vec3{1.1f, 0.0f, 0.4f};
+    dropAround(wake, pistol, 0, 3, 0.5f);
+    Pickup bandages = pistol;
+    bandages.item = ItemType::Bandage;
+    bandages.count = 5;
+    dropAround(wake, bandages, 1, 3, 0.5f);
+    dropAround(wake, ammoPickup(AmmoType::Light), 2, 3, 0.5f);
+    addContainer(ContainerKind::Chest, {62.0f, 0.0f, 38.4f}, math3d::kPi);
 }
 
 void Match::spawnLlama() {
@@ -320,6 +370,8 @@ void Match::dropAround(const Vec3& center, const Pickup& pickup, int index, int 
         p.position = p.position + dir * 0.45f;
     }
     p.position.y = m_world->supportHeight(p.position.x, p.position.z, 0.2f, center.y + 0.5f);
+    // En el lago flota en la superficie (si no, se veria bajo el agua).
+    if (world::inWater(p.position.x, p.position.z) && p.position.y < world::kWaterLevel) p.position.y = world::kWaterLevel - 0.08f;
     dropPickup(p);
 }
 
@@ -336,7 +388,7 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, ammoPickup(ammo), 1, total);
             if (consumable) dropAround(front, randomConsumablePickup(), 2, total);
             // A veces, una trampa de pinchos (al lado, fuera del corro).
-            if (m_rng.chance(0.2f) && m_config.mode != GameMode::OneShot) {
+            if (m_rng.chance(0.2f) && m_config.mode == GameMode::BattleRoyale) {
                 dropAround(front + forwardFromYaw(c.yaw) * 0.8f, trapPickup(1), 0, 1);
             }
             // Materiales para quien lo abre (en Fortnite salen al suelo; aqui directos).
@@ -347,6 +399,8 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, ammoPickup(randomAmmoType()), 0, 2);
             dropAround(front, ammoPickup(randomAmmoType()), 1, 2);
             break;
+        case ContainerKind::Workbench:
+            break;  // no se abre: es el menu de crafteo
         case ContainerKind::Llama: {
             // Como en Fortnite: muchos materiales, municion de todo tipo, curas y granadas.
             // En corro alrededor de la llama (el suelo se ajusta a cada objeto).
@@ -376,7 +430,7 @@ void Match::spawnContainerLoot(int index, int opener) {
             grenades.count = 3;
             dropAround(c.position, grenades, slot++, total, 1.6f);
             dropAround(c.position, randomConsumablePickup(), slot++, total, 1.6f);
-            if (m_config.mode != GameMode::OneShot) dropAround(c.position, trapPickup(2), slot++, total, 1.6f);
+            if (m_config.mode == GameMode::BattleRoyale) dropAround(c.position, trapPickup(2), slot++, total, 1.6f);
             break;
         }
         case ContainerKind::Airdrop: {
@@ -431,7 +485,8 @@ Interactable Match::interactableFor(int id) const {
     for (size_t i = 0; i < m_containers.size(); ++i) {
         const Container& c = m_containers[i];
         if (c.opened || !c.landed) continue;
-        const float reach = c.kind == ContainerKind::Llama ? kLlamaReach : kContainerReach;
+        if (c.kind == ContainerKind::Workbench && id != 0) continue;
+        const float reach = c.kind == ContainerKind::Llama ? kLlamaReach : (c.kind == ContainerKind::Workbench ? 2.7f : kContainerReach);
         if (distXZ(c.position, pos) > reach || fabsf(c.position.y - pos.y) > 1.6f) continue;
         const float s = score(c.position);
         if (s < best) {
@@ -442,7 +497,7 @@ Interactable Match::interactableFor(int id) const {
     }
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
-        if (!p.active || p.kind != PickupKind::Item) continue;
+        if (!p.active || (p.kind != PickupKind::Item && !(p.kind == PickupKind::Blueprint && id == 0))) continue;
         if (distXZ(p.position, pos) > kPickupReach || fabsf(p.position.y - pos.y) > 1.6f) continue;
         const float s = score(p.position);
         if (s < best) {
@@ -451,14 +506,54 @@ Interactable Match::interactableFor(int id) const {
             result.index = static_cast<int>(i);
         }
     }
+    if (id != 0 || !zombieMode()) return result;
+    // Modo zombi: supervivientes que esperan ayuda y piezas fantasma de los planos.
+    for (int i = 0; i < botCount(); ++i) {
+        const Bot& b = m_bots[i];
+        if (b.kind != BotKind::Survivor || b.rescued || b.state == BotState::Eliminated) continue;
+        const Vec3 sp = b.body.state().position;
+        if (distXZ(sp, pos) > 2.6f || fabsf(sp.y - pos.y) > 1.6f) continue;
+        const float s = score(sp) - 0.3f;
+        if (s < best) {
+            best = s;
+            result.kind = Interactable::Kind::Survivor;
+            result.index = i;
+        }
+    }
+    for (int bp = 0; bp < kBlueprintCount; ++bp) {
+        if (!m_bpFound[bp]) continue;
+        for (int k = 0; k < blueprint(bp).pieceCount; ++k) {
+            if (pieceBuilt(bp, k)) continue;
+            const world::Aabb box = blueprintPiece(bp, k).box;
+            const Vec3 near = closestOnBox(pos, box);
+            if (distXZ(near, pos) > m_config.zombie.pieceReach || pos.y < box.min.y - 2.5f || pos.y > box.max.y + 0.5f) continue;
+            const float s = score(near) + 0.6f;  // lo demas (botin) primero
+            if (s < best) {
+                best = s;
+                result.kind = Interactable::Kind::BlueprintPiece;
+                result.index = bp * kMaxBlueprintPieces + k;
+            }
+        }
+    }
     return result;
 }
 
 bool Match::interact(int id, const Interactable& target) {
     if (target.kind == Interactable::Kind::Pickup) return pickUp(id, target.index);
+    if (target.kind == Interactable::Kind::Survivor) return id == 0 && giveToSurvivor(target.index);
+    if (target.kind == Interactable::Kind::BlueprintPiece) {
+        return id == 0 && buildBlueprintPiece(target.index / kMaxBlueprintPieces, target.index % kMaxBlueprintPieces);
+    }
     if (target.kind != Interactable::Kind::Container) return false;
     Container& c = m_containers[target.index];
     if (c.opened || !c.landed) return false;
+    if (c.kind == ContainerKind::Workbench) {
+        // No se abre: la aplicacion muestra el menu de crafteo.
+        if (id != 0) return false;
+        c.discovered = true;
+        pushEvent(GameEventType::WorkbenchOpened, 0, target.index, c.position);
+        return true;
+    }
     c.opened = true;
     c.openedAt = m_time;
     c.claimedBy = -1;
@@ -500,6 +595,12 @@ bool Match::pickUp(int id, int index) {
         return true;
     }
 
+    if (p.kind == PickupKind::Blueprint) {
+        // Plano: aparecen sus piezas fantasma en la base.
+        p.active = false;
+        giveBlueprint(p.count);
+        return true;
+    }
     if (p.kind == PickupKind::Ammo || p.kind == PickupKind::Materials) {
         const int added = p.kind == PickupKind::Ammo ? m_inventory.addAmmo(p.ammo, p.count) : m_materials.add(p.resource, p.count);
         if (added <= 0) return false;
@@ -540,6 +641,7 @@ int Match::pickupRoom(int index) const {
     const Pickup& p = m_pickups[index];
     if (!p.active) return 0;
     if (p.kind == PickupKind::Ammo) return p.count;
+    if (p.kind == PickupKind::Blueprint || p.kind == PickupKind::Materials) return 1;
     if (itemDef(p.item).kind == ItemKind::Trap) return m_config.maxTrapsCarried - m_trapStock;
     return m_inventory.room(p.item);
 }
@@ -582,6 +684,7 @@ void Match::dropSlot(const InventorySlot& slot, const Vec3& where) {
     out.loaded = isWeapon(slot.type) ? slot.weapon.ammo() : -1;
     out.position = where;
     out.position.y = m_world->supportHeight(where.x, where.z, 0.2f, where.y + 0.5f);
+    if (world::inWater(where.x, where.z) && out.position.y < world::kWaterLevel) out.position.y = world::kWaterLevel - 0.08f;
     dropPickup(out);
 }
 

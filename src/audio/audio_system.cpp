@@ -73,6 +73,12 @@ bool init() {
     load(Sfx::ReloadSniper, assets::sfxRecargaFrancotirador());
     load(Sfx::ReloadGrenadeLauncher, assets::sfxRecargaLanzagranadas());
     load(Sfx::ReloadRocket, assets::sfxRecargaCohete());
+    load(Sfx::ZombieGroan, assets::sfxZombieGemido());
+    load(Sfx::ZombieHit, assets::sfxZombieGolpe());
+    load(Sfx::Horde, assets::sfxHorda());
+    load(Sfx::Splash, assets::sfxChapoteo());
+    load(Sfx::Craft, assets::sfxFabricar());
+    load(Sfx::Dawn, assets::sfxAmanecer());
     const assets::Blob music = assets::musicMenu();
     if (g_music.open(music.data, music.size)) g_mixer.setMusic(&g_music);
     g_bytes += static_cast<unsigned>(music.size);

@@ -18,6 +18,8 @@ c++ -std=c++17 -O2 -Wall -Wextra \
     "$ROOT/src/game/match_loot.cpp" \
     "$ROOT/src/game/match_projectiles.cpp" \
     "$ROOT/src/game/match_traps.cpp" \
+    "$ROOT/src/game/match_zombies.cpp" \
+    "$ROOT/src/game/zombies.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/game/inventory.cpp" \

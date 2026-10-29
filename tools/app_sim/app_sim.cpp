@@ -40,6 +40,7 @@
 #include "input/input.h"
 #include "soft_gfx.h"
 #include "world/storm.h"
+#include "world/zombie_sites.h"
 
 // --- Plataforma simulada --------------------------------------------------------------------
 
@@ -559,11 +560,12 @@ void testPatchBVisuals(Sim& sim) {
     while (inv.pickaxe() || inv.selected() != 0) sim.press(inv.pickaxe() ? PSP_CTRL_TRIANGLE : PSP_CTRL_RIGHT);
     sim.wait(0.3f);
     sim.shot("31a_fusil_rafagas");
-    const int before = match.stats().shotsFired;
+    // Las balas del cargador (con 30 bots, el contador de disparos de la partida incluye los suyos).
+    const int before = inv.slot(0).weapon.ammo();
     sim.press(PSP_CTRL_RTRIGGER);
     sim.wait(0.4f);
-    printf("  fusil de rafagas: una pulsacion de R -> %d balas\n", match.stats().shotsFired - before);
-    check(match.stats().shotsFired - before == 3, "R con el fusil de rafagas: rafaga de 3");
+    printf("  fusil de rafagas: una pulsacion de R -> %d balas\n", before - inv.slot(0).weapon.ammo());
+    check(before - inv.slot(0).weapon.ammo() == 3, "R con el fusil de rafagas: rafaga de 3");
     // Lanzacohetes contra una pared construida delante.
     sim.press(PSP_CTRL_RIGHT);
     sim.press(PSP_CTRL_RIGHT);
@@ -1241,6 +1243,213 @@ void testUpdate013(Sim& sim, const char* outDir) {
 }
 
 // Controles de la fase 7 con los botones reales: cruceta, R con consumibles, pico, camara.
+// --- v0.14: partidas de practica, modo Supervivencia zombi y agua ---------------------------------
+
+float distXZ(const Vec3& a, const Vec3& b) { return sqrtf((a.x - b.x) * (a.x - b.x) + (a.z - b.z) * (a.z - b.z)); }
+
+void testUpdate014(Sim& sim, const char* outDir) {
+    printf("\n11) v0.14: partidas de practica, Supervivencia zombi y agua\n");
+    (void)outDir;
+    const app::Profile& profile = sim.app().testProfile();
+
+    // Partida de practica: con menos de 30 bots ni pavos ni logros.
+    sim.press(PSP_CTRL_SQUARE);
+    sim.press(PSP_CTRL_DOWN);
+    for (int k = 0; k < 4; ++k) sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.2f);
+    sim.shot("50a_lobby_practica");
+    const int botsSet = sim.app().testBotSetting();
+    const int matchesBefore = profile.matches, winsBefore = profile.wins, killsBefore = profile.kills;
+    const int vbucksBefore = profile.vbucks;
+    sim.press(PSP_CTRL_TRIANGLE);
+    sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
+    landAndEquip(sim);
+    const bool practice = !sim.app().testRewardsActive() && sim.app().testMatch().botCount() == 10;
+    killAllBots(sim);
+    sim.waitUntil([&] { return sim.results() == kVictory; }, 4.0f);
+    sim.wait(1.0f);
+    sim.shot("50b_victoria_practica");
+    printf("  practica con %d bots: partidas %d -> %d, victorias %d -> %d, bajas %d -> %d, pavos %d -> %d\n", botsSet,
+           matchesBefore, profile.matches, winsBefore, profile.wins, killsBefore, profile.kills, vbucksBefore, profile.vbucks);
+    check(practice && botsSet == 10 && profile.matches == matchesBefore && profile.wins == winsBefore &&
+              profile.kills == killsBefore && profile.vbucks == vbucksBefore,
+          "con menos de 30 bots la partida es de practica: la victoria no da pavos ni cuenta para los logros");
+    sim.press(PSP_CTRL_CROSS);
+    sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.press(PSP_CTRL_DOWN);
+    for (int k = 0; k < 4; ++k) sim.press(PSP_CTRL_RIGHT);
+    // Modo zombi en el panel.
+    sim.press(PSP_CTRL_UP);
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RIGHT);
+    sim.wait(0.1f);
+    sim.shot("51_modo_zombi");
+    const bool zombieMode = sim.app().testGameMode() == static_cast<int>(game::GameMode::Zombies);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_LEFT);  // los bots no cambian en el modo zombi
+    check(zombieMode && sim.app().testBotSetting() == 30, "el panel elige SUPERVIVENCIA ZOMBI (y alli no hay bots que elegir)");
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.2f);
+    sim.shot("51b_lobby_zombi");
+
+    // Despertar en la base.
+    sim.press(PSP_CTRL_TRIANGLE);
+    check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "empieza la supervivencia zombi");
+    game::Match& m = sim.app().testMatch();
+    m.setPlayerInvulnerable(true);
+    const Vec3 wake = m.body(0).state().position;
+    sim.hold(0, 0.6f, 0.0f, -1.0f);  // el stick no le mueve mientras despierta
+    sim.shot("52a_despertar");
+    const float movedWaking = distXZ(m.body(0).state().position, wake);
+    sim.wait(1.6f);
+    sim.shot("52b_despertar_texto");
+    sim.wait(4.5f);
+    sim.shot("53_zombi_base");
+    check(m.zombieMode() && distXZ(wake, world::zsites::kWakeSpot) < 0.5f && movedWaking < 0.05f && m.airState(0) == game::AirState::Ground,
+          "se despierta en la base (sin autobus) y los primeros segundos no se mueve");
+    // La pistola y las vendas junto al catre.
+    int pistol = -1;
+    for (size_t i = 0; i < m.pickups().size(); ++i) {
+        if (m.pickups()[i].active && m.pickups()[i].item == game::ItemType::Pistol) pistol = static_cast<int>(i);
+    }
+    if (pistol >= 0) m.teleport(0, m.pickups()[pistol].position + Vec3{0.0f, 0.0f, 0.8f}, 0.0f);
+    sim.wait(0.2f);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.2f);
+    check(m.inventory().count(game::ItemType::Pistol) == 1, "junto al catre hay una pistola (y vendas) para empezar");
+
+    // Superviviente.
+    const int survivor = game::kZombieSlots;
+    const Vec3 sp = m.body(survivor + 1).state().position;
+    m.teleport(0, sp + Vec3{0.0f, 0.0f, 1.8f}, 0.0f);
+    sim.press(PSP_CTRL_LTRIGGER);
+    sim.wait(0.4f);
+    sim.shot("54_superviviente");
+    const bool prompt = m.playerInteractable().kind == game::Interactable::Kind::Survivor;
+    m.giveItem(game::ItemType::Bandage, 3);
+    while (m.inventory().pickaxe() || m.inventory().slot(m.inventory().selected()).type != game::ItemType::Pistol) {
+        sim.press(m.inventory().pickaxe() ? PSP_CTRL_TRIANGLE : PSP_CTRL_RIGHT);
+    }
+    sim.press(PSP_CTRL_SQUARE);
+    while (m.inventory().slot(m.inventory().selected()).type != game::ItemType::Bandage) sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.5f);
+    sim.shot("54b_superviviente_rescatado");
+    check(prompt && m.bot(survivor).rescued && sim.app().testZombieMessage() == static_cast<int>(i18n::T::ZSurvivorRescued),
+          "CUADRADO junto a un superviviente le da el arma y la cura de la mano; se une (con su aviso)");
+
+    // Centro de crafteo.
+    const Vec3 bench = world::zsites::kWorkbenches[0];
+    m.teleport(0, bench + Vec3{0.0f, 0.0f, -1.7f}, 0.0f);
+    m.giveMaterials(world::Resource::Wood, 200);
+    m.giveMaterials(world::Resource::Metal, 200);
+    sim.wait(0.3f);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.2f);
+    const bool craftOpen = sim.app().testCraftOpen();
+    sim.shot("55_crafteo");
+    sim.takeAudioPeak();
+    sim.press(PSP_CTRL_CROSS);  // fusil de asalto
+    sim.wait(0.3f);
+    sim.shot("55b_crafteo_fabricado");
+    const bool rifle = m.inventory().count(game::ItemType::AssaultRifle) == 1;
+    const int craftPeak = sim.takeAudioPeak();
+    sim.press(PSP_CTRL_CIRCLE);
+    check(craftOpen && rifle && craftPeak > 2000 && !sim.app().testCraftOpen(),
+          "CUADRADO en un centro de crafteo abre el menu; X fabrica (con su sonido) y CIRCULO cierra");
+
+    // Un zombi de dia, de cerca (modelo, postura y su golpe).
+    {
+        int z = -1;
+        for (int id = 1; id <= game::kZombieSlots; ++id) z = m.alive(id) ? id : z;
+        if (z > 0) {
+            m.teleport(0, {30.0f, 0.0f, 44.0f}, 0.0f);
+            sim.app().testSetCameraAim(0.0f, 0.05f);
+            m.teleport(z, {30.0f, 0.0f, 40.0f}, 3.1416f);
+            sim.wait(0.5f);
+            sim.shot("55c_zombi_de_dia");
+        }
+    }
+
+    // Plano: piezas fantasma en la base y construir una.
+    m.giveBlueprint(2);  // torre de vigilancia
+    m.teleport(0, {66.0f, 0.0f, 38.6f}, 0.0f);  // mirando al norte: la rampa y la torre delante
+    sim.app().testSetCameraAim(0.0f, 0.1f);
+    sim.wait(0.5f);
+    sim.shot("56_plano_fantasma");
+    const game::Interactable piece = m.playerInteractable();
+    sim.press(PSP_CTRL_SQUARE);
+    sim.wait(0.3f);
+    sim.shot("56b_pieza_construida");
+    check(piece.kind == game::Interactable::Kind::BlueprintPiece && m.pieceBuilt(2, 0),
+          "con un plano, junto a su pieza fantasma CUADRADO la construye");
+
+    // Agua del lago.
+    m.teleport(0, {-30.0f, 0.0f, 50.0f}, 0.0f);
+    sim.takeAudioPeak();
+    sim.hold(0, 1.2f, 0.0f, -1.0f);
+    sim.shot("57_agua");
+    check(m.body(0).state().wading, "en el lago se anda por el agua (con chapoteo)");
+
+    // La noche: hay que esperar al anochecer (tiempo de juego).
+    m.teleport(0, world::zsites::kWakeSpot, 0.0f);
+    const float fogDay = sim.app().testFogEnd();
+    sim.waitUntil([&] { return m.night(); }, 200.0f);
+    sim.wait(1.0f);
+    sim.shot("58_anochece");
+    const int nightMessage = sim.app().testZombieMessage();
+    sim.wait(12.0f);
+    sim.shot("58b_noche");
+    const float fogNight = sim.app().testFogEnd();
+    printf("  niebla de dia %.0f m, de noche %.0f m; %d zombis vivos de noche\n", static_cast<double>(fogDay),
+           static_cast<double>(fogNight), m.zombiesAlive());
+    check(m.night() && nightMessage == static_cast<int>(i18n::T::ZNightFall) && fogNight < fogDay - 15.0f,
+          "anochece: aviso de la horda, oscuridad y niebla cerrada");
+    // Un zombi de cerca, para verlo.
+    int zombie = -1;
+    for (int id = 1; id <= game::kZombieSlots; ++id) zombie = m.alive(id) ? id : zombie;
+    if (zombie > 0) {
+        const float yaw = sim.app().testCameraYaw();
+        m.teleport(zombie, m.body(0).state().position + Vec3{-sinf(yaw), 0.0f, -cosf(yaw)} * 3.5f, yaw + 3.1416f);
+        sim.wait(0.3f);
+        sim.shot("59_zombi_cerca");
+    }
+    // Amanece (se sobrevive a la primera noche) y despues cae.
+    check(sim.waitUntil([&] { return !m.night(); }, 120.0f) && m.nightsSurvived() == 1, "sobrevive a la noche: amanece el dia 2");
+    sim.wait(0.5f);
+    sim.shot("60_amanece");
+    const int vbucksZombie = profile.vbucks;
+    m.setPlayerInvulnerable(false);
+    m.applyDamage(0, 1000.0f, zombie > 0 ? zombie : 1, true);
+    check(sim.waitUntil([&] { return sim.results() == kDefeat; }, 5.0f), "al caer, resultados de la supervivencia");
+    sim.wait(1.0f);
+    sim.shot("61_resultados_zombi");
+    printf("  pavos %d -> %d, record de noches %d, primera noche %s\n", vbucksZombie, profile.vbucks, profile.zombieBestNights,
+           profile.achievements[static_cast<int>(app::AchievementId::ZFirstNight)].unlocked ? "desbloqueado" : "no");
+    check(profile.vbucks == vbucksZombie + app::kVbucksPerNight && profile.zombieBestNights >= 1 &&
+              profile.achievements[static_cast<int>(app::AchievementId::ZFirstNight)].unlocked && profile.survivorsRescued >= 1,
+          "la noche sobrevivida da 25 pavos, el record y el logro (y cuenta el rescate)");
+    sim.press(PSP_CTRL_CROSS);
+    sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f);
+    // Vuelta al battle royale: sin la base ni el tema en ruinas.
+    sim.press(PSP_CTRL_SQUARE);
+    sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_LEFT);
+    sim.press(PSP_CTRL_SQUARE);
+    sim.press(PSP_CTRL_TRIANGLE);
+    sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
+    const bool tent = sim.app().testWorld().collision().overlapsAny({{58.0f, 0.5f, 37.4f}, {58.6f, 1.2f, 37.8f}}, world::kBlocksMovement);
+    check(!m.zombieMode() && m.aliveCount() == 31 && !tent &&
+              sim.app().testWorld().textures().theme() == world::TextureTheme::Normal,
+          "la siguiente partida es un battle royale normal (sin la base ni las ruinas)");
+    sim.press(PSP_CTRL_START);
+    sim.press(PSP_CTRL_DOWN);
+    sim.press(PSP_CTRL_CROSS);
+    sim.waitUntil([&] { return sim.screen() == kLobby; }, 2.0f);
+}
+
 void testNewControls(Sim& sim) {
     printf("\n5b) Inventario, consumibles, pico y camara con el mando\n");
     game::Match& match = sim.app().testMatch();
@@ -1500,7 +1709,7 @@ int main(int argc, char** argv) {
     sim.press(PSP_CTRL_DOWN);
     sim.press(PSP_CTRL_CROSS);
     sim.wait(0.2f);
-    check(sim.screen() == kLobby && sim.app().testBotSetting() == 10, "la cruceta y X no hacen nada en el lobby (JUGAR)");
+    check(sim.screen() == kLobby && sim.app().testBotSetting() == 30, "la cruceta y X no hacen nada en el lobby (JUGAR)");
     sim.press(PSP_CTRL_SELECT);
     sim.wait(0.2f);
     check(sim.screen() == kControls, "SELECT abre la pantalla de controles");
@@ -1553,11 +1762,14 @@ int main(int argc, char** argv) {
     sim.shot("05g_lobby_modo");
     sim.press(PSP_CTRL_LEFT);
     sim.press(PSP_CTRL_DOWN);
-    sim.press(PSP_CTRL_RIGHT);
-    check(modeOpen && oneShot && sim.app().testGameMode() == 0 && sim.app().testBotSetting() == 15,
-          "CUADRADO abre el panel: izquierda/derecha cambian el modo (Monodisparo) y los bots (15)");
     sim.press(PSP_CTRL_LEFT);
-    check(sim.app().testBotSetting() == 10, "izquierda los baja (10)");
+    sim.wait(0.1f);
+    sim.shot("05h_lobby_modo_practica");
+    check(modeOpen && oneShot && sim.app().testGameMode() == 0 && sim.app().testBotSetting() == 25,
+          "CUADRADO abre el panel: izquierda/derecha cambian el modo (Monodisparo) y los bots (25: practica)");
+    sim.press(PSP_CTRL_RIGHT);
+    sim.press(PSP_CTRL_RIGHT);
+    check(sim.app().testBotSetting() == 30, "derecha los sube (30, el maximo y lo normal desde la v0.14)");
     sim.press(PSP_CTRL_SQUARE);
     check(!sim.app().testModeOpen(), "CUADRADO cierra el panel");
 
@@ -1568,7 +1780,8 @@ int main(int argc, char** argv) {
     sim.shot("07_carga");
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "tras la carga empieza la partida");
     game::Match& match = sim.app().testMatch();
-    check(match.botCount() == 10 && match.aliveCount() == 11, "la partida tiene 10 bots y 11 vivos");
+    check(match.botCount() == 30 && match.aliveCount() == 31 && sim.app().testRewardsActive(),
+          "la partida tiene 30 bots y 31 vivos (con pavos y logros)");
 
     // Autobus de batalla, caida libre y ala delta, con los botones.
     check(match.airState(0) == game::AirState::Bus, "la partida empieza en el autobus de batalla");
@@ -1713,9 +1926,9 @@ int main(int argc, char** argv) {
     sim.press(PSP_CTRL_SQUARE);
     check(sim.screen() == kLoading, "[] en los resultados abre otra partida");
     check(sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f), "la nueva partida empieza");
-    check(match.aliveCount() == 11 && match.elapsed() < 0.5f && match.structures().count() == 0 &&
+    check(match.aliveCount() == 31 && match.elapsed() < 0.5f && match.structures().count() == 0 &&
               sim.app().testWorld().collision().dynamicCount() == 0,
-          "la partida nueva empieza limpia (11 vivos, sin paredes ni cajas dinamicas)");
+          "la partida nueva empieza limpia (31 vivos, sin paredes ni cajas dinamicas)");
     check(landAndEquip(sim), "salto, aterrizaje y equipo de pruebas");
     testNewControls(sim);
     testPatchBVisuals(sim);
@@ -1753,7 +1966,7 @@ int main(int argc, char** argv) {
         sim.wait(0.3f);
         sim.press(PSP_CTRL_TRIANGLE);  // JUGAR
         flowOk &= sim.waitUntil([&] { return sim.screen() == kGame; }, 3.0f);
-        flowOk &= match.aliveCount() == 11 && sim.app().testWorld().collision().dynamicCount() == 0;
+        flowOk &= match.aliveCount() == 31 && sim.app().testWorld().collision().dynamicCount() == 0;
         if (walkable < 0) walkable = sim.app().testNavWalkable();
         navOk &= sim.app().testNavWalkable() == walkable;
         // Algo de construccion y disparos en cada partida.
@@ -1914,6 +2127,7 @@ int main(int argc, char** argv) {
     testTextsFit();
     testSettingsAndEnglish(sim, outDir);
     testUpdate013(sim, outDir);
+    testUpdate014(sim, outDir);
     const app::Profile played = sim.app().testProfile();
     testDeleteData(sim, outDir, profilePath);
 

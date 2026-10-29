@@ -20,6 +20,8 @@ enum class Stat : u8 {
     Matches, Wins, Kills, Deaths, Headshots, MostKills, BestPlaceTop5, Seconds,
     ChestsOpened, AirdropsOpened, LlamasOpened, PiecesBuilt, MaterialsHarvested, TrapKills,
     ExplosiveKills, ItemsUsed,
+    // v0.14: modo zombi (ZombieNights es el record de noches seguidas, como MostKills).
+    ZombieNights, ZombieKills, SurvivorsRescued, BlueprintsDone, ItemsCrafted,
     Count
 };
 
@@ -27,6 +29,8 @@ enum class AchievementId : u8 {
     FirstWin, FiveWins, FirstKill, Hunter, Exterminator, Sharpshooter, KillStreak, Looter,
     TreasureHunter, Llama, Airdrop, Architect, Lumberjack, Trapper, Demolition, TopFive,
     Veteran, Medic,
+    // v0.14: modo zombi.
+    ZFirstNight, ZThreeNights, ZWeek, ZHunter, ZRescuer, ZFortress, ZCrafter,
     Count
 };
 
@@ -52,5 +56,8 @@ struct AchievementState {
 // Pavos (v0.13; docs/TIENDA.md): por cada victoria magistral y por cada logro completado.
 constexpr int kVbucksPerWin = 50;
 constexpr int kVbucksPerAchievement = 50;
+// v0.14: en el modo zombi, por cada noche sobrevivida (y por cada plano completado).
+constexpr int kVbucksPerNight = 25;
+constexpr int kVbucksPerBlueprint = 15;
 
 }  // namespace app

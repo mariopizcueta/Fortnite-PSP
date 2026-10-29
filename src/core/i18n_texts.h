@@ -51,7 +51,7 @@
     X(StatMostKills, "Max. bajas", "Most kills")                                                              \
     X(StatBestPlace, "Mejor puesto", "Best place")                                                            \
     X(BotsSelector, "%d BOTS", "%d BOTS")                                                       \
-    X(BotsWarning, "(mas de 10: mide FPS)", "(over 10: check FPS)")                                           \
+    X(BotsWarning, "(menos de 30: sin pavos ni logros)", "(under 30: no V-Bucks or achievements)")                                           \
     X(NoMapError, "ERROR: sin escenario", "ERROR: no map")                                                    \
     X(ExitQuestion, "Salir de FortnitePSP?", "Quit FortnitePSP?")                                             \
     X(AchievementsTitle, "LOGROS  %d / %d", "ACHIEVEMENTS  %d / %d")                                          \
@@ -433,4 +433,96 @@
     X(CheatActionKillBots, "Eliminar a todos los bots", "Eliminate every bot")                                \
     X(CheatActionInfo, "Accion: se aplica a la partida al pulsar X.", "Action: applied to the match with X.") \
     X(CheatAppliesNow, "Se aplica al momento a esta partida.", "Applies to this match immediately.")          \
-    X(CheatAppliesNext, "Se aplica desde la siguiente partida.", "Applies from the next match on.")
+    X(CheatAppliesNext, "Se aplica desde la siguiente partida.", "Applies from the next match on.") \
+    /* --- v0.14: modo zombi, tacticas de los bots y partidas de practica ------------------- */ \
+    X(BotCamp, "Acampar", "Camp") \
+    X(BotIdle, "Esperar", "Wait") \
+    X(ModeZombies, "SUPERVIVENCIA ZOMBI", "ZOMBIE SURVIVAL") \
+    X(ModeZombiesDesc1, "Sobrevive a los zombis,", "Survive the zombies,") \
+    X(ModeZombiesDesc2, "rescata gente y fortifica.", "rescue people, fortify.") \
+    X(ModeBotsZombies, "BOTS  -  (solo zombis)", "BOTS  -  (zombies only)") \
+    X(BotsZombies, "ZOMBIS", "ZOMBIES") \
+    X(PracticeMatch, "Partida de practica: sin pavos ni logros", "Practice match: no V-Bucks or achievements") \
+    X(PracticeShort, "PRACTICA (menos de 30 bots)", "PRACTICE (under 30 bots)") \
+    X(LoadingZombies, "Polvorin en ruinas - supervivencia zombi", "Ruined Depot - zombie survival") \
+    X(TipZombies, "de noche hay mas zombis: fortifica la base.", "at night there are more zombies: fortify the base.") \
+    X(ZombieWalker, "Zombi", "Zombie") \
+    X(ZombieRunner, "Corredor", "Runner") \
+    X(ZombieBrute, "Bruto", "Brute") \
+    X(ZDay, "DIA %d", "DAY %d") \
+    X(ZNight, "NOCHE %d", "NIGHT %d") \
+    X(ZUntilNight, "anochece en %d:%02d", "nightfall in %d:%02d") \
+    X(ZUntilDawn, "amanece en %d:%02d", "dawn in %d:%02d") \
+    X(ZZombies, "Zombis cerca: %d", "Zombies around: %d") \
+    X(ZKills, "Abatidos: %d", "Killed: %d") \
+    X(ZObjSurvivors, "Supervivientes %d/%d", "Survivors %d/%d") \
+    X(ZObjBlueprints, "Planos %d/%d (%d hechos)", "Blueprints %d/%d (%d built)") \
+    X(ZObjBenches, "Centros de crafteo %d/%d", "Crafting benches %d/%d") \
+    X(ZNightFall, "ANOCHECE: viene una horda", "NIGHTFALL: a horde is coming") \
+    X(ZDawn, "AMANECE: DIA %d", "DAWN: DAY %d") \
+    X(ZWake1, "...donde estoy?", "...where am I?") \
+    X(ZWake2, "Despiertas de un coma en una base abandonada.", "You wake from a coma in an abandoned base.") \
+    X(ZWake3, "Busca armas, gente y planos. Sobrevive.", "Find weapons, people and blueprints. Survive.") \
+    X(ZSurvivorFound, "%s necesita ayuda", "%s needs help") \
+    X(ZSurvivorRescued, "%s se une a ti", "%s joins you") \
+    X(ZSurvivorDown, "%s ha caido", "%s is down") \
+    X(ZNeedsWeapon, "Necesita un arma", "Needs a weapon") \
+    X(ZNeedsHeal, "Necesita una curacion", "Needs a heal") \
+    X(ZNeedsBoth, "Necesita un arma y una curacion", "Needs a weapon and a heal") \
+    X(ZNeedsHint, "Llevalo en la mano y pulsa", "Hold it and press") \
+    X(ZBlueprintFound, "Plano: %s", "Blueprint: %s") \
+    X(ZBlueprintDone, "Base fortificada: %s", "Base fortified: %s") \
+    X(ZPieceInfo, "Pieza del plano (%d de material)", "Blueprint piece (%d materials)") \
+    X(ZPieceNoMats, "Faltan materiales para la pieza", "Not enough materials for the piece") \
+    X(ZWorkbenchFound, "Centro de crafteo encontrado", "Crafting bench found") \
+    X(ZBase, "BASE", "BASE") \
+    X(HintGive, "dar", "give") \
+    X(HintCraft, "fabricar", "craft") \
+    X(HintBuildPiece, "construir pieza", "build piece") \
+    X(CraftTitle, "CENTRO DE CRAFTEO", "CRAFTING BENCH") \
+    X(CraftHave, "Tienes  M %d  P %d  Me %d", "You have  W %d  S %d  M %d") \
+    X(CraftCost, "M %d  P %d  Me %d", "W %d  S %d  M %d") \
+    X(CraftNoMats, "Faltan materiales", "Not enough materials") \
+    X(CraftDone, "Fabricado: %s", "Crafted: %s") \
+    X(CraftNoBench, "Acercate a un centro de crafteo", "Get closer to a crafting bench") \
+    X(CraftAmmoNote, "(municion del arma en la mano)", "(ammo for the weapon in hand)") \
+    X(RecipeRifle, "Fusil de asalto", "Assault rifle") \
+    X(RecipeSmg, "Subfusil", "SMG") \
+    X(RecipeSniper, "Francotirador", "Sniper rifle") \
+    X(RecipeRocket, "Lanzacohetes", "Rocket launcher") \
+    X(RecipeGrenades, "Granadas x3", "Grenades x3") \
+    X(RecipeTraps, "Trampas de pinchos x2", "Spike traps x2") \
+    X(RecipeBandages, "Vendas x5", "Bandages x5") \
+    X(RecipeMedkit, "Botiquin", "Medkit") \
+    X(RecipeAmmo, "Municion x2", "Ammo x2") \
+    X(BlueprintNorthWest, "Muralla norte y oeste", "North and west wall") \
+    X(BlueprintNorthWestDesc, "6 paredes al norte y al oeste de la base.", "6 walls on the north and west of the base.") \
+    X(BlueprintEastSouth, "Muralla este y sur", "East and south wall") \
+    X(BlueprintEastSouthDesc, "5 paredes; la puerta sur queda abierta.", "5 walls; the south gate stays open.") \
+    X(BlueprintTower, "Torre de vigilancia", "Watchtower") \
+    X(BlueprintTowerDesc, "Rampa, plataforma y parapetos a 3 m.", "Ramp, platform and parapets at 3 m.") \
+    X(BlueprintShelter, "Refugio techado", "Roofed shelter") \
+    X(BlueprintShelterDesc, "4 suelos de tejado sobre la base.", "4 roof floors over the base.") \
+    X(PickupBlueprint, "Plano", "Blueprint") \
+    X(ResultZDays, "DIAS", "DAYS") \
+    X(ResultZKills, "ZOMBIS", "ZOMBIES") \
+    X(ResultZRescued, "Rescatados %d   Planos %d   Fabricados %d", "Rescued %d   Blueprints %d   Crafted %d") \
+    X(ResultZDied, "Los zombis te han atrapado", "The zombies got you") \
+    X(ResultZDayN, "Caiste el dia %d", "You fell on day %d") \
+    X(ResultZBest, "Record: %d dias", "Best: %d days") \
+    X(StatZBest, "Zombis: record", "Zombies: best") \
+    X(AchZFirstNight, "Primera noche", "First night") \
+    X(AchZFirstNightDesc, "Sobrevive a una noche (zombis).", "Survive a night (zombie mode).") \
+    X(AchZThreeNights, "Tres noches", "Three nights") \
+    X(AchZThreeNightsDesc, "Sobrevive a 3 noches seguidas.", "Survive 3 nights in a row.") \
+    X(AchZWeek, "Una semana", "One week") \
+    X(AchZWeekDesc, "Sobrevive a 7 noches seguidas.", "Survive 7 nights in a row.") \
+    X(AchZHunter, "Cazazombis", "Zombie hunter") \
+    X(AchZHunterDesc, "Abate 100 zombis.", "Kill 100 zombies.") \
+    X(AchZRescuer, "Rescatador", "Rescuer") \
+    X(AchZRescuerDesc, "Rescata a 5 supervivientes.", "Rescue 5 survivors.") \
+    X(AchZFortress, "Fortaleza", "Fortress") \
+    X(AchZFortressDesc, "Completa 4 planos de la base.", "Complete 4 base blueprints.") \
+    X(AchZCrafter, "Artesano", "Crafter") \
+    X(AchZCrafterDesc, "Fabrica 10 objetos.", "Craft 10 items.") \
+    X(AchZVbucks, "+%d pavos por dias sobrevividos", "+%d V-Bucks for days survived")

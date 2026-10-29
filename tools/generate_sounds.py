@@ -414,6 +414,64 @@ def recarga_lanzagranadas():
     return normalize(out, 0.65)
 
 
+# --- v0.14: modo zombi y agua (al final: los anteriores siguen saliendo identicos) -----------
+
+def zombie_gemido():
+    """Gemido grave: diente de sierra con vibrato lento, filtrado y con aspereza."""
+    tt = t(1.3)
+    f = 95 + 18 * np.sin(2 * math.pi * 1.7 * tt) - 25 * tt
+    phase = 2 * math.pi * np.cumsum(f) / RATE
+    saw = 2 * ((phase / (2 * math.pi)) % 1.0) - 1
+    rough = lowpass(rng.standard_normal(len(tt)), 0.08) * 0.6
+    x = lowpass(saw + rough, 0.18) * (0.6 + 0.4 * np.sin(2 * math.pi * 3.1 * tt) ** 2)
+    e = np.minimum(1, tt / 0.15) * np.clip((1.3 - tt) / 0.5, 0, 1)
+    return normalize(x * e, 0.6)
+
+
+def zombie_golpe():
+    """Zarpazo: golpe sordo y un arañazo."""
+    out = np.zeros(int(0.4 * RATE))
+    place(out, 0.0, thunk(110, 0.12))
+    scratch = lowpass(rng.standard_normal(int(0.18 * RATE)), 0.5) * env(int(0.18 * RATE), 0.01, 0.06)
+    place(out, 0.04, scratch, 0.6)
+    return normalize(out, 0.75)
+
+
+def horda():
+    """Cuerno grave que anuncia la noche y la horda (3 s)."""
+    tt = t(3.0)
+    tone = np.sin(2 * math.pi * 73 * tt) + 0.5 * np.sin(2 * math.pi * 110 * tt) + 0.3 * np.sin(2 * math.pi * 146 * tt)
+    e = np.minimum(1, tt / 0.6) * np.clip((3.0 - tt) / 1.2, 0, 1)
+    wobble = 1 + 0.05 * np.sin(2 * math.pi * 4 * tt)
+    return normalize(lowpass(tone * wobble * e, 0.3), 0.7)
+
+
+def chapoteo():
+    """Paso en el agua: ruido filtrado con dos salpicaduras."""
+    out = np.zeros(int(0.3 * RATE))
+    for k, at in enumerate((0.0, 0.07)):
+        n = int(0.2 * RATE)
+        splash = lowpass(rng.standard_normal(n), 0.35 - 0.1 * k) * env(n, 0.005, 0.05)
+        place(out, at, splash, 1.0 - 0.4 * k)
+    return normalize(out, 0.55)
+
+
+def fabricar():
+    """Martillazos y una carraca: algo fabricado en el banco."""
+    out = np.zeros(int(0.8 * RATE))
+    for k in range(3):
+        place(out, 0.02 + 0.16 * k, clack(700 + 120 * k, 0.05, 0.6))
+        place(out, 0.02 + 0.16 * k, thunk(220, 0.05), 0.6)
+    for k in range(5):
+        place(out, 0.52 + 0.045 * k, clack(1800, 0.015, 0.3), 0.5)
+    return normalize(out, 0.65)
+
+
+def amanecer():
+    """Campanita suave: se ha sobrevivido a la noche."""
+    return normalize(arpeggio([523, 659, 784, 1046], 0.16, 0.5, 1.6), 0.5)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
@@ -427,6 +485,9 @@ SOUNDS = {
     "recarga_fusil": recarga_fusil, "recarga_escopeta": recarga_escopeta, "recarga_tactica": recarga_tactica,
     "recarga_subfusil": recarga_subfusil, "recarga_pistola": recarga_pistola, "recarga_revolver": recarga_revolver,
     "recarga_francotirador": recarga_francotirador, "recarga_lanzagranadas": recarga_lanzagranadas,
+    # v0.14: modo zombi y agua (al final, por lo mismo).
+    "zombie_gemido": zombie_gemido, "zombie_golpe": zombie_golpe, "horda": horda, "chapoteo": chapoteo,
+    "fabricar": fabricar, "amanecer": amanecer,
 }
 
 

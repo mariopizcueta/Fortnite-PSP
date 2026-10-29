@@ -138,7 +138,7 @@ void rasterTriangle(const ClipVertex* v) {
                                          static_cast<float>((g.fog.color >> 16) & 0xFF)};
                 for (int k = 0; k < 3; ++k) col[k] = col[k] * f + fogRgb[k] * (1.0f - f);
             }
-            g.depth[idx] = z;  // la GE escribe profundidad tambien con mezcla (sceGuDepthMask)
+            if (g.depthWrite) g.depth[idx] = z;  // la GE escribe profundidad tambien con mezcla (sceGuDepthMask)
             if (g.blend) {
                 const float alpha = P(v[0].a, v[1].a, v[2].a);
                 for (int k = 0; k < 3; ++k) {
@@ -223,12 +223,16 @@ void begin3D(const Mat4& projection, const Mat4& view, const FogSettings& fog) {
     g.view = view;
     g.model = Mat4::identity();
     g.fog = fog;
+    g.fogConfigured = fog.enabled;
+    g.depthWrite = true;
     g.texture = nullptr;
     g.blend = false;
 }
 void setModelMatrix(const Mat4& model) { g.model = model; }
 void bindTexture(const Texture* texture) { g.texture = texture; }
 void setBlend(bool enabled) { g.blend = enabled; }
+void setFog(bool enabled) { g.fog.enabled = enabled && g.fogConfigured; }
+void setDepthWrite(bool enabled) { g.depthWrite = enabled; }
 
 void drawMesh(const Mesh& mesh) {
     if (!g.enabled) return;

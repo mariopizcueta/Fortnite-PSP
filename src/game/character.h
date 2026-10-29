@@ -27,6 +27,7 @@ struct CharacterState {
     float maxShield = 100.0f;
     JumpState jumpState = JumpState::Grounded;
     float airTime = 0.0f;   // segundos desde que dejo el suelo (0 en el suelo)
+    bool wading = false;    // con los pies en el agua del lago (v0.14): va mas despacio
 
     bool grounded() const { return jumpState == JumpState::Grounded; }
     float horizontalSpeed() const;

@@ -1,5 +1,7 @@
 #include "game/character.h"
 
+#include "world/water.h"
+
 #include "core/i18n.h"
 
 #include <math.h>
@@ -151,7 +153,10 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         amount = 1.0f;
     }
     const bool flying = !wasGrounded && intent.airSpeed > 0.0f;
-    const Vec3 target = wish * (flying ? intent.airSpeed : kRunSpeed * intent.speedScale);
+    // En el agua del lago (v0.14) se anda mas despacio y se salta menos.
+    s.wading = !intent.fly && s.position.y < world::kWaterLevel + 0.05f && world::inWater(s.position.x, s.position.z);
+    const float water = s.wading ? world::kWaterSpeed : 1.0f;
+    const Vec3 target = wish * (flying ? intent.airSpeed : kRunSpeed * intent.speedScale * water);
     const float accel = wasGrounded || intent.fly ? (amount > 0.0f ? kGroundAccel : kGroundBrake) : (flying ? 16.0f : kAirAccel);
     const float dvx = target.x - s.velocity.x;
     const float dvz = target.z - s.velocity.z;
@@ -165,7 +170,7 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
         s.velocity.z += dvz / dv * maxChange;
     }
     const float hs = s.horizontalSpeed();
-    const float maxSpeed = flying ? intent.airSpeed : kRunSpeed * intent.maxSpeedScale;
+    const float maxSpeed = flying ? intent.airSpeed : kRunSpeed * intent.maxSpeedScale * water;
     if (hs > maxSpeed) {
         s.velocity.x *= maxSpeed / hs;
         s.velocity.z *= maxSpeed / hs;
@@ -181,7 +186,7 @@ void CharacterBody::step(const MoveIntent& intent, float dt, const world::Collis
     // --- Salto ---------------------------------------------------------------------------
     m_coyote = wasGrounded ? kCoyoteTime : m_coyote - dt;
     if (m_jumpBuffer > 0.0f && m_coyote > 0.0f && !intent.fly) {
-        s.velocity.y = kJumpSpeed * intent.jumpScale;
+        s.velocity.y = kJumpSpeed * intent.jumpScale * (s.wading ? world::kWaterJump : 1.0f);
         s.jumpState = JumpState::Rising;
         m_jumpBuffer = 0.0f;
         m_coyote = 0.0f;

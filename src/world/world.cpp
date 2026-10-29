@@ -33,6 +33,11 @@ bool World::build() {
     for (int i = 0; i < static_cast<int>(m_harvestables.size()); ++i) {
         const Harvestable& h = m_harvestables[i];
         for (int c = 0; c < h.colliderCount; ++c) m_harvestByCollider[h.collider + c] = static_cast<short>(i);
+        // Lo del modo zombi no existe hasta que una partida de ese modo lo pone en pie
+        // (game::Match::applyMapState): la navegacion se construye sin ello.
+        if (h.zombieOnly) {
+            for (int c = 0; c < h.colliderCount; ++c) m_collision.setStaticEnabled(h.collider + c, false);
+        }
         // Los lotes se reordenan abajo: cada uno guarda a que objeto pertenece.
         for (int k = h.batchBegin; k < h.batchEnd; ++k) m_static[k].object = static_cast<short>(i);
     }

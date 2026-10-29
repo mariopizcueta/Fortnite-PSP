@@ -51,6 +51,7 @@ private:
         kBeam0, kBeam1, kBeam2, kBeam3, kBeam4,
         kBlast0, kBlast1, kBlast2,  // explosion: tres niveles de transparencia
         kTrapPlate, kTrapSpikes, kTrapGhostValid, kTrapGhostInvalid,
+        kBlueprint,  // v0.14: plano enrollado (modo zombi)
         kMeshCount
     };
 

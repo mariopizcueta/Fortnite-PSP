@@ -14,9 +14,14 @@ en esa carpeta; no hay que borrar ni sustituir la carpeta entera (en el Mac, "Re
 carpeta borra lo que tenía dentro). Por si acaso, antes se pueden copiar esos dos `.txt` al
 ordenador.
 
-**Estado: v0.13.0: armas que rompen el mapa, inventario con L + R, pavos y tienda, bots que
-pican, se cubren, huyen y se curan, menú de administrador y modo Monodisparo.** Detalle en
-[docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md). Antes, fase 8, parche de mecánicas y
+**Estado: v0.14.0: 30 bots por defecto (con menos, partida de práctica sin pavos ni logros),
+bots que acampan airdrops, se encierran en cajas, ganan altura con rampas y juegan el final
+con cabeza, texturas y personajes más detallados, cielo y animaciones nuevas, agua que se
+cruza andando y el modo Supervivencia zombi.** Detalle en
+[docs/ACTUALIZACION_0_14.md](docs/ACTUALIZACION_0_14.md) y
+[docs/ZOMBIS.md](docs/ZOMBIS.md). Antes, v0.13.0: armas que rompen el mapa, inventario con
+L + R, pavos y tienda, bots que pican, huyen y se curan, menú de administrador y Monodisparo
+([docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md)). Antes, fase 8, parche de mecánicas y
 contenido (armas nuevas con modelos 3D, explosivos, trampas, llama, animaciones a dos manos,
 logros, taquilla, ajustes e inglés), v0.12.1.
 Detalle del parche en [docs/PARCHE.md](docs/PARCHE.md). Antes (fase 7): botín, autobús, ala
@@ -26,7 +31,8 @@ una partida completa:
 1. inicio de sesión;
 2. lobby;
 3. pantalla de carga;
-4. battle royale contra 10 bots en el depósito "Polvorín", con disparos y construcción;
+4. battle royale contra 30 bots en el depósito "Polvorín", con disparos y construcción (o
+   la Supervivencia zombi);
 5. victoria o derrota;
 6. vuelta al lobby u otra partida.
 
@@ -50,6 +56,32 @@ Novedades del parche:
 de host. No son capturas de una PSP.*
 
 ## Qué incluye
+
+**v0.14.0** (todo en [docs/ACTUALIZACION_0_14.md](docs/ACTUALIZACION_0_14.md)):
+- **30 bots por defecto.** Con menos, la partida es **de práctica**: ni pavos ni logros.
+- **Bots tácticos:** acampan los airdrops, se encierran en una caja de paredes cuando les
+  disparan (y salen al rato), ponen rampas para ganar altura contra quien está más alto y,
+  al final de la partida, rotan antes, se colocan a cubierto en la zona y huyen antes.
+- **Gráficos:** texturas del mapa a 64×64 con más detalle, cielo con degradado, nubes y sol,
+  personajes más redondos con mochila y más detalles, y animaciones nuevas (giro del tronco,
+  balanceo, inclinarse en las curvas, caídas distintas, vadear).
+- **Agua:** el lago se cruza andando, a la mitad de velocidad y chapoteando.
+- **Supervivencia zombi** ([docs/ZOMBIS.md](docs/ZOMBIS.md)): el Polvorín en ruinas y más
+  tenebroso, despiertas de un coma en una base abandonada, día y noche con hordas, tres tipos
+  de zombi, supervivientes a los que rescatar con un arma y una cura, centros de crafteo
+  para fabricar las armas que no hay en el botín (solo escopetas, pistolas y curas) y planos
+  para fortificar la base. Pavos por noche sobrevivida y 7 logros nuevos.
+
+![Modo zombi](docs/capturas/app_v14_modo_zombi.png)
+![La base al despertar](docs/capturas/app_v14_zombi_base.png)
+![Superviviente rescatado](docs/capturas/app_v14_superviviente.png)
+![Centro de crafteo](docs/capturas/app_v14_crafteo.png)
+![Plano de la torre](docs/capturas/app_v14_plano.png)
+![La noche](docs/capturas/app_v14_noche.png)
+![Resultados](docs/capturas/app_v14_resultados.png)
+![Zombis](docs/capturas/preview_v14_zombis.png)
+![Mochilas](docs/capturas/preview_v14_mochilas.png)
+![Texturas](docs/capturas/preview_v14_texturas.png)
 
 **v0.13.0** (todo en [docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md)):
 - **Combate:** las balas rompen los objetos del mapa (naves, contenedores, cajas, árboles…).
@@ -319,7 +351,7 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 |-------------------|------------------------|-----------------------------------------------------|
 | Inicio de sesión  | **X**                  | Iniciar sesión (conexión simulada)                  |
 | Lobby (JUGAR)     | **TRIÁNGULO**          | Jugar                                               |
-| Lobby (JUGAR)     | **CUADRADO**           | Modo de juego y bots (panel: ↑↓ fila, ←→ valor; CUADRADO, X u O cierran) |
+| Lobby (JUGAR)     | **CUADRADO**           | Modo de juego (Battle Royale / Monodisparo / Supervivencia zombi) y bots (panel: ↑↓ fila, ←→ valor; CUADRADO, X u O cierran). Con menos de 30 bots, práctica |
 | Lobby (JUGAR)     | **SELECT**             | Controles                                           |
 | Lobby (JUGAR)     | **CÍRCULO**            | Salir (pide confirmación: X sale, O cancela)        |
 | Lobby             | **Stick**              | Girar el personaje                                  |
@@ -363,11 +395,24 @@ disparar, apuntar, agacharse, bailar) se pueden reasignar en AJUSTES > CONTROLES
 muestra los de por defecto. Con el inventario lleno, CUADRADO abre un selector: cruceta
 ←/→ elige la ranura, CUADRADO cambia, CÍRCULO cancela.
 
+**Supervivencia zombi** (además de lo anterior; no hay autobús):
+
+| Dónde | Botón | Acción |
+|-------|-------|--------|
+| Junto a un superviviente | **CUADRADO** | Darle lo que llevas en la mano (necesita un arma y una curación) |
+| Junto a un centro de crafteo | **CUADRADO** | Menú de crafteo: ↑↓ elegir, X fabricar, O cerrar |
+| Junto a una pieza fantasma de un plano | **CUADRADO** | Construirla (10 de material, reforzada) |
+| Un plano en el suelo | **CUADRADO** | Recogerlo (aparecen sus piezas en la base) |
+
 Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 [docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y
 [docs/JUGADOR.md](docs/JUGADOR.md).
 
 ## Limitaciones conocidas
+
+- **v0.14.0 sin probar en ejecución real:** el rendimiento con 30 bots por defecto y los
+  personajes más detallados, el modo zombi (22 zombis y la noche) y si la noche se ve
+  demasiado oscura en la PSP-2000.
 
 - **v0.7.2 sin probar en ejecución real:** falta oír en la PSP los sonidos nuevos (sobre
   todo los pasos y beber) y comprobar que los iconos de botón se leen en la pantalla.
@@ -391,7 +436,8 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 - **Zona que se cierra simplificada:** un círculo que se cierra en 4 min y guía a los bots
   hacia el depósito. Fuera de ella no se pierde vida; solo hace daño la tormenta fija del
   límite del mapa. El reloj del HUD muestra lo que falta para que termine de cerrarse.
-- **Bots:** 10 por defecto, configurables hasta 30. Todos llevan el mismo fusil.
+- **Bots:** 30 por defecto (desde la v0.14), configurables de 5 a 30; con menos de 30 la
+  partida es de práctica.
 - **Texto:** se usa la fuente 8×8 de depuración, sin tildes ni eñes (por eso se lee
   "Contrasena" o "elimino"). Los rótulos grandes (JUGAR, ELIMINADO…) sí las llevan,
   porque son imágenes.
@@ -409,6 +455,8 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 
 ```
 Makefile                     Build basado en build.mak de PSPSDK
+docs/ACTUALIZACION_0_14.md   v0.14: 30 bots, bots tacticos, graficos, agua y modo zombi
+docs/ZOMBIS.md               Supervivencia zombi (v0.14)
 docs/ACTUALIZACION_0_13.md   v0.13: mapa que se rompe, inventario, pavos, IA, admin, Monodisparo
 docs/TIENDA.md               Pavos, recompensas y tienda de objetos (v0.13)
 docs/PRESENTACION.md         Pantallas, HUD, estilo, animaciones, sonido, memoria (fase 6)
@@ -477,6 +525,9 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
+- **v0.14.0: `make app-sim` 0 fallos en 178 comprobaciones, `make match-sim` 0 fallos en
+  231, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 11 (app-sim) y 20
+  (match-sim); ver [docs/ACTUALIZACION_0_14.md](docs/ACTUALIZACION_0_14.md).
 - **v0.13.0: `make app-sim` 0 fallos en 164 comprobaciones, `make match-sim` 0 fallos en
   206, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 10 (app-sim) y 19
   (match-sim); ver [docs/ACTUALIZACION_0_13.md](docs/ACTUALIZACION_0_13.md).
