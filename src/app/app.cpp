@@ -11,7 +11,9 @@
 #include "audio/audio_system.h"
 #include "platform/log.h"
 #include "world/storm.h"
+#include "world/water.h"
 #include "world/world_units.h"
+#include "world/zombie_sites.h"
 
 namespace app {
 namespace {
@@ -145,7 +147,7 @@ void App::init() {
     const Cosmetic* outfit = m_profile.equippedIn(CosmeticSlot::Outfit);
     const game::CharacterPalette* palettes[kModelCount] = {
         outfit && outfit->palette ? outfit->palette : &game::palettes::kPlayer, &game::palettes::kCommando,
-        &game::palettes::kOrange, &game::palettes::kRanger};
+        &game::palettes::kOrange, &game::palettes::kRanger, &game::palettes::kZombie, &game::palettes::kZombieWorker};
     m_modelsReady = true;
     for (int i = 0; i < kModelCount; ++i) m_modelsReady &= m_models[i].build(*palettes[i]);
     platform::log::write("modelos de personaje: %s, %d triangulos (%d el de lejos)",
@@ -160,6 +162,8 @@ void App::init() {
                          m_props.triangles());
     m_lobbyReady = m_lobbyScene.build();
     buildMinimap();
+    buildZombieMinimap();
+    buildSky();
     {
         const assets::Blob scope = assets::scopePng();
         if (!gfx::loadPngFromMemory(m_scope, scope.data, scope.size, GU_PSM_5551)) {
@@ -222,9 +226,22 @@ void App::startMatch() {
         for (int a = 0; a < static_cast<int>(game::AmmoType::Count); ++a) m_matchConfig.startAmmo[a] = 120;
         for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) m_matchConfig.startMaterials[r] = 500;
     }
-    m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(),
-                  kPlayerSpawn, kPlayerSpawnYaw);
+    // Supervivencia zombi (v0.14): sus reglas, el mapa en ruinas y se despierta en la base.
+    const bool zombies = m_gameMode == game::GameMode::Zombies;
+    if (zombies) configureZombieMatch();
+    m_world.setTheme(zombies ? world::TextureTheme::Ruined : world::TextureTheme::Normal);
+    const Vec3 spawn = zombies ? world::zsites::kWakeSpot : kPlayerSpawn;
+    const float spawnYaw = zombies ? world::zsites::kWakeYaw : kPlayerSpawnYaw;
+    m_match.start(m_matchConfig, m_world.mutableCollision(), m_nav, m_world.pointsOfInterest(), spawn, spawnYaw);
     m_match.setPlayerName(m_profile.name);
+    // Con menos de 30 bots la partida es de practica: ni pavos ni logros (el modo zombi, si).
+    m_rewardsActive = zombies || m_botCount >= game::kRewardBots;
+    m_wakeTime = zombies ? 0.0f : 99.0f;
+    m_craftOpen = false;
+    m_craftMessageTime = 0.0f;
+    m_zMessageTime = 0.0f;
+    m_zMessage = i18n::T::None;
+    m_matchBestNights = m_profile.zombieBestNights;
     m_eventCursor = m_match.eventCount();
     m_playerKiller = -1;
     m_buildMode = false;
@@ -238,7 +255,7 @@ void App::startMatch() {
     for (u32& s : m_botSteps) s = 0;
     // En el autobus, vista de tres cuartos (el autobus va a lo largo de Z).
     m_followCamera.reset(m_match.body(0).state().position + Vec3{0.0f, 4.0f, 0.0f},
-                         m_match.airState(0) == game::AirState::Bus ? 0.9f : kPlayerSpawnYaw);
+                         m_match.airState(0) == game::AirState::Bus ? 0.9f : spawnYaw);
     m_freeCameraActive = false;
     m_lockTarget = -1;
     m_matchRecorded = false;
@@ -263,9 +280,10 @@ void App::startMatch() {
     m_matchFrameMsSum = m_matchFrameMsMax = 0.0f;
     m_matchFrames = 0;
     m_matchLogged = false;
-    platform::log::write("partida %d: %d bots, semilla %u, preparada en %u ms, heap %u KB "
+    platform::log::write("partida %d (%s): %d bots, semilla %u, preparada en %u ms, heap %u KB "
                          "(%+d KB desde el lobby inicial), %d cajas de colision",
-                         m_matchesPlayed, m_botCount, static_cast<unsigned>(m_matchConfig.seed),
+                         m_matchesPlayed, zombies ? "zombis" : (m_rewardsActive ? "con recompensas" : "practica"),
+                         zombies ? m_matchConfig.botCount : m_botCount, static_cast<unsigned>(m_matchConfig.seed),
                          static_cast<unsigned>((core::nowMicros() - t0) / 1000), heapInUse() / 1024,
                          static_cast<int>(heapInUse() / 1024) - static_cast<int>(m_startHeapBytes / 1024),
                          m_world.collision().count());
@@ -283,6 +301,7 @@ void App::goToLobby() {
     m_inventoryOpen = false;
     m_modMenuOpen = false;
     m_passwordOpen = false;
+    m_craftOpen = false;
     if (m_audioReady && m_useSfx != audio::Sfx::Count) audio::mixer().stop(m_useSfx);
     if (m_audioReady && m_reloadSfx != audio::Sfx::Count) audio::mixer().stop(m_reloadSfx);
     m_useSfx = m_reloadSfx = audio::Sfx::Count;
@@ -306,6 +325,11 @@ void App::shutdown() {
     m_world.destroy();
     m_worldReady = false;
     gfx::destroyTexture(m_minimap);
+    gfx::destroyTexture(m_minimapZombie);
+    gfx::destroyTexture(m_vignette);
+    gfx::destroyMesh(m_sky);
+    gfx::destroyMesh(m_skyZombie);
+    m_skyReady = false;
     gfx::destroyTexture(m_scope);
     m_atlas.destroy();
     gfx::destroyTexture(m_loadscreen);
@@ -419,9 +443,18 @@ void App::updateGame(const input::Input& in, float dt) {
     m_lPressAge += dt;
     m_rPressAge += dt;
     if (m_inventoryOpen && (!control || !onGround || !m_match.alive(0))) m_inventoryOpen = false;
+    // Modo zombi: el despertar (los primeros segundos no se mueve), los avisos y el menu de
+    // crafteo (como el inventario: la partida sigue y el jugador no actua).
+    m_wakeTime += dt;
+    if (m_zMessageTime > 0.0f) m_zMessageTime -= dt;
+    if (m_craftMessageTime > 0.0f) m_craftMessageTime -= dt;
+    if (m_craftOpen && (!control || !onGround || m_match.nearbyWorkbench() < 0)) m_craftOpen = false;
+    const bool craftWasOpen = m_craftOpen;
+    if (m_craftOpen && !chord) updateCraftMenu(in);
+    const bool waking = m_wakeTime < 2.2f;
     // Lo que cierra el inventario (CIRCULO) no cuenta despues como accion de la partida.
-    const bool inventoryWasOpen = m_inventoryOpen;
-    if (chord && control && onGround) {
+    const bool inventoryWasOpen = m_inventoryOpen || craftWasOpen || waking;
+    if (chord && control && onGround && !craftWasOpen) {
         m_inventoryOpen = !m_inventoryOpen;
         m_invCursor = m_match.inventory().selected();
         m_invHeld = -1;
@@ -596,6 +629,9 @@ void App::updateGame(const input::Input& in, float dt) {
         a.reloading = b.armed && b.weapon.reloading();
         a.reloadProgress = b.weapon.reloadProgress();
         a.usingItem = b.healTimer > 0.0f;
+        // Los supervivientes que esperan en su campamento estan agachados junto a la hoguera.
+        a.crouched = b.kind == game::BotKind::Survivor && !b.rescued;
+        if (b.kind == game::BotKind::Zombie) a.aiming = false;
         m_botAnims[i].update(renderState(i + 1), a, dt);
     }
     playFootsteps();
@@ -648,11 +684,14 @@ void App::updateStormFog() {
         };
         return rgba(ch(0), ch(8), ch(16));
     };
-    m_fogColor = lerpColor(lerpColor(lerpColor(config::kColorSky, kStormFogColor, 0.45f * nearT), kStormFogColor,
+    // Modo zombi (v0.14): niebla gris verdosa de dia y casi negra de noche, mas cerrada.
+    u32 baseColor = config::kColorSky;
+    float baseStart = m_settings.fogStart(), baseEnd = m_settings.fogEnd();
+    if (m_match.zombieMode()) updateZombieFog(&baseStart, &baseEnd, &baseColor);
+    m_fogColor = lerpColor(lerpColor(lerpColor(baseColor, kStormFogColor, 0.45f * nearT), kStormFogColor,
                                      0.7f * closingT),
                            kStormInsideColor, inT);
     // La distancia de dibujado de los ajustes fija la niebla normal.
-    const float baseStart = m_settings.fogStart(), baseEnd = m_settings.fogEnd();
     m_fogStart = lerp(lerp(lerp(baseStart, 6.0f, nearT), 4.0f, closingT), 0.0f, inT) + altitude * 0.6f;
     const float edgeEnd = lerp(baseEnd, 42.0f, nearT), closingEnd = lerp(baseEnd, 38.0f, closingT);
     m_fogEnd = lerp(fminf(edgeEnd, closingEnd), 13.0f, inT) + altitude * 1.4f;
@@ -849,14 +888,17 @@ void App::playFootsteps() {
     // jugador, siempre; los de los bots, solo cerca (avisan de que alguien se acerca).
     if (m_playerAnim.footsteps != m_playerSteps) {
         m_playerSteps = m_playerAnim.footsteps;
-        playSfx(audio::Sfx::Footstep, 0.45f);
+        // En el agua del lago, chapoteo (v0.14).
+        if (m_match.body(0).state().wading) playSfx(audio::Sfx::Splash, 0.5f);
+        else playSfx(audio::Sfx::Footstep, 0.45f);
     }
     for (int i = 0; i < m_match.botCount(); ++i) {
         if (m_botAnims[i].footsteps == m_botSteps[i]) continue;
         m_botSteps[i] = m_botAnims[i].footsteps;
         const Vec3 p = renderState(i + 1).position;
         if (math3d::length(p - renderState(0).position) < kFootstepRange) {
-            playSpatial(audio::Sfx::Footstep, p, 0.22f);  // mas bajos que los propios (0,45)
+            const bool wading = m_match.body(i + 1).state().wading;
+            playSpatial(wading ? audio::Sfx::Splash : audio::Sfx::Footstep, p, 0.22f);  // mas bajos que los propios (0,45)
         }
     }
 }
@@ -903,7 +945,12 @@ void App::processEvents() {
                     playSfx(audio::Sfx::PlayerDeath, 1.0f);
                 }
                 if (e.other == 0) playSfx(audio::Sfx::Elimination, 1.0f);
-                if (e.other == 0 && e.entity > 0) {
+                if (e.entity > 0 && m_match.isSurvivor(e.entity) && m_match.bot(e.entity - 1).rescued) {
+                    showZombieMessage(i18n::T::ZSurvivorDown, m_match.name(e.entity), 0, kErrorRed);
+                }
+                if (e.other == 0 && e.entity > 0 && m_match.isZombie(e.entity)) {
+                    addStat(Stat::ZombieKills, 1);  // modo zombi: sus bajas no cuentan como las del battle royale
+                } else if (e.other == 0 && e.entity > 0) {
                     // Logros: bajas, y con que (amount = tipo de objeto + 1).
                     const game::ItemType source = static_cast<game::ItemType>(e.amount - 1);
                     addStat(Stat::Kills, 1);
@@ -938,7 +985,8 @@ void App::processEvents() {
                         case game::ContainerKind::Chest: addStat(Stat::ChestsOpened, 1); break;
                         case game::ContainerKind::Airdrop: addStat(Stat::AirdropsOpened, 1); break;
                         case game::ContainerKind::Llama: addStat(Stat::LlamasOpened, 1); break;
-                        case game::ContainerKind::AmmoBox: break;
+                        case game::ContainerKind::AmmoBox:
+                        case game::ContainerKind::Workbench: break;
                     }
                 }
                 // Cada contenedor con su sonido: la caja de municion ya no usa el del cofre.
@@ -948,6 +996,7 @@ void App::processEvents() {
                         case game::ContainerKind::Airdrop: playSfx(audio::Sfx::ChestOpen, 0.9f); break;
                         case game::ContainerKind::AmmoBox: playSfx(audio::Sfx::AmmoBoxOpen, 0.9f); break;
                         case game::ContainerKind::Llama: playSpatial(audio::Sfx::LlamaOpen, e.position, 1.0f); break;
+                        case game::ContainerKind::Workbench: break;
                     }
                 }
                 break;
@@ -1027,6 +1076,9 @@ void App::processEvents() {
                     e.other == static_cast<int>(game::ItemType::Medkit)) {
                     playSfx(audio::Sfx::Heal, 0.6f);
                 }
+                break;
+            default:
+                processZombieEvent(e);
                 break;
             case game::GameEventType::UseStarted:
             case game::GameEventType::UseCanceled: {
@@ -1226,6 +1278,7 @@ void App::renderGame(const FrameInfo& frame) {
         fog.color = m_fogColor;  // == clearColor()
 
         gfx::begin3D(projection, view, fog);
+        renderSky(view);  // v0.14: cielo con degradado, nubes y sol (lo primero, sin niebla)
         const math3d::Frustum frustum = math3d::Frustum::fromMatrix(projection * view);
         const float drawDistance = m_fog ? m_fogEnd : config::kFarPlane;
         m_stats = m_world.draw(frustum, cameraEye(), drawDistance, m_match.destroyedObjects());
@@ -1242,6 +1295,23 @@ void App::renderGame(const FrameInfo& frame) {
             m_props.drawBeams(m_match, frustum, cameraEye(), m_match.elapsed());
             m_props.drawExplosions(m_match, frustum);
         }
+        // Modo zombi: piezas fantasma de los planos encontrados (azules; la que se construiria
+        // ahora con CUADRADO, parpadeando).
+        if (m_buildVisualsReady && m_match.zombieMode()) {
+            const game::Interactable it = m_match.playerInteractable();
+            const int current = it.kind == game::Interactable::Kind::BlueprintPiece ? it.index : -1;
+            for (int bp = 0; bp < game::kBlueprintCount; ++bp) {
+                if (!m_match.blueprintFound(bp)) continue;
+                for (int k = 0; k < game::blueprint(bp).pieceCount; ++k) {
+                    if (m_match.pieceBuilt(bp, k)) continue;
+                    if (bp * game::kMaxBlueprintPieces + k == current && fmodf(m_blinkTime, 0.6f) < 0.2f) continue;
+                    const game::WallPlacement ghost = m_match.blueprintPiece(bp, k);
+                    const Vec3 c = (ghost.box.min + ghost.box.max) * 0.5f;
+                    if (math3d::length(c - cameraEye()) > drawDistance || !frustum.sphereVisible(c, 3.0f)) continue;
+                    m_buildVisuals.drawGhost(ghost);
+                }
+            }
+        }
         m_world.drawStormWall(frustum, cameraEye(), drawDistance);
         // La que se cierra, mientras no abarque ya todo el mapa.
         if (m_match.zoneRadius() < 124.0f) {
@@ -1257,6 +1327,8 @@ void App::renderGame(const FrameInfo& frame) {
         }
         m_viewProjection = projection * view;
         gfx::begin2D();
+        // Modo zombi: penumbra, oscuridad de noche y vineta (antes del HUD).
+        if (m_match.zombieMode()) renderNightOverlay();
     }
 
     switch (m_hud) {
@@ -1290,6 +1362,9 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
             default:
                 if (id == 0 && m_dancing) return game::BodyPose::Dance;
                 if (id == 0 && m_match.playerCrouched()) return game::BodyPose::Crouch;
+                // Modo zombi: los zombis encorvados; los supervivientes que esperan, agachados.
+                if (m_match.isZombie(id)) return game::BodyPose::Zombie;
+                if (m_match.isSurvivor(id) && !m_match.bot(id - 1).rescued) return game::BodyPose::Crouch;
                 // Truco "fiesta": los bots vivos bailan.
                 if (id > 0 && m_match.cheats().partyBots && m_match.alive(id)) return game::BodyPose::Dance;
                 return game::BodyPose::Normal;
@@ -1317,15 +1392,17 @@ int App::renderCharacters(const math3d::Frustum& frustum, const Vec3& eye) const
         if (!visible(s.position)) continue;
         // Mas alla de la distancia de detalle de los ajustes, la version de pocos poligonos.
         const bool far = math3d::length(s.position - eye) > m_settings.lodDistance();
-        const game::CharacterModel& model = m_models[1 + b.palette % 3];
+        const bool zombie = b.kind == game::BotKind::Zombie;
+        const game::CharacterModel& model = zombie ? m_models[4 + b.palette % 2] : m_models[1 + b.palette % 3];
         // Los bots armados sin tipo (reglas clasicas) llevan el fusil.
         const bool partying = m_match.cheats().partyBots && !eliminated;
-        const game::ItemModel held = partying                                ? game::ItemModel::None
+        const game::ItemModel held = partying || zombie || (b.kind == game::BotKind::Survivor && !b.rescued)
+                                         ? game::ItemModel::None
                                      : b.healTimer > 0.0f && b.healSlot >= 0 ? game::itemModelFor(b.bag.slot(b.healSlot).type)
                                      : !b.armed || b.state == game::BotState::Harvest ? game::ItemModel::Pickaxe
                                      : b.weaponType == game::ItemType::None ? game::ItemModel::AssaultRifle
                                                                             : game::itemModelFor(b.weaponType, b.weaponRarity);
-        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id), &m_items);
+        model.draw(s, m_botAnims[i], m_world.textures(), eliminated, held, far, pose(id), &m_items, m_match.entityScale(id));
         if (m_propsReady && m_match.airState(id) == game::AirState::Glide) m_props.drawGlider(s.position, s.yaw);
         triangles += (far ? model.lowDetailTriangles() : model.triangles()) + m_items.triangles(held, far);
     }

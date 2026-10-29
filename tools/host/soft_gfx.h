@@ -24,6 +24,8 @@ struct Raster {
     gfx::FogSettings fog;
     const gfx::Texture* texture = nullptr;
     bool blend = false;
+    bool fogConfigured = false;  // la niebla de begin3D (setFog la apaga y la vuelve a encender)
+    bool depthWrite = true;      // setDepthWrite
     bool enabled = true;  // false: las llamadas de dibujo no hacen nada (simulacion rapida)
 
     int trianglesIn = 0;

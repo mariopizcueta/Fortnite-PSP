@@ -91,6 +91,23 @@ enum class GameEventType : u8 {
     TrapPlaced,    // entity = quien la pone, other = indice de la trampa
     TrapTriggered, // entity = duena de la trampa, other = indice, amount = personajes alcanzados
     TrapRemoved,   // la pieza en la que estaba se ha roto (other = indice)
+    // v0.14: modo zombi.
+    NightStarted,     // other = dia (empieza su noche)
+    DayStarted,       // other = dia que empieza (se ha sobrevivido a la noche anterior)
+    HordeIncoming,    // position = de donde viene; amount = zombis
+    ZombieAttack,     // entity = zombi, other = victima (-1: una pieza construida)
+    ZombieGroan,      // entity = zombi (gemido de vez en cuando, para el sonido)
+    SurvivorFound,    // entity = superviviente (el jugador ha pasado cerca de su campamento)
+    SurvivorGift,     // entity = superviviente, other = ItemType dado (-1: nada), amount = lo que le falta
+    SurvivorRescued,  // entity = superviviente
+    WorkbenchFound,   // other = contenedor del centro de crafteo
+    WorkbenchOpened,  // other = contenedor (la aplicacion abre el menu de crafteo)
+    Crafted,          // other = receta, amount = 1 si se ha hecho, 0 si faltan materiales
+    BlueprintFound,   // other = plano
+    BlueprintPiece,   // other = plano, amount = pieza
+    BlueprintDone,    // other = plano (todas sus piezas en pie)
+    // v0.14: tacticas de los bots.
+    BotCamping,       // entity = bot que se aposta junto a un airdrop
 };
 
 // Fase de la caida desde el autobus de cada personaje.
@@ -101,7 +118,8 @@ const char* airStateName(AirState state);
 
 // Objeto en el suelo: un arma o consumible (con su rareza), municion o materiales de
 // construccion (los sueltan los bots al caer y la llama; se recogen solos al pasar).
-enum class PickupKind : u8 { Item, Ammo, Materials };
+// Plano (v0.14, modo zombi): `count` = indice del plano; se recoge con CUADRADO.
+enum class PickupKind : u8 { Item, Ammo, Materials, Blueprint };
 struct Pickup {
     bool active = false;
     PickupKind kind = PickupKind::Item;
@@ -116,8 +134,9 @@ struct Pickup {
 };
 
 // Llama: como mucho una por partida (MatchConfig::llamaChance, 5 %); se abre con CUADRADO o
-// se rompe a disparos o con el pico y suelta materiales, municion y objetos.
-enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop, Llama };
+// se rompe a disparos o con el pico y suelta materiales, municion y objetos. Centro de
+// crafteo (v0.14, modo zombi): no se abre ni se gasta; CUADRADO abre el menu de crafteo.
+enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop, Llama, Workbench };
 struct Container {
     ContainerKind kind = ContainerKind::Chest;
     math3d::Vec3 position;
@@ -127,6 +146,7 @@ struct Container {
     bool landed = true;   // airdrop: false mientras baja con el globo
     int claimedBy = -1;
     float health = 0.0f;  // llama: vida antes de romperse (las demas no se rompen)
+    bool discovered = false;  // centro de crafteo: el jugador ha pasado cerca (minimapa)
 };
 
 // --- Trampas (parche, fase 8; docs/TRAMPAS.md) ---------------------------------------------
@@ -183,8 +203,10 @@ struct Explosion {
 };
 
 // Lo que hay al alcance para abrir o recoger con CUADRADO.
+// v0.14 (modo zombi): un superviviente (indice del bot) y una pieza fantasma de un plano
+// (indice = plano * kMaxBlueprintPieces + pieza).
 struct Interactable {
-    enum class Kind : u8 { None, Pickup, Container } kind = Kind::None;
+    enum class Kind : u8 { None, Pickup, Container, Survivor, BlueprintPiece } kind = Kind::None;
     int index = -1;
 };
 
@@ -256,6 +278,12 @@ struct MatchStats {
     int botHarvestHits = 0;      // golpes de pico de los bots a objetos del mapa (v0.13)
     int botFlees = 0;            // veces que un bot con poca vida ha empezado a huir
     int objectsShot = 0;         // impactos de bala en objetos del mapa
+    int botCamps = 0;            // v0.14: bots que se apostan junto a un airdrop
+    int botBoxes = 0;            // ...que levantan una caja de paredes
+    int botRamps = 0;            // ...que levantan una rampa para ganar altura
+    int botHolds = 0;            // ...que mantienen la posicion al final de la partida
+    int zombieHits = 0;          // golpes de zombis (a personajes y a piezas)
+    int zombiesSpawned = 0;
     u64 aiMicros = 0;            // tiempo acumulado de IA (decidir + dirigir)
     u64 physicsMicros = 0;       // tiempo acumulado de fisica de personajes
     int steps = 0;
@@ -390,6 +418,47 @@ public:
     // Lleva a la mano lo de esa ranura (guarda el pico).
     bool selectSlot(int slot);
 
+    // --- Modo zombi (v0.14, docs/ZOMBIS.md) -------------------------------------------------
+    bool zombieMode() const { return m_config.mode == GameMode::Zombies; }
+    int day() const { return m_day; }
+    bool night() const { return m_night; }
+    // s que faltan para el siguiente anochecer (de dia) o amanecer (de noche).
+    float timeToChange() const;
+    // 0 a pleno dia, 1 de noche (con transicion al anochecer y al amanecer).
+    float darkness() const;
+    int nightsSurvived() const { return m_nightsSurvived; }
+    int zombiesAlive() const;
+    int zombieKills() const { return m_zombieKills; }
+    int survivorsRescued() const;
+    int survivorsAlive() const;  // rescatados y vivos
+    int itemsCrafted() const { return m_itemsCrafted; }
+    // Bandos: en el battle royale todos contra todos; en el modo zombi, los zombis contra el
+    // jugador y los supervivientes rescatados (los que esperan en su campamento, con nadie).
+    bool hostile(int a, int b) const;
+    bool isZombie(int id) const { return id > 0 && id <= botCount() && m_bots[id - 1].kind == BotKind::Zombie; }
+    bool isSurvivor(int id) const { return id > 0 && id <= botCount() && m_bots[id - 1].kind == BotKind::Survivor; }
+    // Supervivientes: lo que le falta (1 = un arma, 2 = una curacion; 0 = rescatado) y darle
+    // lo de la ranura elegida del jugador (CUADRADO junto a el).
+    int survivorNeeds(int botIndex) const;
+    bool giveToSurvivor(int botIndex);
+    // Crafteo: centro de crafteo al alcance del jugador (contenedor) o -1; si hay material
+    // para una receta, y fabricarla (junto a un centro de crafteo).
+    int nearbyWorkbench() const;
+    bool canCraft(int recipeIndex) const;
+    bool craft(int recipeIndex);
+    // Planos: encontrados, piezas en pie, completados alguna vez, y construir una pieza
+    // fantasma (CUADRADO junto a ella, con material).
+    bool blueprintFound(int i) const { return i >= 0 && i < kBlueprintCount && m_bpFound[i]; }
+    bool blueprintDone(int i) const { return i >= 0 && i < kBlueprintCount && m_bpDone[i]; }
+    int blueprintsDone() const;
+    bool pieceBuilt(int bp, int piece) const;
+    WallPlacement blueprintPiece(int bp, int piece) const;
+    bool buildBlueprintPiece(int bp, int piece);
+    // Pruebas: encontrar un plano sin ir a por el.
+    void giveBlueprint(int i);
+    // Tamano del personaje (los brutos son mas grandes; caja de impacto y dibujo).
+    float entityScale(int id) const;
+
     // Trucos del menu de administrador (se pueden cambiar a mitad de partida desde la pausa).
     void setCheats(const Cheats& cheats) { m_config.cheats = cheats; }
     const Cheats& cheats() const { return m_config.cheats; }
@@ -515,6 +584,7 @@ private:
     void updateAirdrops(float dt);
     void autoPickupAmmo(int id);
     void spawnLlama();
+    void spawnZombieSites();
     void damageContainer(int index, float amount, int by, const math3d::Vec3& point);
     // Cajas de la llama (para disparos, pico y explosiones) y si la llama esta en pie.
     bool llamaStanding() const;
@@ -555,6 +625,26 @@ private:
     void startFlee(int index, int threat);
     bool fleePoint(const Bot& bot, const math3d::Vec3& threat, math3d::Vec3* out);
     bool botHasHeals(const Bot& bot) const;
+    // v0.14: tacticas de los bots (match_bots.cpp): acampar airdrops, estructuras pequenas
+    // (caja de paredes, rampa) y final de partida.
+    bool lateGame() const;
+    bool findCamp(int index);
+    void startSmallBuild(int index, int kind, float yaw);
+    void updateSmallBuild(int index, float dt);
+    bool botPlacePiece(int index, PieceType type, float yaw);
+    // Modo zombi (match_zombies.cpp).
+    void startZombies();
+    void updateZombieMode(float dt);
+    void updateZombie(int index, float dt);
+    void decideZombie(int index);
+    void updateSurvivor(int index, float dt);
+    void decideSurvivor(int index);
+    bool spawnZombie(ZombieType type, const math3d::Vec3* near);
+    ZombieType rollZombieType();
+    void spawnHorde();
+    void zombieDrops(int index);
+    void applyMapState();
+    MoveIntent avoidObstacles(int index, math3d::Vec3 desired, float speed, MoveIntent intent);
     void onStructuresChanged();
     void pushEvent(GameEventType type, int entity, int other, const math3d::Vec3& position);
     world::Aabb bodyBounds(int id) const;
@@ -663,6 +753,20 @@ private:
     bool m_pendingTrap = false;
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
+    // Modo zombi.
+    float m_zClock = 0.0f;     // s dentro del dia o de la noche actual
+    int m_day = 1;
+    bool m_night = false;
+    int m_nightsSurvived = 0;
+    float m_spawnTimer = 0.0f;
+    int m_zombieKills = 0;
+    int m_itemsCrafted = 0;
+    bool m_bpFound[kBlueprintCount] = {};
+    bool m_bpDone[kBlueprintCount] = {};
+    short m_bpWall[kBlueprintCount][kMaxBlueprintPieces];
 };
+
+// Duena de las piezas de los planos: no cuentan en el limite de piezas del jugador.
+constexpr int kBlueprintOwner = -5;
 
 }  // namespace game

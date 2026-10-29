@@ -58,8 +58,9 @@ public:
     // Cono / piramide vertical.
     void cone(const Material& m, const math3d::Vec3& base, float radius, float height,
               int segments);
-    // Losa horizontal de suelo con UV en coordenadas de mundo (continua entre losas).
-    void groundTile(const Material& m, float x0, float z0, float size, float brightness);
+    // Losa horizontal de suelo con UV en coordenadas de mundo (continua entre losas). `y`:
+    // altura (el suelo; la superficie del agua va algo mas arriba).
+    void groundTile(const Material& m, float x0, float z0, float size, float brightness, float y = 0.0f);
 
     // Cierra el grupo actual y anade sus lotes (uno por textura) a `out`.
     void flushGroup(std::vector<StaticBatch>& out);

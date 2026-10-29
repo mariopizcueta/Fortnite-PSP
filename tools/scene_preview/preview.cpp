@@ -117,10 +117,12 @@ int main(int argc, char** argv) {
     for (const View& v : views) renderView(w, v, outDir);
 
     // --- Vistas de juego: personajes + camara en tercera persona ------------------------
-    game::CharacterModel models[4];
-    const game::CharacterPalette* palettes[4] = {&game::palettes::kPlayer, &game::palettes::kCommando,
-                                                 &game::palettes::kOrange, &game::palettes::kRanger};
-    for (int i = 0; i < 4; ++i) {
+    // v0.14: y los dos aspectos de zombi (4 y 5).
+    game::CharacterModel models[6];
+    const game::CharacterPalette* palettes[6] = {&game::palettes::kPlayer, &game::palettes::kCommando,
+                                                 &game::palettes::kOrange, &game::palettes::kRanger,
+                                                 &game::palettes::kZombie, &game::palettes::kZombieWorker};
+    for (int i = 0; i < 6; ++i) {
         if (!models[i].build(*palettes[i])) {
             fprintf(stderr, "ERROR construyendo los modelos\n");
             return 1;
@@ -161,6 +163,10 @@ int main(int argc, char** argv) {
         {"15_aspectos", {-1.8f, 0.0f, 30.0f}, 0.0f, 0.0f, true, pi * 0.95f, 0.12f, 6.5f,
          {{1, {-0.6f, 0.0f, 30.0f}, 0.0f, false, false, false}, {2, {0.6f, 0.0f, 30.0f}, 0.0f, false, false, false},
           {3, {1.8f, 0.0f, 30.0f}, 0.0f, true, false, false}}, 3},
+        // v0.14: zombis (el tercero, un bruto: mas grande) y el jugador de espaldas con la mochila.
+        {"16_zombis", {-1.8f, 0.0f, 30.0f}, pi, 0.0f, true, pi * 0.95f, 0.12f, 6.5f,
+         {{4, {-0.4f, 0.0f, 30.0f}, 0.0f, false, false, true}, {5, {0.9f, 0.0f, 30.0f}, 0.0f, false, false, false},
+          {4, {2.4f, 0.0f, 30.0f}, 0.0f, false, false, false}}, 3},
     };
     for (const GameView& gv : gameViews) {
         Mat4 view;
@@ -205,19 +211,22 @@ int main(int argc, char** argv) {
         gfx::begin3D(proj, view, fog);
         const world::RenderStats stats = w.draw(math3d::Frustum::fromMatrix(proj * view), eye, config::kFogEnd);
 
-        auto drawActor = [&](int model, const Vec3& pos, float yaw, bool aiming, bool eliminated, bool running) {
+        auto drawActor = [&](int model, const Vec3& pos, float yaw, bool aiming, bool eliminated, bool running,
+                             float scale = 1.0f) {
             game::CharacterState s;
             s.position = pos;
             s.yaw = yaw;
-            s.velocity = running ? game::forwardFromYaw(yaw) * 5.5f : Vec3{0, 0, 0};
+            s.velocity = running ? game::forwardFromYaw(yaw) * 2.5f : Vec3{0, 0, 0};
             game::CharacterAnim anim;
             for (int i = 0; i < 25; ++i) anim.update(s, aiming, true, 1.0f / 60.0f);
-            models[model].draw(s, anim, w.textures(), eliminated);
+            const game::BodyPose pose = model >= 4 ? game::BodyPose::Zombie : game::BodyPose::Normal;
+            models[model].draw(s, anim, w.textures(), eliminated, game::ItemModel::None, false, pose, nullptr, scale);
         };
         drawActor(0, gv.player, gv.yaw, gv.look != 0.0f, false, false);
         for (int i = 0; i < gv.actorCount; ++i) {
             const Actor& a = gv.actors[i];
-            drawActor(a.model, a.position, a.yaw, a.aiming, a.eliminated, a.running);
+            const bool brute = strcmp(gv.name, "16_zombis") == 0 && i == 2;
+            drawActor(a.model, a.position, a.yaw, a.aiming, a.eliminated, a.running, brute ? 1.3f : 1.0f);
         }
 
         char path[512];

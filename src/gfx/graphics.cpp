@@ -22,6 +22,7 @@ bool g_vsync = true;
 // Ultima textura enlazada en 3D; kUnbound obliga a reenviar el estado.
 const Texture* const kUnbound = reinterpret_cast<const Texture*>(1);
 const Texture* g_boundTexture = kUnbound;
+bool g_fogConfigured = false;  // la niebla del begin3D actual esta activa
 
 struct ColorVertex {
     u32 color;
@@ -144,12 +145,24 @@ void begin3D(const math3d::Mat4& projection, const math3d::Mat4& view, const Fog
     } else {
         sceGuDisable(GU_FOG);
     }
+    g_fogConfigured = fog.enabled;
 
     g_boundTexture = kUnbound;
     bindTexture(nullptr);
 }
 
 void setModelMatrix(const math3d::Mat4& model) { uploadMatrix(GU_MODEL, model); }
+
+void setDepthWrite(bool enabled) {
+    // OJO: en GU la mascara va al reves (GU_FALSE = se escribe).
+    sceGuDepthMask(enabled ? GU_FALSE : GU_TRUE);
+}
+
+void setFog(bool enabled) {
+    // begin3D ya dejo los parametros con sceGuFog; aqui solo se enciende o se apaga.
+    if (enabled && g_fogConfigured) sceGuEnable(GU_FOG);
+    else sceGuDisable(GU_FOG);
+}
 
 void bindTexture(const Texture* texture) {
     if (texture == g_boundTexture) return;

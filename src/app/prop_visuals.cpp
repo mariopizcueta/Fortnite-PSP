@@ -139,6 +139,15 @@ void buildAmmo(SceneBuilder& b, u32 color) {
     b.box(flat(rgba(230, 200, 60)), flat(rgba(230, 200, 60)), {-0.135f, 0.05f, -0.095f}, {0.135f, 0.07f, 0.095f});
 }
 
+void buildBlueprint(SceneBuilder& b) {
+    // Plano enrollado (v0.14): tubo de papel azul con una cinta blanca y los extremos claros.
+    b.setTransform(math3d::Mat4::translation({-0.28f, 0.07f, 0.0f}) * math3d::Mat4::rotationZ(-0.5f * math3d::kPi));
+    b.cylinder(flat(rgba(60, 110, 200)), flat(rgba(200, 220, 250)), {0.0f, 0.0f, 0.0f}, 0.07f, 0.56f, 8);
+    b.cylinder(flat(rgba(240, 240, 230)), flat(rgba(240, 240, 230)), {0.0f, 0.24f, 0.0f}, 0.075f, 0.06f, 8, false);
+    b.resetTransform();
+    b.box(flat(rgba(80, 140, 220)), flat(rgba(120, 170, 240)), {-0.2f, 0.0f, -0.14f}, {0.18f, 0.012f, 0.14f});
+}
+
 void buildBeam(SceneBuilder& b, u32 color) {
     // Dos planos cruzados: se ven igual desde cualquier lado.
     const Material m = flat(color);
@@ -280,6 +289,8 @@ bool PropVisuals::build() {
     }
     buildTrapPlate(b);
     finish(kTrapPlate);
+    buildBlueprint(b);
+    finish(kBlueprint);
     buildTrapSpikes(b);
     finish(kTrapSpikes);
     b.box(flat(rgba(90, 200, 255, 120)), flat(rgba(90, 200, 255, 120)), {-1.0f, 0.0f, -1.0f}, {1.0f, 0.1f, 1.0f}, true);
@@ -337,6 +348,8 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
                 draw(kLlama, model * Mat4::rotationZ(sway), &textures);
                 break;
             }
+            case game::ContainerKind::Workbench:
+                break;  // el banco es un objeto del mapa
         }
     }
     const float lootRange = fminf(maxDistance, kLootDrawDistance);
@@ -353,6 +366,8 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
             draw(static_cast<Mesh>(kAmmoLight + static_cast<int>(p.ammo)), spin, &textures);
         } else if (p.kind == game::PickupKind::Materials) {
             draw(static_cast<Mesh>(kMatWood + static_cast<int>(p.resource)), spin, &textures);
+        } else if (p.kind == game::PickupKind::Blueprint) {
+            draw(kBlueprint, spin, &textures);
         } else {
             // Armas y consumibles: su modelo, girando sobre su centro.
             const game::ItemModel model = game::itemModelFor(p.item, p.rarity);
@@ -451,10 +466,12 @@ void PropVisuals::drawBeams(const game::Match& match, const math3d::Frustum& fru
     const std::vector<game::Pickup>& pickups = match.pickups();
     for (size_t i = 0; i < pickups.size(); ++i) {
         const game::Pickup& p = pickups[i];
-        if (!p.active || p.kind != game::PickupKind::Item) continue;
+        if (!p.active || (p.kind != game::PickupKind::Item && p.kind != game::PickupKind::Blueprint)) continue;
         if (math3d::length(p.position - eye) > kLootDrawDistance) continue;
         if (!frustum.sphereVisible(p.position + Vec3{0.0f, 0.8f, 0.0f}, 1.0f)) continue;
-        draw(static_cast<Mesh>(kBeam0 + static_cast<int>(p.rarity)),
+        // Los planos, con el haz azul (raro).
+        const int beam = p.kind == game::PickupKind::Blueprint ? 2 : static_cast<int>(p.rarity);
+        draw(static_cast<Mesh>(kBeam0 + beam),
              Mat4::translation(p.position) * Mat4::rotationY(time * 0.5f), nullptr);
     }
     gfx::setBlend(false);

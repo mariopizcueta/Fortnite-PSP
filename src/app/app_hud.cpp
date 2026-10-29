@@ -250,8 +250,9 @@ constexpr float kFullMapSize = 240.0f, kFullMapX = 120.0f, kFullMapY = 20.0f;
 void App::renderFullMap() const {
     gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 170));
     gfx::fillRect(kFullMapX - 3, kFullMapY - 3, kFullMapSize + 6, kFullMapSize + 6, rgba(20, 30, 50, 230));
-    if (m_minimap.pixels) {
-        gfx::drawTextureRect(m_minimap, 0, 0, kMapTexels, kMapTexels, kFullMapX, kFullMapY, kFullMapSize, kFullMapSize);
+    const gfx::Texture& map = m_match.zombieMode() && m_minimapZombie.pixels ? m_minimapZombie : m_minimap;
+    if (map.pixels) {
+        gfx::drawTextureRect(map, 0, 0, kMapTexels, kMapTexels, kFullMapX, kFullMapY, kFullMapSize, kFullMapSize);
     }
     const float scale = kFullMapSize / (2.0f * world::kMapHalfSize);
     auto toMap = [&](float x, float z, float* sx, float* sy) {
@@ -285,6 +286,10 @@ void App::renderFullMap() const {
     }
     if (m_match.airState(0) == game::AirState::Bus && toMap(m_match.busPosition().x, m_match.busPosition().z, &sx, &sy)) {
         gfx::fillRect(sx - 3, sy - 4, 7, 8, config::kColorGold);
+    }
+    if (m_match.zombieMode()) {
+        drawZombieMarkers(kFullMapX + world::kMapHalfSize * scale, kFullMapY + world::kMapHalfSize * scale, scale, kFullMapX,
+                          kFullMapY, kFullMapX + kFullMapSize, kFullMapY + kFullMapSize, true);
     }
     const game::CharacterState followed = renderState(spectateTarget());
     if (toMap(followed.position.x, followed.position.z, &sx, &sy)) {
@@ -346,6 +351,7 @@ void App::renderGameHud() const {
     if (m_swapOpen) renderSwapChooser();
     renderDamageNumbers();
     if (m_inventoryOpen) renderInventoryScreen();
+    if (m_match.zombieMode()) renderZombieHud();
 }
 
 // --- Inventario (L + R a la vez, v0.13) ---------------------------------------------------------
@@ -513,7 +519,14 @@ const ui::Hint* App::interactionHint(int* count) const {
     }
     const game::Interactable it = m_match.playerInteractable();
     if (it.kind == game::Interactable::Kind::None) return nullptr;
-    if (it.kind == game::Interactable::Kind::Container) {
+    // Modo zombi: supervivientes, piezas de los planos y centros de crafteo.
+    const bool workbench = it.kind == game::Interactable::Kind::Container &&
+                           m_match.containers()[it.index].kind == game::ContainerKind::Workbench;
+    if (it.kind == game::Interactable::Kind::Survivor || it.kind == game::Interactable::Kind::BlueprintPiece || workbench) {
+        if (!zombieInteractionText(it, text, sizeof(text))) return nullptr;
+    } else if (it.kind == game::Interactable::Kind::Pickup && m_match.pickups()[it.index].kind == game::PickupKind::Blueprint) {
+        snprintf(text, sizeof(text), tr(T::ZBlueprintFound), tr(game::blueprint(m_match.pickups()[it.index].count).name));
+    } else if (it.kind == game::Interactable::Kind::Container) {
         const game::ContainerKind kind = m_match.containers()[it.index].kind;
         snprintf(text, sizeof(text), "%s", tr(kind == game::ContainerKind::Chest     ? T::OpenChest
                                               : kind == game::ContainerKind::AmmoBox ? T::OpenAmmoBox
@@ -649,9 +662,8 @@ void App::renderMinimap() const {
     };
     const float u0 = clampWindow((followed.position.x + world::kMapHalfSize) / kMetersPerTexel) - kMapWindow * 0.5f;
     const float v0 = clampWindow((followed.position.z + world::kMapHalfSize) / kMetersPerTexel) - kMapWindow * 0.5f;
-    if (m_minimap.pixels) {
-        gfx::drawTextureRect(m_minimap, u0, v0, kMapWindow, kMapWindow, kMapX, kMapY, kMapSize, kMapSize);
-    }
+    const gfx::Texture& map = m_match.zombieMode() && m_minimapZombie.pixels ? m_minimapZombie : m_minimap;
+    if (map.pixels) gfx::drawTextureRect(map, u0, v0, kMapWindow, kMapWindow, kMapX, kMapY, kMapSize, kMapSize);
     const float pxPerMeter = kMapSize / (kMapWindow * kMetersPerTexel);
     auto toMap = [&](float x, float z, float* sx, float* sy) {
         *sx = kMapX + ((x + world::kMapHalfSize) / kMetersPerTexel - u0) * (kMapSize / kMapWindow);
@@ -726,6 +738,12 @@ void App::renderMinimap() const {
         float sx, sy;
         const Vec3& bus = m_match.busPosition();
         if (toMap(bus.x, bus.z, &sx, &sy)) gfx::fillRect(sx - 2, sy - 3, 5, 6, config::kColorGold);
+    }
+    if (m_match.zombieMode()) {
+        const float k = kMapSize / kMapWindow / kMetersPerTexel;
+        drawZombieMarkers(kMapX + (world::kMapHalfSize / kMetersPerTexel - u0) * (kMapSize / kMapWindow),
+                          kMapY + (world::kMapHalfSize / kMetersPerTexel - v0) * (kMapSize / kMapWindow), k, kMapX, kMapY,
+                          kMapX + kMapSize, kMapY + kMapSize, false);
     }
 
     // Fila de iconos: zona, vivos y bajas.
@@ -912,12 +930,21 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         gfx::text::printShadow(380, 262, kLightGrey, "%s", tr(T::MapClose));
         return;
     }
+    // Modo zombi: mientras despierta (pantalla a oscuras), solo su texto.
+    if (m_match.zombieMode() && m_wakeTime < 3.4f) {
+        overlayZombieHud();
+        return;
+    }
     gfx::text::printShadow(6, 4, kLightGrey, "%s", m_match.name(0));
     if (m_settings.showFps) gfx::text::print(6, 14, kDimGrey, "%4.1f FPS", frame.timer.fps());
     overlayCompass();
-    // Inventario abierto: solo su texto (el resto del HUD queda debajo del panel).
+    // Inventario (o menu de crafteo) abierto: solo su texto (el resto del HUD queda debajo).
     if (m_inventoryOpen) {
         overlayInventoryScreen();
+        return;
+    }
+    if (m_craftOpen) {
+        overlayCraftMenu();
         return;
     }
 
@@ -960,6 +987,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
             ui::printHints((gfx::kScreenWidth - ui::hintsWidth(hint, n)) / 2, kPromptY, color, hint, n);
         }
     }
+    if (m_match.zombieMode()) overlayZombieHud();
     if (m_stormMessage > 0.0f && fmodf(m_stormMessage, 0.8f) > 0.2f) {
         printCenteredShadow(107, rgba(210, 150, 255), tr(T::StormClosingNow));
     }
@@ -1015,6 +1043,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     for (int i = 0; i < m_match.killEventCount(); ++i) {
         const game::KillEvent& e = m_match.killEvent(i);
         if (m_match.elapsed() - e.time > kKillFeedSeconds) continue;
+        if (m_match.isZombie(e.victim)) continue;  // modo zombi: los abatidos se cuentan aparte
         const u32 color = (e.killer == 0 || e.victim == 0) ? config::kColorGold : kWhite;
         if (e.killer >= 0) {
             gfx::text::printShadow(6, y, color, tr(T::FeedEliminated), m_match.name(e.killer), m_match.name(e.victim));
@@ -1030,11 +1059,14 @@ void App::overlayGameHud(const FrameInfo& frame) const {
     // se cierra), vivos y bajas.
     const game::StormZone& storm = m_match.storm();
     char time[16];
-    const float left = storm.closes() ? storm.timeLeft() : m_matchConfig.zoneShrinkSeconds - m_match.elapsed();
+    const float left = m_match.zombieMode() ? m_match.timeToChange()
+                       : storm.closes()     ? storm.timeLeft()
+                                            : m_matchConfig.zoneShrinkSeconds - m_match.elapsed();
     formatTime(left > 0.0f ? left : 0.0f, time, sizeof(time));
-    gfx::text::printShadow(376, 89, storm.shrinking() ? rgba(210, 150, 255) : kWhite, "%s", time);
-    gfx::text::printShadow(428, 89, kWhite, "%d", m_match.aliveCount());
-    gfx::text::printShadow(464, 89, kWhite, "%d", m_match.playerKills());
+    gfx::text::printShadow(376, 89, storm.shrinking() || m_match.night() ? rgba(210, 150, 255) : kWhite, "%s", time);
+    // Modo zombi: zombis en el mapa y abatidos por el jugador.
+    gfx::text::printShadow(428, 89, kWhite, "%d", m_match.zombieMode() ? m_match.zombiesAlive() : m_match.aliveCount());
+    gfx::text::printShadow(464, 89, kWhite, "%d", m_match.zombieMode() ? m_match.zombieKills() : m_match.playerKills());
     // Materiales: madera, piedra y metal.
     const game::Materials& mats = m_match.materials();
     const int wood = mats.get(world::Resource::Wood);

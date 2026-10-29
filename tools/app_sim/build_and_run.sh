@@ -31,6 +31,7 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/app/app_hud.cpp" \
     "$ROOT/src/app/app_menus.cpp" \
     "$ROOT/src/app/app_settings.cpp" \
+    "$ROOT/src/app/app_zombies.cpp" \
     "$ROOT/src/app/settings.cpp" \
     "$ROOT/src/app/achievements.cpp" \
     "$ROOT/src/app/locker.cpp" \
@@ -54,6 +55,8 @@ c++ -std=c++17 -O2 -Wall -Wextra -DFORTNITEPSP_HOST_TEST \
     "$ROOT/src/game/match_loot.cpp" \
     "$ROOT/src/game/match_projectiles.cpp" \
     "$ROOT/src/game/match_traps.cpp" \
+    "$ROOT/src/game/match_zombies.cpp" \
+    "$ROOT/src/game/zombies.cpp" \
     "$ROOT/src/game/nav_grid.cpp" \
     "$ROOT/src/game/player.cpp" \
     "$ROOT/src/game/inventory.cpp" \

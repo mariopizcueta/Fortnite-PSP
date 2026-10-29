@@ -33,6 +33,7 @@ OBJS = src/main.o \
        src/app/app_hud.o \
        src/app/app_menus.o \
        src/app/app_settings.o \
+       src/app/app_zombies.o \
        src/app/settings.o \
        src/app/achievements.o \
        src/app/locker.o \
@@ -58,6 +59,8 @@ OBJS = src/main.o \
        src/game/match_loot.o \
        src/game/match_projectiles.o \
        src/game/match_traps.o \
+       src/game/match_zombies.o \
+       src/game/zombies.o \
        src/game/nav_grid.o \
        src/game/player.o \
        src/game/structures.o \

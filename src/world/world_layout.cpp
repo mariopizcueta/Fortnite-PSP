@@ -23,8 +23,10 @@
 
 #include "gfx/graphics.h"
 #include "world/storm.h"
+#include "world/water.h"
 #include "world/world.h"
 #include "world/world_units.h"
+#include "world/zombie_sites.h"
 
 namespace world {
 namespace {
@@ -36,17 +38,12 @@ using math3d::Vec3;
 constexpr float kYardMinX = -38.0f, kYardMaxX = 38.0f;
 constexpr float kYardMinZ = -34.0f, kYardMaxZ = 16.0f;
 constexpr float kRoadHalfWidth = 3.5f;
-constexpr float kLakeX = -30.0f, kLakeZ = 56.0f, kLakeRx = 20.0f, kLakeRz = 12.0f;
 constexpr float kMesaX = 58.0f, kMesaZ = -60.0f;
 constexpr float kForestMaxX = -44.0f, kForestMaxZ = 36.0f;
 constexpr float kWarehouseZ0 = -26.0f, kWarehouseZ1 = 4.0f;
 
 float southRoadX(float z) { return 22.0f + (z - kYardMaxZ) * 0.22f; }
 
-float lakeValue(float x, float z) {
-    const float dx = (x - kLakeX) / kLakeRx, dz = (z - kLakeZ) / kLakeRz;
-    return dx * dx + dz * dz;  // < 1 dentro del lago
-}
 
 bool insideWarehouse(float x, float z) {
     if (z < kWarehouseZ0 || z > kWarehouseZ1) return false;
@@ -107,22 +104,28 @@ struct Builders {
     std::vector<StaticBatch>* out = nullptr;  // lotes de dibujo (los de cada objeto, aparte)
     int objectCollider = 0;                    // primera caja / lote del objeto en curso
     int objectBatch = 0;
+    bool zombieOnly = false;                   // lo que se registra solo existe en el modo zombi
 };
 
 // Lo que da cada objeto al picarlo (por golpe) y su vida (el pico quita 50 por golpe).
+// `ruin`: en el modo zombi, % de objetos de ese tipo que ya estan derruidos (v0.14).
 struct Yield {
     Resource resource;
     int perHit;
     float health;
+    u8 ruin;
 };
-constexpr Yield kTreeYield{Resource::Wood, 8, 300.0f};
-constexpr Yield kCrateYield{Resource::Wood, 6, 150.0f};
-constexpr Yield kRockYield{Resource::Stone, 7, 300.0f};
-constexpr Yield kMetalYield{Resource::Metal, 8, 400.0f};
-constexpr Yield kSmallMetalYield{Resource::Metal, 6, 200.0f};
-constexpr Yield kPanelYield{Resource::Metal, 6, 300.0f};      // paneles de las naves y tejados
-constexpr Yield kBlockWallYield{Resource::Stone, 6, 250.0f};  // muro de bloques y peldanos
-constexpr Yield kFenceYield{Resource::Metal, 4, 150.0f};      // vallas, farolas, barandillas
+constexpr Yield kTreeYield{Resource::Wood, 8, 300.0f, 0};
+constexpr Yield kCrateYield{Resource::Wood, 6, 150.0f, 35};
+constexpr Yield kRockYield{Resource::Stone, 7, 300.0f, 0};
+constexpr Yield kMetalYield{Resource::Metal, 8, 400.0f, 15};
+constexpr Yield kSmallMetalYield{Resource::Metal, 6, 200.0f, 30};
+constexpr Yield kPanelYield{Resource::Metal, 6, 300.0f, 38};      // paneles de las naves y tejados
+constexpr Yield kBlockWallYield{Resource::Stone, 6, 250.0f, 25};  // muro de bloques y peldanos
+constexpr Yield kFenceYield{Resource::Metal, 4, 150.0f, 45};      // vallas, farolas, barandillas
+// Objetos del modo zombi (base, campamentos, centros de crafteo): nunca derruidos.
+constexpr Yield kCampWoodYield{Resource::Wood, 6, 200.0f, 0};
+constexpr Yield kCampMetalYield{Resource::Metal, 6, 260.0f, 0};
 
 // Objeto del mapa que se puede picar y destruir: todo lo que se dibuje y se anada a la
 // colision entre beginObject() y endObject() forma un solo objeto (sus lotes de dibujo
@@ -151,6 +154,8 @@ void endObject(Builders& b, const Yield& y) {
     }
     h.perHit = y.perHit;
     h.health = y.health;
+    h.ruinChance = y.ruin;
+    h.zombieOnly = b.zombieOnly;
     b.harvest->push_back(h);
 }
 
@@ -612,28 +617,16 @@ void mesa(Builders& b, std::vector<StaticBatch>& out) {
 }
 
 void lake(Builders& b, std::vector<StaticBatch>& out) {
-    // El agua se dibuja en buildGround(); aqui solo su colision: bloquea el paso (no se
-    // nada) pero no los disparos. Una caja por fila de losas de agua.
-    for (float z = kLakeZ - kLakeRz - 2.0f; z <= kLakeZ + kLakeRz + 2.0f; z += kTileSize) {
-        float runStart = 0.0f;
-        bool inRun = false;
-        for (float x = kLakeX - kLakeRx - 2.0f; x <= kLakeX + kLakeRx + 2.0f + kTileSize; x += kTileSize) {
-            const bool water = lakeValue(x + kTileSize * 0.5f, z + kTileSize * 0.5f) < 1.0f;
-            if (water && !inRun) {
-                runStart = x;
-                inRun = true;
-            } else if (!water && inRun) {
-                b.collision.add({{runStart, -1.0f, z}, {x, 2.5f, z + kTileSize}}, kBlocksMovement);
-                inRun = false;
-            }
-        }
-    }
+    // El agua se dibuja en buildGround() y no tiene colision (v0.14): se cruza andando, mas
+    // despacio (world/water.h). Antes bloqueaba el paso.
     // Rocas en la orilla como cobertura.
     boulder(b, kLakeX + 22.0f, kLakeZ - 4.0f, 2.6f, 2.0f, 1.6f);
     boulder(b, kLakeX - 8.0f, kLakeZ - 15.5f, 3.2f, 2.2f, 1.8f);
     boulder(b, kLakeX + 6.0f, kLakeZ + 15.0f, 2.4f, 2.4f, 1.4f);
     b.visual.flushGroup(out);
 }
+
+bool nearZombieSite(float x, float z, float radius);
 
 void forest(Builders& b, std::vector<StaticBatch>& out) {
     // Rejilla de 7 m con jitter al oeste del deposito; un lote cada dos filas.
@@ -644,6 +637,7 @@ void forest(Builders& b, std::vector<StaticBatch>& out) {
             if (hash01(col, row, 601) < 0.18f) continue;  // claros
             const float px = x + (hash01(col, row, 602) - 0.5f) * 4.0f;
             const float pz = z + (hash01(col, row, 603) - 0.5f) * 4.0f;
+            if (nearZombieSite(px, pz, 7.0f)) continue;  // claro de un campamento (v0.14)
             const float s = 0.8f + 0.45f * hash01(col, row, 604);
             if (hash01(col, row, 605) < 0.6f) pineTree(b, px, pz, s);
             else blockTree(b, px, pz, s);
@@ -676,6 +670,170 @@ void scatteredTrees(Builders& b, std::vector<StaticBatch>& out) {
     boulder(b, 34.0f, 70.0f, 2.6f, 2.2f, 1.5f);
     boulder(b, 80.0f, 70.0f, 3.0f, 3.0f, 2.2f);
     b.visual.flushGroup(out);
+}
+
+// --- Modo zombi (v0.14, docs/ZOMBIS.md) ---------------------------------------------------
+// La base abandonada donde despierta el jugador, los campamentos de los supervivientes y los
+// centros de crafteo. Son objetos del mapa como los demas (se pueden picar), pero marcados
+// `zombieOnly`: la partida los quita en el resto de modos (no colisionan ni se dibujan).
+
+// Cerca de un lugar del modo zombi (alli no crecen arboles: es un claro).
+bool nearZombieSite(float x, float z, float radius) {
+    auto near = [&](const Vec3& p) { return (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < radius * radius; };
+    for (const Vec3& p : zsites::kCamps) if (near(p)) return true;
+    for (const Vec3& p : zsites::kWorkbenches) if (near(p)) return true;
+    return zsites::insideBase(x, z, radius);
+}
+
+const Material kRustSheet = textured(kTexRustSiding, rgba(196, 150, 120), 2.0f);
+const Material kCanvas = textured(kTexCanvas, rgba(168, 156, 118), 2.0f);
+const Material kSandbag = textured(kTexCanvas, rgba(176, 156, 112), 1.0f);
+const Material kRotten = textured(kTexRottenWood, kWhite, 1.2f);
+const Material kAsh = flat(rgba(52, 46, 42));
+const Material kEmber = flat(rgba(236, 110, 40));
+
+// Tienda de campana: lona a dos aguas sobre un suelo, con la entrada oscura.
+void tent(Builders& b, float x, float z, bool alongX) {
+    beginObject(b);
+    const float hl = 1.3f, hw = 1.1f, h = 1.6f;
+    const float ax = alongX ? hl : hw, az = alongX ? hw : hl;
+    b.collision.add({{x - ax, 0.0f, z - az}, {x + ax, h, z + az}}, kSolid);
+    if (alongX) {
+        b.visual.quad(kCanvas, {x - hl, 0, z + hw}, {x + hl, 0, z + hw}, {x + hl, h, z}, {x - hl, h, z});
+        b.visual.quad(kCanvas, {x + hl, 0, z - hw}, {x - hl, 0, z - hw}, {x - hl, h, z}, {x + hl, h, z});
+        b.visual.triangle(kCanvas, {x + hl, 0, z + hw}, {x + hl, 0, z - hw}, {x + hl, h, z});
+        b.visual.triangle(flat(rgba(30, 26, 22)), {x - hl, 0, z - hw}, {x - hl, 0, z + hw}, {x - hl, h, z});
+    } else {
+        b.visual.quad(kCanvas, {x + hw, 0, z + hl}, {x + hw, 0, z - hl}, {x, h, z - hl}, {x, h, z + hl});
+        b.visual.quad(kCanvas, {x - hw, 0, z - hl}, {x - hw, 0, z + hl}, {x, h, z + hl}, {x, h, z - hl});
+        b.visual.triangle(kCanvas, {x - hw, 0, z - hl}, {x + hw, 0, z - hl}, {x, h, z - hl});
+        b.visual.triangle(flat(rgba(30, 26, 22)), {x + hw, 0, z + hl}, {x - hw, 0, z + hl}, {x, h, z + hl});
+    }
+    b.visual.box(kTrunk, kTrunk, {x - 0.05f, 0, z - 0.05f}, {x + 0.05f, h + 0.15f, z + 0.05f});
+    endObject(b, kCampWoodYield);
+}
+
+// Hoguera apagada: piedras en corro, troncos y brasas (se pisa por encima: 0.25 m).
+void campfire(Builders& b, float x, float z) {
+    beginObject(b);
+    b.collision.add({{x - 0.5f, 0.0f, z - 0.5f}, {x + 0.5f, 0.25f, z + 0.5f}}, kBlocksMovement);
+    for (int i = 0; i < 6; ++i) {
+        const float a = i * (math3d::kPi / 3.0f);
+        const float sx = x + cosf(a) * 0.45f, sz = z + sinf(a) * 0.45f;
+        b.visual.box(kRock, kRock, {sx - 0.12f, 0, sz - 0.1f}, {sx + 0.12f, 0.18f, sz + 0.1f});
+    }
+    b.visual.box(kAsh, kAsh, {x - 0.3f, 0, z - 0.3f}, {x + 0.3f, 0.04f, z + 0.3f});
+    b.visual.box(kTrunk, kTrunk, {x - 0.32f, 0.04f, z - 0.06f}, {x + 0.32f, 0.16f, z + 0.06f});
+    b.visual.box(kTrunk, kTrunk, {x - 0.06f, 0.10f, z - 0.30f}, {x + 0.06f, 0.22f, z + 0.30f});
+    b.visual.box(kEmber, kEmber, {x - 0.1f, 0.05f, z - 0.1f}, {x + 0.1f, 0.09f, z + 0.1f});
+    endObject(b, kCampWoodYield);
+}
+
+// Catre de madera podrida con una manta.
+void cot(Builders& b, float x, float z, bool alongX) {
+    beginObject(b);
+    const float ax = alongX ? 1.0f : 0.45f, az = alongX ? 0.45f : 1.0f;
+    b.collision.add({{x - ax, 0.0f, z - az}, {x + ax, 0.5f, z + az}}, kSolid);
+    b.visual.box(kRotten, kRotten, {x - ax, 0.32f, z - az}, {x + ax, 0.42f, z + az});
+    b.visual.box(kCanvas, kCanvas, {x - ax * 0.85f, 0.42f, z - az * 0.85f}, {x + ax * 0.85f, 0.5f, z + az * 0.85f});
+    for (float sx : {-1.0f, 1.0f})
+        for (float sz : {-1.0f, 1.0f})
+            b.visual.box(kRotten, kRotten, {x + sx * (ax - 0.05f) - 0.05f, 0, z + sz * (az - 0.05f) - 0.05f},
+                         {x + sx * (ax - 0.05f) + 0.05f, 0.32f, z + sz * (az - 0.05f) + 0.05f});
+    endObject(b, kCampWoodYield);
+}
+
+// Bidon oxidado.
+void barrel(Builders& b, float x, float z) {
+    beginObject(b);
+    b.collision.add({{x - 0.35f, 0.0f, z - 0.35f}, {x + 0.35f, 1.0f, z + 0.35f}}, kSolid);
+    b.visual.cylinder(kRustSheet, flat(rgba(92, 60, 44)), {x, 0.0f, z}, 0.35f, 1.0f, 8);
+    b.visual.cylinder(flat(rgba(70, 44, 32)), flat(rgba(70, 44, 32)), {x, 0.3f, z}, 0.37f, 0.06f, 8, false);
+    b.visual.cylinder(flat(rgba(70, 44, 32)), flat(rgba(70, 44, 32)), {x, 0.7f, z}, 0.37f, 0.06f, 8, false);
+    endObject(b, kCampMetalYield);
+}
+
+// Muro bajo de sacos terreros (de x0 a x1 a lo largo de X, o de Z).
+void sandbags(Builders& b, float x0, float z0, float x1, float z1) {
+    beginObject(b);
+    b.collision.add({{x0, 0.0f, z0}, {x1, 0.95f, z1}}, kSolid);
+    const bool alongX = x1 - x0 > z1 - z0;
+    const float len = alongX ? x1 - x0 : z1 - z0;
+    const int n = static_cast<int>(len / 0.6f);
+    for (int row = 0; row < 3; ++row) {
+        const float y0 = row * 0.31f, off = (row % 2) * 0.3f;
+        for (int i = 0; i < n; ++i) {
+            const float a = i * 0.6f + off, c = fminf(a + 0.58f, len);
+            if (a >= len - 0.05f) break;
+            if (alongX) b.visual.box(kSandbag, kSandbag, {x0 + a, y0, z0 + 0.03f}, {x0 + c, y0 + 0.3f, z1 - 0.03f});
+            else b.visual.box(kSandbag, kSandbag, {x0 + 0.03f, y0, z0 + a}, {x1 - 0.03f, y0 + 0.3f, z0 + c});
+        }
+    }
+    endObject(b, kCampWoodYield);
+}
+
+// Centro de crafteo: banco de trabajo con tornillo y herramientas bajo un tejadillo de
+// chapa oxidada, y una caja de chatarra al lado.
+void workbench(Builders& b, float x, float z) {
+    beginObject(b);
+    b.collision.add({{x - 0.95f, 0.0f, z - 0.5f}, {x + 0.95f, 0.9f, z + 0.5f}}, kSolid);
+    b.visual.box(kRotten, kRotten, {x - 0.95f, 0.78f, z - 0.5f}, {x + 0.95f, 0.9f, z + 0.5f});
+    for (float sx : {-0.85f, 0.85f})
+        for (float sz : {-0.4f, 0.4f})
+            b.visual.box(kSteel, kSteel, {x + sx - 0.05f, 0, z + sz - 0.05f}, {x + sx + 0.05f, 0.78f, z + sz + 0.05f});
+    b.visual.box(kRotten, kRotten, {x - 0.85f, 0.25f, z - 0.4f}, {x + 0.85f, 0.31f, z + 0.4f});
+    // Tornillo de banco, sierra y llave.
+    b.visual.box(flat(rgba(60, 90, 140)), kDarkTrim, {x + 0.45f, 0.9f, z - 0.25f}, {x + 0.75f, 1.08f, z + 0.05f});
+    b.visual.box(kSteel, kSteel, {x - 0.6f, 0.9f, z - 0.1f}, {x - 0.05f, 0.92f, z + 0.12f});
+    b.visual.box(kTrunk, kTrunk, {x - 0.75f, 0.9f, z - 0.05f}, {x - 0.6f, 0.95f, z + 0.08f});
+    b.visual.box(flat(rgba(200, 60, 40)), kDarkTrim, {x - 0.2f, 0.9f, z + 0.2f}, {x + 0.15f, 0.96f, z + 0.3f});
+    // Postes y tejadillo de chapa.
+    for (float sx : {-1.1f, 1.1f}) {
+        b.visual.box(kRustSheet, kRustSheet, {x + sx - 0.06f, 0, z + 0.55f}, {x + sx + 0.06f, 2.5f, z + 0.67f});
+    }
+    b.visual.quad(kRustSheet, {x - 1.4f, 2.25f, z - 1.0f}, {x + 1.4f, 2.25f, z - 1.0f}, {x + 1.4f, 2.6f, z + 0.8f},
+                  {x - 1.4f, 2.6f, z + 0.8f});
+    // Panel de herramientas detras del banco.
+    b.visual.quad(kRotten, {x - 1.0f, 1.0f, z + 0.62f}, {x + 1.0f, 1.0f, z + 0.62f}, {x + 1.0f, 2.0f, z + 0.62f},
+                  {x - 1.0f, 2.0f, z + 0.62f});
+    endObject(b, kCampMetalYield);
+    beginObject(b);
+    solid(b, kRustSheet, flat(rgba(80, 70, 60)), {x + 1.25f, 0, z - 0.4f}, {x + 1.95f, 0.7f, z + 0.4f});
+    endObject(b, kCampMetalYield);
+}
+
+void zombieSites(Builders& b, std::vector<StaticBatch>& out) {
+    b.zombieOnly = true;
+    // Base abandonada (x 56..68, z 28..40). Libres: las lineas del perimetro (las paredes de
+    // los planos) y la celda de la rampa de la torre (x 64..68, z 32..36).
+    cot(b, 58.4f, 29.6f, true);
+    tent(b, 58.3f, 37.6f, true);
+    campfire(b, 62.0f, 34.2f);
+    barrel(b, 66.9f, 29.0f);
+    barrel(b, 66.9f, 30.1f);
+    barrel(b, 65.8f, 29.0f);
+    beginObject(b);  // mesa con el mapa de los planos
+    solid(b, kRotten, kRotten, {60.6f, 0, 29.1f}, {62.4f, 0.85f, 30.1f});
+    b.visual.box(flat(rgba(70, 120, 190)), flat(rgba(70, 120, 190)), {60.9f, 0.85f, 29.3f}, {61.9f, 0.87f, 29.9f});
+    endObject(b, kCampWoodYield);
+    crate(b, 57.2f, 33.6f);
+    crate(b, 57.2f, 34.8f);
+    sandbags(b, 69.0f, 30.0f, 69.6f, 36.0f);  // fuera, junto al muro este
+    b.visual.flushGroup(out);
+    // Campamentos: tienda, hoguera, sacos terreros y una caja (el superviviente espera en
+    // el centro, junto a la hoguera).
+    for (const Vec3& c : zsites::kCamps) {
+        tent(b, c.x - 2.0f, c.z - 1.5f, true);
+        campfire(b, c.x + 1.8f, c.z - 1.2f);
+        sandbags(b, c.x - 3.0f, c.z + 2.3f, c.x + 1.0f, c.z + 2.9f);
+        crate(b, c.x + 2.6f, c.z + 1.6f);
+        b.visual.flushGroup(out);
+    }
+    for (const Vec3& w : zsites::kWorkbenches) {
+        workbench(b, w.x, w.z);
+        b.visual.flushGroup(out);
+    }
+    b.zombieOnly = false;
 }
 
 }  // namespace
@@ -764,9 +922,21 @@ void buildGround(SceneBuilder& b, CollisionWorld& /*collision*/, std::vector<Sta
                         case GroundType::Dirt:
                             b.groundTile(dirt, x0, z0, kTileSize, 0.90f + 0.12f * jitter);
                             break;
-                        case GroundType::Water:
-                            b.groundTile(water, x0, z0, kTileSize, 0.95f + 0.05f * jitter);
+                        case GroundType::Water: {
+                            // Superficie algo por encima del fondo (los pies quedan bajo el
+                            // agua) y, en la orilla, el canto del agua hasta el suelo.
+                            b.groundTile(water, x0, z0, kTileSize, 0.95f + 0.05f * jitter, kWaterLevel);
+                            const float x1 = x0 + kTileSize, z1 = z0 + kTileSize, h = kWaterLevel;
+                            if (groundAt(mx, mz - kTileSize) != GroundType::Water)
+                                b.quad(water, {x1, 0, z0}, {x0, 0, z0}, {x0, h, z0}, {x1, h, z0});
+                            if (groundAt(mx, mz + kTileSize) != GroundType::Water)
+                                b.quad(water, {x0, 0, z1}, {x1, 0, z1}, {x1, h, z1}, {x0, h, z1});
+                            if (groundAt(mx - kTileSize, mz) != GroundType::Water)
+                                b.quad(water, {x0, 0, z0}, {x0, 0, z1}, {x0, h, z1}, {x0, h, z0});
+                            if (groundAt(mx + kTileSize, mz) != GroundType::Water)
+                                b.quad(water, {x1, 0, z1}, {x1, 0, z0}, {x1, h, z0}, {x1, h, z1});
                             break;
+                        }
                         case GroundType::Sand:
                             b.groundTile(sand, x0, z0, kTileSize, 0.92f + 0.08f * jitter);
                             break;
@@ -867,6 +1037,7 @@ void buildStructures(SceneBuilder& visual, CollisionWorld& collision, std::vecto
     lake(b, out);
     forest(b, out);
     scatteredTrees(b, out);
+    zombieSites(b, out);
 
     pois.push_back({kLakeX + 4.0f, 0.0f, kLakeZ - kLakeRz - 5.0f});   // orilla norte del lago
     pois.push_back({-62.0f, 0.0f, -20.0f});                            // bosque

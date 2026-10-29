@@ -35,6 +35,12 @@ const Field kFields[] = {
     {"curativos", &Profile::itemsUsed},
     // v0.13.
     {"pavos", &Profile::vbucks},
+    // v0.14: modo zombi.
+    {"zombis_record_noches", &Profile::zombieBestNights},
+    {"zombis_abatidos", &Profile::zombieKills},
+    {"supervivientes", &Profile::survivorsRescued},
+    {"planos", &Profile::blueprintsDone},
+    {"fabricados", &Profile::itemsCrafted},
 };
 
 // Caracteres permitidos en el nombre (los del teclado en pantalla).
@@ -76,6 +82,11 @@ int Profile::stat(Stat s) const { return const_cast<Profile*>(this)->mutableStat
 
 int& Profile::mutableStat(Stat s) {
     switch (s) {
+        case Stat::ZombieNights: return zombieBestNights;
+        case Stat::ZombieKills: return zombieKills;
+        case Stat::SurvivorsRescued: return survivorsRescued;
+        case Stat::BlueprintsDone: return blueprintsDone;
+        case Stat::ItemsCrafted: return itemsCrafted;
         case Stat::Matches: return matches;
         case Stat::Wins: return wins;
         case Stat::Kills: return kills;

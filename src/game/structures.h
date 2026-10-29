@@ -35,8 +35,8 @@ struct BuildConfig {
     int wallCost = 10;           // madera por pieza (pared, suelo o rampa, como en Fortnite)
     float floorThickness = 0.2f;
     float rampThickness = 1.0f;  // grosor vertical de la losa de la rampa (debajo se puede pasar)
-    int maxBotWalls = 24;        // paredes de bots en pie a la vez (entre todos)
-    int maxWallsPerBot = 3;
+    int maxBotWalls = 40;        // piezas de bots en pie a la vez (entre todos)
+    int maxWallsPerBot = 6;      // v0.14: una caja de cuatro paredes y una rampa
 };
 
 constexpr int kMaxWallCapacity = 64;  // limite tecnico de piezas en pie
@@ -104,6 +104,9 @@ public:
                        PieceType type = PieceType::Wall) const;
 
     int place(const WallPlacement& placement, int owner = 0);  // indice de la pared o -1
+    // Coloca una pieza ya calculada (planos del modo zombi, v0.14) sin las comprobaciones de
+    // plan(): solo que no repita otra pieza y que quede sitio. `healthScale`: reforzada.
+    int placeForced(const WallPlacement& placement, int owner, float healthScale);
     bool remove(int index);
     // Resta vida; devuelve true si la pared se ha destruido.
     bool damage(int index, float amount);

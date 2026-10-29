@@ -21,7 +21,9 @@ enum class Sfx : u8 {
     PistolShot, RocketLaunch, GrenadeLaunch, GrenadeThrow, Explosion, AmmoBoxOpen, LlamaOpen, TrapTrigger,
     // v0.13.
     RevolverShot, PumpShotgunShot, MedkitUse, BandageUse, ReloadRifle, ReloadShotgun, ReloadTactical, ReloadSmg,
-    ReloadPistol, ReloadRevolver, ReloadSniper, ReloadGrenadeLauncher, ReloadRocket, Count
+    ReloadPistol, ReloadRevolver, ReloadSniper, ReloadGrenadeLauncher, ReloadRocket,
+    // v0.14: modo zombi y agua.
+    ZombieGroan, ZombieHit, Horde, Splash, Craft, Dawn, Count
 };
 
 class Mixer {

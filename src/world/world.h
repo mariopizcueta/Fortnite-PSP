@@ -40,6 +40,8 @@ public:
     // Para anadir y quitar las paredes construidas (cajas dinamicas) durante la partida.
     CollisionWorld& mutableCollision() { return m_collision; }
     const TextureLibrary& textures() const { return m_textures; }
+    // Tema de las texturas (v0.14: en ruinas en el modo zombi).
+    void setTheme(TextureTheme theme) { m_textures.setTheme(theme); }
     // Lugares a los que tienden los bots al explorar (interiores de las naves, patio...).
     const std::vector<math3d::Vec3>& pointsOfInterest() const { return m_pointsOfInterest; }
     // Todo lo que se puede picar y destruir (ver harvest.h).

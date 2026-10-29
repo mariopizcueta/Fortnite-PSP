@@ -223,17 +223,17 @@ void SceneBuilder::cone(const Material& m, const Vec3& base, const float radius,
 }
 
 void SceneBuilder::groundTile(const Material& m, float x0, float z0, float size,
-                              float brightness) {
+                              float brightness, float y) {
     const float x1 = x0 + size, z1 = z0 + size;
     const u32 color = scaleColor(shade(m.color, {0.0f, 1.0f, 0.0f}), brightness);
     const float k = 1.0f / m.metersPerRepeat;
 
     Bucket& b = bucketFor(m.texture, 4);
     const u16 base = static_cast<u16>(b.vertices.size());
-    b.vertices.push_back({x0 * k, z1 * k, color, x0, kGroundY, z1});
-    b.vertices.push_back({x1 * k, z1 * k, color, x1, kGroundY, z1});
-    b.vertices.push_back({x1 * k, z0 * k, color, x1, kGroundY, z0});
-    b.vertices.push_back({x0 * k, z0 * k, color, x0, kGroundY, z0});
+    b.vertices.push_back({x0 * k, z1 * k, color, x0, kGroundY + y, z1});
+    b.vertices.push_back({x1 * k, z1 * k, color, x1, kGroundY + y, z1});
+    b.vertices.push_back({x1 * k, z0 * k, color, x1, kGroundY + y, z0});
+    b.vertices.push_back({x0 * k, z0 * k, color, x0, kGroundY + y, z0});
     b.indices.insert(b.indices.end(), {base, static_cast<u16>(base + 1), static_cast<u16>(base + 2),
                                        base, static_cast<u16>(base + 2), static_cast<u16>(base + 3)});
 }

@@ -7,6 +7,7 @@
 #include "core/timer.h"
 #include "game/match_internal.h"
 #include "world/storm.h"
+#include "world/water.h"
 
 namespace game {
 
@@ -18,6 +19,15 @@ void Match::updateBot(int index, float dt) {
     Bot& b = m_bots[index];
     if (b.state == BotState::Eliminated) return;
     const int self = index + 1;
+    // Modo zombi (v0.14): zombis y supervivientes tienen su propia IA (match_zombies.cpp).
+    if (b.kind == BotKind::Zombie) {
+        updateZombie(index, dt);
+        return;
+    }
+    if (b.kind == BotKind::Survivor) {
+        updateSurvivor(index, dt);
+        return;
+    }
 
     // Autobus y caida: salta en su momento y planea hacia donde quiere aterrizar.
     if (m_air[self] != AirState::Ground) {
@@ -54,11 +64,26 @@ void Match::updateBot(int index, float dt) {
     b.meleeTimer -= dt;
     b.swingTimer -= dt;
     b.sinceHurt += dt;
+    b.perchTimer -= dt;
+    b.climbTimer -= dt;
     if (b.coverFrom >= 0) {
-        // Huyendo, la pared es lo primero (siempre que tenga materiales).
-        if (alive(b.coverFrom)) botBuildCover(index, b.coverFrom, b.state == BotState::Flee);
+        // Huyendo, la pared es lo primero (siempre que tenga materiales). v0.14: si tiene
+        // bastantes y el que dispara no esta encima, a veces una caja de cuatro paredes.
+        if (alive(b.coverFrom)) {
+            const Vec3 pos = b.body.state().position;
+            const Vec3 from = body(b.coverFrom).state().position;
+            int mats = 0;
+            for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) mats += b.materials.amount[r];
+            const bool urgent = b.state == BotState::Flee;
+            const bool box = m_config.botsSmallBuilds && b.buildStep == 0 && b.boxTimer <= 0.0f &&
+                             (mats >= 40 || m_config.botsFreeBuild) &&
+                             (urgent || (distXZ(pos, from) > 8.0f && m_rng.chance(lateGame() ? 0.5f : 0.3f)));
+            if (box) startSmallBuild(index, 1, yawTowards(pos, from));
+            else botBuildCover(index, b.coverFrom, urgent);
+        }
         b.coverFrom = -1;
     }
+    updateSmallBuild(index, dt);
     b.weapon.update(dt);
     b.reaction -= dt;
     b.sidestepTimer -= dt;
@@ -95,7 +120,7 @@ int Match::perceive(int index) const {
     int best = -1;
     float bestScore = 1e9f;
     for (int id = 0; id < entityCount(); ++id) {
-        if (id == self || !alive(id) || m_air[id] != AirState::Ground) continue;
+        if (id == self || !alive(id) || m_air[id] != AirState::Ground || !hostile(self, id)) continue;
         if (id == 0 && m_config.cheats.invisible) continue;  // truco: el jugador no se ve
         const Vec3 p = body(id).state().position;
         const float d = distXZ(p, s.position);
@@ -130,9 +155,41 @@ void Match::chooseDestination(Bot& b) {
         safePoint(&b.destination);
         return;
     }
+    // Final de la partida (v0.14): mejor esperar a cubierto dentro de la zona siguiente
+    // (junto a algo que tape) que correr a campo abierto.
+    if (b.armed && lateGame() && m_rng.chance(0.7f)) {
+        const float r = fmaxf(m_storm.nextRadius() * 0.5f, 2.0f);
+        float bestScore = -1e9f;
+        for (int attempt = 0; attempt < 6; ++attempt) {
+            Vec3 p;
+            if (!m_nav->randomPointNear(zone, r, m_rng, &p) || world::inWater(p.x, p.z)) continue;
+            float score = -distXZ(p, zone) * 0.3f;
+            if (m_harvestables) {
+                for (size_t i = 0; i < m_harvestables->size(); ++i) {
+                    if (m_objectDestroyed[i]) continue;
+                    const world::Aabb& box = (*m_harvestables)[i].box;
+                    if (box.max.y - box.min.y > 0.9f && distanceToBox(p + Vec3{0.0f, 1.0f, 0.0f}, box) < 2.5f) {
+                        score += 6.0f;  // cobertura al lado
+                        break;
+                    }
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                dest = p;
+                chosen = true;
+            }
+        }
+        if (chosen) {
+            b.destination = dest;
+            b.holding = true;
+            ++m_stats.botHolds;
+            return;
+        }
+    }
     // Caza: a menudo va a por el rival mas cercano (sin verlo: como quien sigue el ruido de
-    // la partida), en vez de pasear sin rumbo.
-    if (b.armed && m_rng.chance(0.45f)) {
+    // la partida), en vez de pasear sin rumbo. Al final de la partida, menos.
+    if (b.armed && m_rng.chance(lateGame() ? 0.2f : 0.45f)) {
         const Vec3 pos = b.body.state().position;
         float best = m_config.huntRange;
         for (int id = 0; id < entityCount(); ++id) {
@@ -235,7 +292,9 @@ bool Match::botNeedsSafety(const Vec3& pos, int self) const {
     // de ella): hay que entrar. Con margen, para no quedarse justo en el borde.
     if (!m_storm.closes()) return false;
     if (self >= 0 && m_inStorm[self]) return true;
-    const bool soon = m_storm.shrinking() || (m_storm.timeLeft() >= 0.0f && m_storm.timeLeft() < 25.0f);
+    // Al final de la partida se rota antes (v0.14): se entra con tiempo y se busca sitio.
+    const float early = lateGame() ? 45.0f : 25.0f;
+    const bool soon = m_storm.shrinking() || (m_storm.timeLeft() >= 0.0f && m_storm.timeLeft() < early);
     return soon && distXZ(pos, m_storm.nextCenter()) > m_storm.nextRadius() - 2.0f;
 }
 
@@ -342,6 +401,17 @@ void Match::decide(int index) {
         b.breakingWall = false;
         b.lastSeen = body(seen).state().position;
         b.lostTime = 0.0f;
+        // Altura (v0.14): si el rival esta mas alto (tejado, rampa), o al final de la partida a
+        // media distancia, una rampa hacia el para ganarla.
+        if (m_config.botsSmallBuilds && b.armed && b.buildStep == 0 && b.perchTimer <= 0.0f &&
+            b.body.state().grounded() && pos.y < 1.0f) {
+            const float d = distXZ(pos, b.lastSeen);
+            const float dy = b.lastSeen.y - pos.y;
+            if ((dy > 1.6f && d > 5.0f && d < 28.0f && m_rng.chance(0.6f)) ||
+                (lateGame() && d > 10.0f && d < 30.0f && m_rng.chance(0.1f))) {
+                startSmallBuild(index, 2, yawTowards(pos, b.lastSeen));
+            }
+        }
     } else if (b.state == BotState::Attack) {
         b.targetVisible = false;
         b.lostTime += interval;
@@ -349,8 +419,10 @@ void Match::decide(int index) {
         b.breakingWall = false;
         if (b.target >= 0 && alive(b.target) && distXZ(pos, body(b.target).state().position) < botAttackRange(b)) {
             world::RayHit hit;
-            if (m_world->raycast(eyeOf(index + 1), chestOf(b.target), world::kBlocksShots, &hit) &&
-                m_structures.wallFromCollider(hit.dynamicHandle) >= 0) {
+            const int wall = m_world->raycast(eyeOf(index + 1), chestOf(b.target), world::kBlocksShots, &hit)
+                                 ? m_structures.wallFromCollider(hit.dynamicHandle)
+                                 : -1;
+            if (wall >= 0 && m_structures.wall(wall).owner != index + 1) {
                 b.breakingWall = true;
                 b.wallPoint = hit.point;
                 b.lostTime = 0.0f;  // sigue atacando mientras haya pared que romper
@@ -370,20 +442,29 @@ void Match::decide(int index) {
     }
 
     // Tormenta: si hay que entrar en la zona, se deja el botin o la busqueda y se va.
-    if ((b.state == BotState::Loot || b.state == BotState::Search || b.state == BotState::Harvest ||
+    if ((b.state == BotState::Loot || b.state == BotState::Search || b.state == BotState::Harvest || b.state == BotState::Camp ||
          ((b.state == BotState::Attack || b.state == BotState::Flee) && m_inStorm[self])) &&
         botNeedsSafety(pos, self)) {
         if (b.lootPickup >= 0) m_pickups[b.lootPickup].claimedBy = -1;
         if (b.lootContainer >= 0) m_containers[b.lootContainer].claimedBy = -1;
         b.lootPickup = b.lootContainer = -1;
         b.harvestObject = -1;
+        b.campContainer = -1;
         b.state = BotState::Explore;
+    }
+    // Airdrops (v0.14): armado y con vida, a veces se aposta cerca y espera a quien vaya a
+    // por el (hay un limite de bots por airdrop).
+    if (m_config.botsCampAirdrops && b.armed && b.state != BotState::Attack && b.state != BotState::Loot &&
+        b.state != BotState::Flee && b.state != BotState::Camp && !botNeedsSafety(pos, self) && m_rng.chance(0.35f) &&
+        findCamp(index)) {
+        b.state = BotState::Camp;
+        b.stateTime = 0.0f;
     }
     // Botin: sin arma es lo primero; con arma, hasta tener un inventario completo (dos armas
     // y curas) lo busca a menudo (cofres, armas mejores); despues, de vez en cuando. Si no
     // hay botin y le faltan materiales, va a picar.
     if (b.state != BotState::Attack && b.state != BotState::Loot && b.state != BotState::Flee &&
-        b.state != BotState::Harvest && !botNeedsSafety(pos, self)) {
+        b.state != BotState::Harvest && b.state != BotState::Camp && !botNeedsSafety(pos, self)) {
         int weapons = 0;
         for (int i = 0; i < Inventory::kSlots; ++i) weapons += isWeapon(b.bag.slot(i).type) ? 1 : 0;
         const bool incomplete = weapons < 2 || !botHasHeals(b);
@@ -456,12 +537,52 @@ void Match::decide(int index) {
                 b.stateTime = 0.0f;
                 b.searchDuration = m_rng.range(2.0f, 4.0f);
                 b.searchYaw = b.body.state().yaw;
+                if (b.holding) {
+                    // Ha llegado a su sitio del final de la partida: lo protege y espera.
+                    b.holding = false;
+                    b.searchDuration = m_rng.range(8.0f, 14.0f);
+                    int mats = 0;
+                    for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) mats += b.materials.amount[r];
+                    if (m_config.botsSmallBuilds && mats >= 40 && b.buildStep == 0) {
+                        const Vec3 toward = b.threat >= 0 && alive(b.threat) ? body(b.threat).state().position : m_storm.nextCenter();
+                        startSmallBuild(index, 1, yawTowards(pos, toward));
+                    }
+                }
             } else if (distXZ(b.destination, m_storm.nextCenter()) > m_storm.nextRadius() + 6.0f) {
                 b.state = BotState::Explore;  // la zona se ha cerrado: otro destino
             }
             break;
         case BotState::Search:
             if (b.stateTime > b.searchDuration) b.state = BotState::Explore;
+            break;
+        case BotState::Camp: {
+            // Apostado junto a un airdrop: espera hasta que lo abran (y entonces sigue) o, si
+            // nadie viene, va a por el (v0.14).
+            const bool valid = b.campContainer >= 0 && b.campContainer < static_cast<int>(m_containers.size()) &&
+                               !m_containers[b.campContainer].opened;
+            if (!valid) {
+                b.campContainer = -1;
+                b.state = BotState::Explore;
+                break;
+            }
+            const Container& c = m_containers[b.campContainer];
+            if (c.landed && b.stateTime > 30.0f) {
+                b.campContainer = -1;
+                b.state = BotState::Explore;
+                if (findLoot(index, 200.0f)) {
+                    b.state = BotState::Loot;
+                    b.stateTime = 0.0f;
+                    b.pathRefresh = 0.0f;
+                    b.pathLength = 0;
+                }
+                break;
+            }
+            if (b.pathIndex >= b.pathLength && distXZ(pos, b.destination) > 2.0f && b.pathRefresh <= 0.0f) {
+                if (requestPath(b, b.destination)) b.pathRefresh = 3.0f;
+            }
+            break;
+        }
+        case BotState::Idle:
             break;
         case BotState::Harvest: {
             int total = 0;
@@ -538,7 +659,7 @@ void Match::decide(int index) {
     // a la segunda replanifica desde donde esta; a la tercera cambia de destino.
     const bool wantsToMove = b.pathIndex < b.pathLength &&
                              (b.state == BotState::Travel || b.state == BotState::Attack || b.state == BotState::Loot ||
-                              b.state == BotState::Flee || b.state == BotState::Harvest);
+                              b.state == BotState::Flee || b.state == BotState::Harvest || b.state == BotState::Camp);
     b.progressTimer += interval;
     if (b.progressTimer >= kStuckWindow) {
         const float moved = distXZ(pos, b.progressAnchor);
@@ -552,8 +673,9 @@ void Match::decide(int index) {
                 b.stuckCount = 0;
                 b.pathLength = 0;
                 if (b.state == BotState::Travel) b.state = BotState::Explore;
-                if (b.state == BotState::Harvest) {
+                if (b.state == BotState::Harvest || b.state == BotState::Camp) {
                     b.harvestObject = -1;  // no llega: a otra cosa
+                    b.campContainer = -1;
                     b.state = BotState::Explore;
                 }
             } else if (b.stuckCount == 2) {
@@ -652,6 +774,17 @@ MoveIntent Match::steer(int index, float dt) {
             followPath();
             speed = 1.0f;
             break;
+        case BotState::Camp:
+            // Va a su sitio; alli, quieto y con el arma lista, vigila el airdrop.
+            if (!followPath() && b.campContainer >= 0 && b.campContainer < static_cast<int>(m_containers.size())) {
+                const Vec3 drop = m_containers[b.campContainer].position;
+                intent.faceYawOverride = true;
+                intent.faceYaw = yawTowards(pos, drop) + 0.45f * sinf(b.stateTime * 0.7f);
+                b.aiming = true;
+            }
+            speed = 0.85f;
+            break;
+        case BotState::Idle:
         case BotState::Explore:
         case BotState::Eliminated:
             break;
@@ -659,10 +792,18 @@ MoveIntent Match::steer(int index, float dt) {
 
     // Curandose: quieto hasta terminar (o hasta ver a alguien).
     if (b.healTimer > 0.0f) desired = {0.0f, 0.0f, 0.0f};
+    // Subiendo por su rampa (v0.14): recto hacia arriba, sin esquivar los escalones.
+    if (b.climbTimer > 0.0f) {
+        intent.wish = forwardFromYaw(b.buildYaw);
+        intent.speedScale = 1.0f;
+        intent.faceYawOverride = false;
+        return intent;
+    }
 
     // Encima de algo (tejado de una nave, contenedor, altillo) tras caer del autobus: la
-    // navegacion solo llega al suelo, asi que primero hay que bajar.
-    if (s.grounded() && pos.y > 1.2f) {
+    // navegacion solo llega al suelo, asi que primero hay que bajar. No si se ha subido a
+    // proposito (su rampa para ganar altura, o siguiendo al jugador en lo alto).
+    if (s.grounded() && pos.y > 1.2f && b.perchTimer <= 0.0f) {
         b.descentTimer -= dt;
         if (b.descentTimer <= 0.0f) {
             b.descent = descentDirection(pos);
@@ -676,6 +817,16 @@ MoveIntent Match::steer(int index, float dt) {
         b.descentTimer = 0.0f;
     }
 
+    return avoidObstacles(index, desired, speed, intent);
+}
+
+MoveIntent Match::avoidObstacles(int index, Vec3 desired, float speed, MoveIntent intent) {
+    // Comun a todas las IA: apartarse de lado si esta atascado, no amontonarse con otros
+    // personajes y esquivar el obstaculo que tenga justo delante.
+    Bot& b = m_bots[index];
+    const int self = index + 1;
+    const CharacterState& s = b.body.state();
+    const Vec3 pos = s.position;
     // Atascado: moverse de lado un momento.
     if (b.sidestepTimer > 0.0f) {
         const Vec3 base = math3d::length(desired) > 0.01f ? desired : forwardFromYaw(s.yaw);
@@ -737,7 +888,8 @@ void Match::botShoot(int index) {
 
     const WeaponConfig& weapon = b.weapon.config();
     const int type = b.weaponType == ItemType::None ? -1 : static_cast<int>(b.weaponType);
-    const float scale = m_config.botDamageScale;
+    // Los supervivientes del modo zombi pegan algo mas que los bots del battle royale.
+    const float scale = b.kind == BotKind::Survivor ? m_config.zombie.survivorDamageScale : m_config.botDamageScale;
     if (!b.targetVisible) {
         if (!b.breakingWall) return;
         // Disparo a la pared que tapa al objetivo.
@@ -789,7 +941,7 @@ bool Match::findLoot(int index, float maxDistance, bool healsOnly) {
     int pickup = -1, container = -1;
     for (size_t i = 0; i < m_containers.size(); ++i) {
         const Container& c = m_containers[i];
-        if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox) continue;
+        if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox || c.kind == ContainerKind::Workbench) continue;
         if (c.claimedBy >= 0 && c.claimedBy != self) continue;
         if (healsOnly && c.kind == ContainerKind::Airdrop) continue;
         // El airdrop y la llama merecen la pena aunque ya vaya armado.
@@ -894,12 +1046,24 @@ void Match::botBuildCover(int index, int attacker, bool urgent) {
 
 void Match::hearShot(int shooter, const Vec3& origin) {
     // Los bots armados que no estan peleando ni buscando botin van a mirar de donde vienen
-    // los disparos que oyen.
+    // los disparos que oyen. Los zombis (v0.14) tambien acuden al ruido.
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) {
         Bot& b = m_bots[i];
         const int self = i + 1;
+        if (b.kind == BotKind::Zombie) {
+            if (b.state == BotState::Eliminated || b.state == BotState::Attack || isZombie(shooter)) continue;
+            if (shooter == 0 && m_config.cheats.invisible) continue;
+            const float range = m_config.zombie.hearingRange * (m_night ? 1.4f : 1.0f);
+            if (distXZ(b.body.state().position, origin) > range) continue;
+            b.investigate = true;
+            b.destination = origin + Vec3{m_rng.range(-4.0f, 4.0f), 0.0f, m_rng.range(-4.0f, 4.0f)};
+            if (b.decisionTimer > 0.15f) b.decisionTimer = 0.15f;
+            continue;
+        }
+        if (b.kind == BotKind::Survivor) continue;
         if (self == shooter || b.state == BotState::Eliminated || b.state == BotState::Attack ||
-            b.state == BotState::Loot || b.state == BotState::Flee || !b.armed || m_air[self] != AirState::Ground) {
+            b.state == BotState::Loot || b.state == BotState::Flee || b.state == BotState::Camp || !b.armed ||
+            m_air[self] != AirState::Ground) {
             continue;
         }
         if (shooter == 0 && m_config.cheats.invisible) continue;  // truco: no se le oye
@@ -915,8 +1079,9 @@ void Match::hearShot(int shooter, const Vec3& origin) {
 // --- IA v0.13: materiales, picar y huir con poca vida ----------------------------------------
 
 bool Match::botWeak(const Bot& b) const {
+    // Al final de la partida (v0.14) se arriesga menos: huye antes.
     const CharacterState& s = b.body.state();
-    return s.health + s.shield < m_config.botFleeHealth;
+    return s.health + s.shield < m_config.botFleeHealth + (lateGame() ? 15.0f : 0.0f);
 }
 
 bool Match::botHasHeals(const Bot& b) const {
@@ -1048,6 +1213,155 @@ bool Match::fleePoint(const Bot& b, const Vec3& threat, Vec3* out) {
         }
     }
     return found;
+}
+
+// --- IA v0.14: airdrops, estructuras pequenas y final de partida ------------------------------
+
+bool Match::lateGame() const {
+    // Quedan pocos, o la tormenta ya va por sus ultimos cierres.
+    // Solo en partidas que eran grandes (con un par de bots no hay "final").
+    if (zombieMode() || (1 + botCount()) < 2 * m_config.lateGameAlive) return false;
+    return m_alive <= m_config.lateGameAlive || (m_storm.closes() && m_storm.phase() >= 5);
+}
+
+bool Match::findCamp(int index) {
+    Bot& b = m_bots[index];
+    const int self = index + 1;
+    const CharacterState& s = b.body.state();
+    if (s.health + s.shield < 60.0f) return false;
+    const Vec3 pos = s.position;
+    // El airdrop sin abrir mas cercano (cayendo o ya en el suelo) que no tenga ya bastantes
+    // bots apostados.
+    int drop = -1;
+    float best = m_config.botCampRange;
+    for (size_t i = 0; i < m_containers.size(); ++i) {
+        const Container& c = m_containers[i];
+        if (c.kind != ContainerKind::Airdrop || c.opened) continue;
+        const float d = distXZ(c.position, pos);
+        if (d >= best || stormDepthAt(c.position.x, c.position.z) > -6.0f) continue;
+        int campers = 0;
+        for (const Bot& o : m_bots) campers += o.state == BotState::Camp && o.campContainer == static_cast<int>(i) ? 1 : 0;
+        if (campers >= m_config.botCampers) continue;
+        best = d;
+        drop = static_cast<int>(i);
+    }
+    if (drop < 0) return false;
+    const Vec3 c = m_containers[drop].position;
+    const float ground = m_world->supportHeight(c.x, c.z, 0.6f, 200.0f);
+    const Vec3 target{c.x, ground + 0.8f, c.z};
+    // Un sitio a 10-14 m desde el que se vea el airdrop, por su lado y mejor junto a algo que
+    // le cubra.
+    Vec3 side = flatten(pos - c);
+    const float len = math3d::length(side);
+    side = len > 0.1f ? side * (1.0f / len) : forwardFromYaw(s.yaw);
+    float bestScore = -1e9f;
+    Vec3 spot;
+    bool found = false;
+    for (int k = 0; k < 6; ++k) {
+        const Vec3 dir = rotateY(side, (static_cast<float>(k) - 2.5f) * 0.5f);
+        Vec3 p;
+        if (!m_nav->randomPointNear(c + dir * m_rng.range(10.0f, 14.0f), 3.0f, m_rng, &p)) continue;
+        if (world::inWater(p.x, p.z) || stormDepthAt(p.x, p.z) > -4.0f) continue;
+        if (!lineOfSight(p + Vec3{0.0f, kEyeHeight, 0.0f}, target)) continue;
+        float score = -distXZ(p, pos) * 0.2f;
+        if (m_harvestables) {
+            for (size_t i = 0; i < m_harvestables->size(); ++i) {
+                if (m_objectDestroyed[i]) continue;
+                const world::Aabb& box = (*m_harvestables)[i].box;
+                if (box.max.y - box.min.y > 0.9f && distanceToBox(p + Vec3{0.0f, 1.0f, 0.0f}, box) < 2.5f) {
+                    score += 8.0f;
+                    break;
+                }
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            spot = p;
+            found = true;
+        }
+    }
+    if (!found) return false;
+    b.campContainer = drop;
+    b.destination = spot;
+    b.pathLength = 0;
+    b.pathRefresh = 0.0f;
+    if (requestPath(b, spot)) b.pathRefresh = 3.0f;
+    ++m_stats.botCamps;
+    pushEvent(GameEventType::BotCamping, self, drop, spot);
+    return true;
+}
+
+void Match::startSmallBuild(int index, int kind, float yaw) {
+    Bot& b = m_bots[index];
+    if (!m_config.botsSmallBuilds || !m_config.botsBuild) return;
+    b.buildKind = kind;
+    b.buildYaw = yaw;
+    b.buildStep = kind == 1 ? 4 : 1;
+    b.buildTimer = 0.0f;
+    if (kind == 1) ++m_stats.botBoxes;
+}
+
+bool Match::botPlacePiece(int index, PieceType type, float yaw) {
+    Bot& b = m_bots[index];
+    const int self = index + 1;
+    world::Resource material = world::Resource::Wood;
+    if (!m_config.botsFreeBuild && !botPickMaterial(b, &material)) return false;
+    world::Aabb others[kMaxBots + 1];
+    int n = 0;
+    for (int id = 0; id < entityCount(); ++id) {
+        if (id != self && alive(id) && m_air[id] == AirState::Ground) others[n++] = bodyBounds(id);
+    }
+    WallPlacement plan = m_structures.plan(b.body.state().position, yaw, bodyBounds(self), others, n, self, type);
+    plan.material = material;
+    if (!plan.valid) return false;
+    const int wall = m_structures.place(plan, self);
+    if (wall < 0) return false;
+    if (!m_config.botsFreeBuild) b.materials.spend(material, m_config.build.wallCost);
+    ++m_stats.wallsBuilt;
+    const world::Aabb& box = m_structures.wall(wall).box;
+    pushEvent(GameEventType::WallBuilt, self, -1, (box.min + box.max) * 0.5f);
+    return true;
+}
+
+void Match::updateSmallBuild(int index, float dt) {
+    // Una pieza cada 0.2 s: la caja (hacia la amenaza, los lados y detras) o la rampa (y
+    // sube por ella). Al cabo de un rato quita las paredes de su caja para salir.
+    Bot& b = m_bots[index];
+    const int self = index + 1;
+    if (b.boxTimer > 0.0f) {
+        b.boxTimer -= dt;
+        const bool busy = b.healTimer > 0.0f || (b.state == BotState::Attack && b.targetVisible);
+        if (b.boxTimer <= 0.0f && busy) b.boxTimer = 1.0f;
+        if (b.boxTimer <= 0.0f) {
+            const Vec3 pos = b.body.state().position;
+            for (int w = 0; w < m_structures.capacity(); ++w) {
+                const BuiltWall& wall = m_structures.wall(w);
+                if (!wall.active || wall.owner != self || wall.type != PieceType::Wall) continue;
+                if (distanceToBox(pos + Vec3{0.0f, 1.0f, 0.0f}, wall.box) < 3.5f) {
+                    const Vec3 center = (wall.box.min + wall.box.max) * 0.5f;
+                    if (m_structures.remove(w)) pushEvent(GameEventType::WallRemoved, self, -1, center);
+                }
+            }
+        }
+    }
+    if (b.buildStep <= 0) return;
+    b.buildTimer -= dt;
+    if (b.buildTimer > 0.0f || !b.body.state().grounded() || m_air[self] != AirState::Ground) return;
+    b.buildTimer = 0.2f;
+    if (b.buildKind == 1) {
+        const float offsets[4] = {0.0f, 0.5f * math3d::kPi, -0.5f * math3d::kPi, math3d::kPi};
+        botPlacePiece(index, PieceType::Wall, b.buildYaw + offsets[4 - b.buildStep]);
+        if (--b.buildStep == 0) b.boxTimer = m_rng.range(5.0f, 9.0f);
+        return;
+    }
+    // Rampa: si se ha puesto, sube por ella y se queda arriba un rato.
+    b.buildStep = 0;
+    if (botPlacePiece(index, PieceType::Ramp, b.buildYaw)) {
+        ++m_stats.botRamps;
+        b.climbTimer = 1.3f;
+        b.perchTimer = 7.0f;
+        b.pathLength = 0;
+    }
 }
 
 }  // namespace game

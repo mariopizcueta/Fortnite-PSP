@@ -94,6 +94,13 @@ public:
     int testReloadSfx() const { return static_cast<int>(m_reloadSfx); }
     void testAddVbucks(int n) { m_profile.vbucks += n; }
     int testAchievementCursor() const { return m_achievementCursor; }
+    bool testCraftOpen() const { return m_craftOpen; }
+    int testCraftCursor() const { return m_craftCursor; }
+    bool testRewardsActive() const { return m_rewardsActive; }
+    void testSetBots(int n) { m_botCount = n; }
+    void testSetMode(game::GameMode mode) { m_gameMode = mode; }
+    float testWakeTime() const { return m_wakeTime; }
+    int testZombieMessage() const { return static_cast<int>(m_zMessage); }
     // Escribe directamente en el teclado de la contrasena (las pruebas no recorren las teclas).
     void testTypePassword(const char* text) { snprintf(m_passBuffer, sizeof(m_passBuffer), "%s", text); }
     bool testLockerChoosing() const { return m_lockerChoosing; }
@@ -119,7 +126,7 @@ private:
     enum class Results { None, Victory, Defeat };
     // Secciones del lobby (L / R): jugar, logros, tienda (v0.13) y taquilla.
     enum class LobbyTab { Play, Achievements, Shop, Locker, Count };
-    static constexpr int kModelCount = 4;  // jugador + 3 aspectos de bot
+    static constexpr int kModelCount = 6;  // jugador + 3 aspectos de bot + 2 de zombi (v0.14)
 
     // --- app.cpp ----------------------------------------------------------------------
     void presentBootFrame(const char* status);
@@ -238,6 +245,28 @@ private:
     int resultsHintCount() const;
     void overlayResults() const;
 
+    // --- app_zombies.cpp: modo Supervivencia zombi (v0.14, docs/ZOMBIS.md) -------------------
+    void configureZombieMatch();        // en startMatch: reglas, tema en ruinas y despertar
+    void processZombieEvent(const game::GameEvent& e);
+    void updateZombieFog(float* start, float* end, u32* color) const;
+    void updateCraftMenu(const input::Input& in);
+    void renderCraftMenu() const;
+    void overlayCraftMenu() const;
+    void renderZombieHud() const;
+    void overlayZombieHud() const;
+    void renderNightOverlay() const;    // tras el 3D: oscuridad y vineta del modo zombi
+    // Marcas del modo zombi en un mapa: (x, z) -> (ox + x * k, oy + z * k), recortado a la
+    // caja (x0, y0)-(x1, y1). `big`: el mapa a pantalla completa.
+    void drawZombieMarkers(float ox, float oy, float k, float x0, float y0, float x1, float y1, bool big) const;
+    const char* zombieInteractionText(const game::Interactable& it, char* text, size_t size) const;
+    void showZombieMessage(i18n::T text, const char* name, int number, u32 color, float seconds = 3.5f);
+    void buildZombieMinimap();
+    void buildSky();
+    void renderSky(const math3d::Mat4& view) const;
+    void recordZombieMatch();
+    void renderZombieResults() const;
+    void overlayZombieResults() const;
+
     // --- app_hud.cpp ------------------------------------------------------------------
     void renderGameHud() const;
     const ui::Hint* buildHints(int* count) const;
@@ -338,6 +367,28 @@ private:
     float m_stormMessage = 0.0f;  // s que queda el aviso "la tormenta se cierra"
     BuildVisuals m_buildVisuals;
     bool m_buildVisualsReady = false;
+    // v0.14: modo zombi. Menu de crafteo (CUADRADO en un centro de crafteo), aviso grande del
+    // modo (anochece, superviviente...), despertar al empezar, minimapa en ruinas, vineta de
+    // la noche y cielo con degradado (todos los modos).
+    bool m_craftOpen = false;
+    int m_craftCursor = 0;
+    i18n::T m_craftMessage = i18n::T::None;
+    float m_craftMessageTime = 0.0f;
+    bool m_craftMessageError = false;
+    i18n::T m_zMessage = i18n::T::None;
+    char m_zMessageName[24] = "";
+    int m_zMessageNumber = 0;
+    u32 m_zMessageColor = 0xFFFFFFFF;
+    float m_zMessageTime = 0.0f;
+    float m_wakeTime = 99.0f;      // s desde que despierta (fundido de negro, parpadeos)
+    gfx::Texture m_minimapZombie;
+    gfx::Texture m_vignette;       // 64x64: alfa que crece hacia los bordes
+    gfx::Mesh m_sky;               // cupula con degradado (se dibuja sin niebla, con mezcla)
+    gfx::Mesh m_skyZombie;
+    bool m_skyReady = false;
+    // Partida de practica (menos de kRewardBots bots): ni pavos ni logros.
+    bool m_rewardsActive = true;
+    int m_matchBestNights = 0;     // record de noches antes de esta partida (resultados)
     math3d::Mat4 m_viewProjection = math3d::Mat4::identity();  // para proyectar numeros de dano
 
     camera::ThirdPersonCamera m_followCamera;

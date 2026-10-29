@@ -14,7 +14,9 @@
 // Uso: sh tools/match_sim/build_and_run.sh   (o: make match-sim). Sale con 1 si algo falla.
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,6 +29,7 @@
 #include "world/storm.h"
 #include "world/world.h"
 #include "world/world_units.h"
+#include "world/zombie_sites.h"
 
 // El mundo referencia funciones de dibujo que aqui no se usan.
 namespace gfx {
@@ -123,10 +126,14 @@ void testMapCollisions(world::World& world) {
     printf("  contra el muro sur: z final %.2f\n", s.position.z);
     check(s.position.z >= 14.4f + game::tuning::kBodyRadius - 0.01f && !pen, "el muro del recinto bloquea");
 
-    // Hacia el lago: el agua bloquea el paso.
+    // Hacia el lago (v0.14): se entra andando, a la mitad de velocidad. En 4 s sin agua se
+    // llegaria a z 60; con el agua desde z ~44, a ~52.
     s = walk(w, {-30.0f, 0.0f, 38.0f}, 0.0f, 0.0f, 1.0f, 4.0f, &pen);
-    printf("  hacia el lago: z final %.2f (orilla norte ~ z 44)\n", s.position.z);
-    check(s.position.z < 46.0f && !pen, "el agua del lago no se puede cruzar");
+    printf("  hacia el lago: z final %.2f (orilla norte ~ z 44), en el agua %s, velocidad %.2f m/s\n", s.position.z,
+           s.wading ? "si" : "no", static_cast<double>(s.horizontalSpeed()));
+    check(s.position.z > 47.0f && s.position.z < 55.0f && s.wading && !pen &&
+              fabsf(s.horizontalSpeed() - game::tuning::kRunSpeed * 0.5f) < 0.2f,
+          "el lago se cruza andando, a la mitad de velocidad");
 }
 
 void testShots(world::World& world, game::NavGrid& nav) {
@@ -307,7 +314,15 @@ SimResult simulate(world::World& world, game::NavGrid& nav, int bots, u32 seed, 
         for (int id = 0; id <= bots; ++id) {
             if (!m.alive(id)) continue;
             ++recount;
-            if (penetrates(world.collision(), m.body(id).state())) ++r.penetrations;
+            if (penetrates(world.collision(), m.body(id).state())) {
+                ++r.penetrations;
+                if (getenv("SIM_DEBUG")) {
+                    const Vec3 p = m.body(id).state().position;
+                    printf("    DEBUG solido: id %d t %.1f (%.2f %.2f %.2f) estado %s\n", id, static_cast<double>(m.elapsed()),
+                           static_cast<double>(p.x), static_cast<double>(p.y), static_cast<double>(p.z),
+                           id > 0 ? game::botStateName(m.bot(id - 1).state) : "jugador");
+                }
+            }
         }
         if (recount != m.aliveCount() || m.aliveCount() > prevAlive) ++r.aliveMismatches;
         prevAlive = m.aliveCount();
@@ -2917,6 +2932,491 @@ void testUpdate013(world::World& world, game::NavGrid& nav) {
     }
 }
 
+// --- v0.14: tacticas de los bots, agua y modo Supervivencia zombi -----------------------------------
+
+namespace {
+
+int eventsOf(const Match& m, u32 from, game::GameEventType type, int* lastAmount = nullptr) {
+    int n = 0;
+    const u32 start = m.eventCount() - from > static_cast<u32>(Match::kMaxEvents) ? m.eventCount() - Match::kMaxEvents : from;
+    for (u32 i = start; i < m.eventCount(); ++i) {
+        if (m.event(i).type != type) continue;
+        ++n;
+        if (lastAmount) *lastAmount = m.event(i).amount;
+    }
+    return n;
+}
+
+}  // namespace
+
+void testUpdate014(world::World& world, game::NavGrid& nav) {
+    printf("\n20) v0.14: tacticas de los bots, agua y Supervivencia zombi\n");
+    using game::ItemType;
+    using game::Rarity;
+    game::PlayerInput still;
+
+    // --- Bots: caja de paredes al recibir disparos y la quitan al cabo de un rato ---------------
+    {
+        world.mutableCollision().clearDynamic();
+        MatchConfig cfg;
+        cfg.botCount = 1;
+        cfg.startInBus = false;
+        cfg.loot = false;
+        cfg.stormCloses = false;
+        cfg.invulnerablePlayer = true;
+        cfg.botsFlee = false;
+        Match m;
+        m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        const Vec3 spot{70.0f, 0.0f, 25.0f};
+        m.teleport(0, spot, 0.0f);
+        m.teleport(1, spot + Vec3{0.0f, 0.0f, -14.0f}, 0.0f);
+        m.giveBotItem(0, ItemType::AssaultRifle, 1, Rarity::Rare);
+        m.giveBotMaterials(0, world::Resource::Wood, 100);
+        int maxWalls = 0, boxes = 0;
+        bool removed = false;
+        for (int attempt = 0; attempt < 12 && boxes == 0; ++attempt) {
+            game::PlayerAim aim;
+            aim.eye = m.chestOf(0);
+            aim.direction = math3d::normalize(m.chestOf(1) - aim.eye);
+            m.playerShot(aim, 5.0f, 80.0f);
+            m.setHealth(1, 100.0f, 0.0f);
+            for (int i = 0; i < 30; ++i) stepWith(m, still, game::PlayerAim{});
+            boxes = m.stats().botBoxes;
+        }
+        for (int i = 0; i < 60 * 14; ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            const int walls = m.structures().countOwnedBy(1);
+            if (walls > maxWalls) maxWalls = walls;
+            if (maxWalls >= 3 && walls == 0) removed = true;
+        }
+        printf("  caja: %d cajas empezadas, hasta %d paredes del bot a la vez; despues las quita: %s\n", boxes, maxWalls,
+               removed ? "si" : "no");
+        check(boxes > 0 && maxWalls >= 3, "un bot con materiales al que disparan levanta una caja de paredes");
+        check(removed, "pasado un rato quita las paredes de su caja para salir (no se queda encerrado)");
+    }
+
+    // --- Bots: rampa para ganar altura contra quien esta mas alto ----------------------------------
+    {
+        world.mutableCollision().clearDynamic();
+        MatchConfig cfg;
+        cfg.botCount = 1;
+        cfg.startInBus = false;
+        cfg.loot = false;
+        cfg.stormCloses = false;
+        cfg.invulnerablePlayer = true;
+        cfg.botsFlee = false;
+        cfg.seed = 5;
+        Match m;
+        m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        // El jugador encima de los dos contenedores apilados del patio (5.2 m); el bot abajo.
+        const Vec3 top{-32.5f, 5.2f, 8.2f};
+        m.teleport(0, top, 0.0f);
+        m.teleport(1, {-32.5f, 0.0f, 21.0f}, 0.0f);
+        m.giveBotItem(0, ItemType::AssaultRifle, 1, Rarity::Rare);
+        m.giveBotMaterials(0, world::Resource::Wood, 200);
+        float maxY = 0.0f;
+        for (int i = 0; i < 60 * 25 && m.stats().botRamps == 0; ++i) stepWith(m, still, game::PlayerAim{});
+        for (int i = 0; i < 60 * 3; ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            maxY = fmaxf(maxY, m.body(1).state().position.y);
+        }
+        printf("  jugador a %.1f m de altura: rampas del bot %d, altura maxima del bot %.2f m\n",
+               static_cast<double>(m.body(0).state().position.y), m.stats().botRamps, static_cast<double>(maxY));
+        check(m.stats().botRamps > 0 && maxY > 1.2f, "contra un rival mas alto, el bot pone una rampa y sube por ella");
+    }
+
+    // --- Bots: acampan un airdrop ------------------------------------------------------------------
+    {
+        world.mutableCollision().clearDynamic();
+        MatchConfig cfg;
+        cfg.botCount = 1;
+        cfg.startInBus = false;
+        cfg.loot = false;
+        cfg.stormCloses = false;
+        cfg.invulnerablePlayer = true;
+        cfg.seed = 9;
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        m.teleport(0, {-80.0f, 0.0f, 80.0f}, 0.0f);
+        const Vec3 drop{52.0f, 0.0f, 52.0f};
+        const int c = m.addContainer(game::ContainerKind::Airdrop, drop, 0.0f);
+        for (int b = 0; b < 1; ++b) {
+            m.teleport(b + 1, drop + Vec3{-20.0f, 0.0f, -25.0f}, 0.0f);
+            m.giveBotItem(b, ItemType::AssaultRifle, 1, Rarity::Rare);
+            m.giveBotItem(b, ItemType::Shotgun, 1, Rarity::Rare);
+            m.giveBotItem(b, ItemType::Bandage, 5);
+        }
+        int camping = 0;
+        float campDist = 0.0f;
+        for (int i = 0; i < 60 * 25; ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            if (i % 60 != 0) continue;
+            for (int b = 0; b < 1; ++b) {
+                if (m.bot(b).state != game::BotState::Camp) continue;
+                ++camping;
+                campDist = distXZ(m.body(b + 1).state().position, drop);
+            }
+        }
+        printf("  airdrop sin abrir: %d bots se han apostado (%d muestras acampando, ultimo a %.1f m del airdrop)\n",
+               m.stats().botCamps, camping, static_cast<double>(campDist));
+        check(m.stats().botCamps > 0 && camping > 0 && campDist > 6.0f && campDist < 18.0f && !m.containers()[c].opened,
+              "los bots se apostan a 10-14 m de un airdrop sin abrir y lo vigilan");
+    }
+
+    // --- Partidas completas de 30 bots: tacticas nuevas -----------------------------------------------
+    {
+        int camps = 0, boxes = 0, ramps = 0, holds = 0;
+        bool finished = true;
+        int penetrations = 0;
+        for (u32 seed : {21u, 22u}) {
+            const SimResult r = simulate(world, nav, 30, seed, 20.0f * 60.0f, true);
+            camps += r.stats.botCamps;
+            boxes += r.stats.botBoxes;
+            ramps += r.stats.botRamps;
+            holds += r.stats.botHolds;
+            finished &= r.finished;
+            penetrations += r.penetrations;
+            printf("  30 bots, semilla %u: %.0f s, acampadas %d, cajas %d, rampas %d, posiciones al final %d\n", seed,
+                   static_cast<double>(r.duration), r.stats.botCamps, r.stats.botBoxes, r.stats.botRamps, r.stats.botHolds);
+        }
+        check(finished && penetrations == 0, "las partidas de 30 bots con las tacticas nuevas terminan sin nadie dentro de un solido");
+        check(boxes > 0 && holds > 0, "en partidas reales los bots levantan cajas y mantienen posiciones al final");
+    }
+
+    // --- Agua: los bots cruzan el lago (mas despacio) ---------------------------------------------
+    {
+        world.mutableCollision().clearDynamic();
+        MatchConfig cfg = MatchConfig::classic();
+        cfg.botCount = 1;
+        Match m;
+        m.start(cfg, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        m.teleport(0, {80.0f, 0.0f, -80.0f}, 0.0f);
+        m.teleport(1, {-30.0f, 0.0f, 40.0f}, 0.0f);
+        m.commandBotTravel(0, {-30.0f, 0.0f, 70.0f});
+        bool wading = false;
+        float best = 1e9f;
+        for (int i = 0; i < 60 * 25; ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            wading |= m.body(1).state().wading;
+            best = fminf(best, distXZ(m.body(1).state().position, {-30.0f, 0.0f, 70.0f}));
+        }
+        printf("  bot enviado al otro lado del lago: ha pisado el agua %s, distancia final %.1f m\n", wading ? "si" : "no",
+               static_cast<double>(best));
+        check(wading && best < 2.5f, "los bots cruzan el lago andando");
+    }
+
+    // --- Modo zombi --------------------------------------------------------------------------------
+    world.mutableCollision().clearDynamic();
+    MatchConfig zc = MatchConfig::zombies();
+    zc.seed = 31;
+    Match z;
+    z.setHarvestables(&world.harvestables());
+    z.start(zc, world.mutableCollision(), nav, world.pointsOfInterest(), world::zsites::kWakeSpot, world::zsites::kWakeYaw);
+    {
+        int ruins = 0, zombieObjects = 0, zombieStanding = 0;
+        for (size_t i = 0; i < world.harvestables().size(); ++i) {
+            const world::Harvestable& h = world.harvestables()[i];
+            if (h.zombieOnly) {
+                ++zombieObjects;
+                zombieStanding += z.objectDestroyed(static_cast<int>(i)) ? 0 : 1;
+            } else {
+                ruins += z.objectDestroyed(static_cast<int>(i)) ? 1 : 0;
+            }
+        }
+        int survivors = 0, waiting = 0, zombies = 0;
+        for (int i = 0; i < z.botCount(); ++i) {
+            survivors += z.isSurvivor(i + 1) ? 1 : 0;
+            waiting += z.isSurvivor(i + 1) && z.alive(i + 1) && !z.hostile(i + 1, 0) ? 1 : 0;
+            zombies += z.isZombie(i + 1) ? 1 : 0;
+        }
+        int benches = 0, blueprints = 0, weapons = 0, badWeapons = 0, traps = 0, grenades = 0;
+        for (const game::Container& c : z.containers()) benches += c.kind == game::ContainerKind::Workbench ? 1 : 0;
+        for (const game::Pickup& p : z.pickups()) {
+            if (!p.active) continue;
+            blueprints += p.kind == game::PickupKind::Blueprint ? 1 : 0;
+            if (p.kind != game::PickupKind::Item) continue;
+            if (game::isWeapon(p.item)) {
+                ++weapons;
+                const game::WeaponClass wc = game::weaponClass(p.item);
+                badWeapons += wc != game::WeaponClass::Shotgun && wc != game::WeaponClass::Pistol ? 1 : 0;
+            }
+            traps += p.item == ItemType::SpikeTrap ? 1 : 0;
+            grenades += p.item == ItemType::Grenade ? 1 : 0;
+        }
+        printf("  modo zombi: %d objetos en ruinas, %d/%d objetos de la base y campamentos en pie, %d supervivientes "
+               "(%d esperando), %d huecos de zombi, %d centros de crafteo, %d planos, %d armas en el suelo (%d de otro tipo)\n",
+               ruins, zombieStanding, zombieObjects, survivors, waiting, zombies, benches, blueprints, weapons, badWeapons);
+        check(ruins > 40 && zombieStanding == zombieObjects && zombieObjects > 20, "el mapa en ruinas: parte del Polvorin derruido y la base y los campamentos en pie");
+        check(survivors == 5 && waiting == 5 && zombies == game::kZombieSlots && z.zombiesAlive() == 0 && benches == 3 && blueprints == 4,
+              "5 supervivientes esperando, huecos para 22 zombis, 3 centros de crafteo y 4 planos");
+        check(weapons > 5 && badWeapons == 0 && traps == 0 && grenades == 0,
+              "en el botin solo hay escopetas, pistolas y curativos (ni trampas ni granadas)");
+        check(!z.storm().closes() && z.airState(0) == game::AirState::Ground &&
+                  distXZ(z.body(0).state().position, world::zsites::kWakeSpot) < 0.5f,
+              "sin autobus ni tormenta: se despierta en la base");
+    }
+    // Aparecen zombis lejos y fuera de la base.
+    {
+        const Vec3 base = world::zsites::kWakeSpot;
+        z.setPlayerInvulnerable(true);
+        float nearestSpawn = 1e9f;
+        int insideBase = 0;
+        int seen = 0;
+        bool wasAlive[game::kZombieSlots + 1] = {};
+        for (int i = 0; i < 60 * 40; ++i) {
+            stepWith(z, still, game::PlayerAim{});
+            for (int id = 1; id <= game::kZombieSlots; ++id) {
+                const bool now = z.alive(id);
+                if (now && !wasAlive[id]) {  // acaba de aparecer
+                    const Vec3 p = z.body(id).state().position;
+                    nearestSpawn = fminf(nearestSpawn, distXZ(p, base));
+                    insideBase += world::zsites::insideBase(p.x, p.z) ? 1 : 0;
+                    ++seen;
+                }
+                wasAlive[id] = now;
+            }
+        }
+        printf("  40 s de dia: %d zombis vivos, %d apariciones vistas, la mas cercana a %.1f m del jugador\n", z.zombiesAlive(),
+               seen, static_cast<double>(nearestSpawn));
+        check(z.zombiesAlive() >= 5 && nearestSpawn >= zc.zombie.spawnMinDistance - 0.5f && insideBase == 0,
+              "de dia van apareciendo zombis, lejos del jugador y nunca dentro de la base");
+    }
+    // Un zombi persigue y golpea al jugador; con una pared en medio, la rompe.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 0;
+        c.zombie.zombiesPerDay = 0;
+        c.seed = 4;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), {20.0f, 0.0f, 40.0f}, 0.0f);
+        // Un zombi aparece en un hueco libre: se fuerza con la aparicion del dia.
+        MatchConfig::zombies();
+        m.teleport(0, {20.0f, 0.0f, 40.0f}, 0.0f);
+        // Sin aparicion automatica: se usa la horda de la primera noche.
+        const u32 from = m.eventCount();
+        for (int i = 0; i < 60 * static_cast<int>(c.zombie.dayLength - c.zombie.startClock + 1.0f); ++i) {
+            stepWith(m, still, game::PlayerAim{});
+        }
+        int hordeAmount = 0;
+        const int nights = eventsOf(m, from, game::GameEventType::NightStarted);
+        eventsOf(m, from, game::GameEventType::HordeIncoming, &hordeAmount);
+        printf("  primera noche: %d avisos de anochecer, horda de %d zombis, %d zombis vivos, oscuridad %.2f\n", nights,
+               hordeAmount, m.zombiesAlive(), static_cast<double>(m.darkness()));
+        check(nights == 1 && m.night() && hordeAmount >= c.zombie.hordeBase - 1 && m.darkness() > 0.9f,
+              "al acabar el dia anochece y llega una horda");
+        const float before = m.body(0).state().health;
+        int hits = 0;
+        const u32 from2 = m.eventCount();
+        for (int i = 0; i < 60 * 40 && m.alive(0); ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            if (i % 30 == 0) hits = eventsOf(m, from2, game::GameEventType::ZombieAttack);
+        }
+        printf("  la horda llega: %d golpes de zombi en 40 s, vida %.0f -> %.0f\n", m.stats().zombieHits,
+               static_cast<double>(before), static_cast<double>(m.body(0).state().health));
+        check(m.stats().zombieHits > 0 && (m.body(0).state().health < before || !m.alive(0)),
+              "la horda encuentra al jugador y le golpea");
+        check(!m.alive(0) ? m.phase() == game::MatchPhase::Finished : true, "si el jugador cae, la partida termina");
+        (void)hits;
+    }
+    // Zombi contra una pared construida: la rompe a golpes.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 1;
+        c.zombie.zombiesPerDay = 0;
+        c.zombie.daySpawnInterval = 0.2f;
+        c.invulnerablePlayer = true;
+        c.seed = 8;
+        const Vec3 p{22.0f, 0.0f, 46.0f};  // centro de una celda de 4 m: las 4 paredes la cierran
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), p, 0.0f);
+        m.giveMaterials(world::Resource::Wood, 200);
+        for (int i = 0; i < 60 * 5 && m.zombiesAlive() == 0; ++i) stepWith(m, still, game::PlayerAim{});
+        int zombie = -1;
+        for (int id = 1; id <= game::kZombieSlots; ++id) zombie = m.alive(id) ? id : zombie;
+        // Caja de cuatro paredes alrededor del jugador y el zombi al lado.
+        for (float yaw : {0.0f, 1.5708f, 3.1416f, -1.5708f}) m.buildWall(yaw);
+        const int walls = m.structures().count();
+        if (zombie > 0) m.teleport(zombie, p + Vec3{0.0f, 0.0f, -3.4f}, 0.0f);
+        float minHealth = 1e9f;
+        for (int i = 0; i < 60 * 20; ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            for (int w = 0; w < m.structures().capacity(); ++w) {
+                if (m.structures().wall(w).active) minHealth = fminf(minHealth, m.structures().wall(w).health);
+            }
+        }
+        printf("  encerrado en %d paredes con un zombi al lado: vida minima de una pared %.0f, paredes en pie %d, golpes %d\n",
+               walls, static_cast<double>(minHealth), m.structures().count(), m.stats().zombieHits);
+        check(zombie > 0 && walls >= 3 && m.stats().zombieHits > 0 && (minHealth < 150.0f || m.structures().count() < walls),
+              "un zombi que no llega al jugador golpea las paredes que se lo impiden");
+    }
+    // Supervivientes: necesitan un arma y una curacion; despues siguen al jugador y disparan.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 0;
+        c.zombie.zombiesPerDay = 0;
+        c.invulnerablePlayer = true;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), world::zsites::kWakeSpot, 0.0f);
+        const int survivor = game::kZombieSlots;  // el del primer campamento
+        const Vec3 camp = m.body(survivor + 1).state().position;
+        m.teleport(0, camp + Vec3{0.0f, 0.0f, 1.6f}, 3.1416f);
+        const game::Interactable it = m.playerInteractable();
+        const int needsBefore = m.survivorNeeds(survivor);
+        m.giveItem(ItemType::Pistol, 1, Rarity::Rare);
+        m.giveItem(ItemType::Bandage, 5);
+        m.selectSlot(0);
+        const bool gaveWeapon = m.interact(0, it);
+        const int needsMid = m.survivorNeeds(survivor);
+        m.selectSlot(1);
+        m.giveToSurvivor(survivor);
+        printf("  superviviente: necesita %d -> tras el arma %d -> tras las vendas %d; rescatado %s\n", needsBefore, needsMid,
+               m.survivorNeeds(survivor), m.bot(survivor).rescued ? "si" : "no");
+        check(it.kind == game::Interactable::Kind::Survivor && needsBefore == 3 && gaveWeapon && needsMid == 2 &&
+                  m.bot(survivor).rescued && m.survivorsRescued() == 1,
+              "con CUADRADO se le da un arma y una curacion al superviviente y se une");
+        // Sigue al jugador.
+        const Vec3 dest = camp + Vec3{14.0f, 0.0f, 10.0f};
+        m.teleport(0, dest, 0.0f);
+        for (int i = 0; i < 60 * 12; ++i) stepWith(m, still, game::PlayerAim{});
+        const float follow = distXZ(m.body(survivor + 1).state().position, dest);
+        printf("  el jugador se aleja 17 m: el superviviente acaba a %.1f m de el\n", static_cast<double>(follow));
+        check(follow < 7.0f, "el superviviente rescatado sigue al jugador");
+        // Las balas del jugador no le dan (sin fuego amigo).
+        game::PlayerAim aim;
+        aim.eye = m.chestOf(0);
+        aim.direction = math3d::normalize(m.chestOf(survivor + 1) - aim.eye);
+        const game::ShotResult shot = m.playerShot(aim, 50.0f, 60.0f);
+        check(shot.victim != survivor + 1 && m.body(survivor + 1).state().health == 100.0f,
+              "las balas del jugador atraviesan a los supervivientes (sin fuego amigo)");
+    }
+    // Crafteo y planos.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 0;
+        c.zombie.zombiesPerDay = 0;
+        c.invulnerablePlayer = true;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), world::zsites::kWakeSpot, 0.0f);
+        const Vec3 bench = world::zsites::kWorkbenches[0];
+        m.teleport(0, bench + Vec3{0.0f, 0.0f, -1.6f}, 0.0f);
+        const int nearby = m.nearbyWorkbench();
+        const bool failed = !m.craft(0);  // sin materiales
+        m.giveMaterials(world::Resource::Wood, 300);
+        m.giveMaterials(world::Resource::Stone, 300);
+        m.giveMaterials(world::Resource::Metal, 300);
+        const bool rifle = m.craft(0);
+        const bool bandages = m.craft(6);
+        const int traps = m.trapStock();
+        m.craft(5);
+        printf("  centro de crafteo %d: sin material %s; fusil %s, vendas %s, trampas %d -> %d; madera %d, metal %d\n", nearby,
+               failed ? "no" : "SI", rifle ? "si" : "no", bandages ? "si" : "no", traps, m.trapStock(),
+               m.materials().get(world::Resource::Wood), m.materials().get(world::Resource::Metal));
+        check(nearby >= 0 && failed && rifle && bandages && m.inventory().count(ItemType::AssaultRifle) == 1 &&
+                  m.inventory().count(ItemType::Bandage) == 5 && m.trapStock() == traps + 2 &&
+                  m.materials().get(world::Resource::Metal) == 300 - 60 - 20,
+              "en un centro de crafteo se fabrican armas, curas y trampas gastando material (sin material, no)");
+        m.teleport(0, {0.0f, 0.0f, 40.0f}, 0.0f);
+        check(m.nearbyWorkbench() < 0 && !m.craft(0), "lejos del centro de crafteo no se fabrica");
+
+        // Plano: recogerlo y construir sus piezas en la base.
+        int bpPickup = -1;
+        for (size_t i = 0; i < m.pickups().size(); ++i) {
+            const game::Pickup& p = m.pickups()[i];
+            if (p.active && p.kind == game::PickupKind::Blueprint && p.count == 0) bpPickup = static_cast<int>(i);
+        }
+        m.teleport(0, m.pickups()[bpPickup].position + Vec3{0.0f, 0.0f, 1.0f}, 0.0f);
+        const game::Interactable it = m.playerInteractable();
+        m.interact(0, it);
+        const bool found = m.blueprintFound(0);
+        m.teleport(0, world::zsites::kBaseCenter + Vec3{0.0f, 0.0f, 2.5f}, 0.0f);
+        int built = 0;
+        const game::Blueprint& bp = game::blueprint(0);
+        for (int k = 0; k < bp.pieceCount; ++k) {
+            const world::Aabb box = m.blueprintPiece(0, k).box;
+            const Vec3 c2 = (box.min + box.max) * 0.5f;
+            const Vec3 inside{fminf(fmaxf(c2.x, world::zsites::kBaseMinX + 1.2f), world::zsites::kBaseMaxX - 1.2f), 0.0f,
+                              fminf(fmaxf(c2.z, world::zsites::kBaseMinZ + 1.2f), world::zsites::kBaseMaxZ - 1.2f)};
+            m.teleport(0, inside, 0.0f);
+            const game::Interactable piece = m.playerInteractable();
+            if (piece.kind == game::Interactable::Kind::BlueprintPiece && m.interact(0, piece)) ++built;
+            else if (m.buildBlueprintPiece(0, k)) ++built;
+        }
+        int reinforced = 0;
+        for (int w = 0; w < m.structures().capacity(); ++w) {
+            const game::BuiltWall& wall = m.structures().wall(w);
+            reinforced += wall.active && wall.owner == game::kBlueprintOwner && wall.maxHealth >= 2.0f * 150.0f - 0.5f ? 1 : 0;
+        }
+        printf("  plano 0 (%d piezas): encontrado %s, construidas %d, reforzadas %d, completo %s; piezas del jugador %d\n",
+               bp.pieceCount, found ? "si" : "no", built, reinforced, m.blueprintDone(0) ? "si" : "no", m.structures().count());
+        check(found && built == bp.pieceCount && m.blueprintDone(0) && reinforced == bp.pieceCount && m.structures().count() == 0,
+              "un plano recogido muestra sus piezas en la base; se construyen con CUADRADO (reforzadas) y se completa");
+        // Todos los planos caben y se pueden completar.
+        for (int b = 1; b < game::kBlueprintCount; ++b) m.giveBlueprint(b);
+        m.giveMaterials(world::Resource::Metal, 400);
+        for (int b = 1; b < game::kBlueprintCount; ++b) {
+            for (int k = 0; k < game::blueprint(b).pieceCount; ++k) {
+                m.teleport(0, {-80.0f, 0.0f, 80.0f}, 0.0f);
+                m.buildBlueprintPiece(b, k);
+            }
+        }
+        printf("  los 4 planos: %d completos, %d piezas en la base\n", m.blueprintsDone(), m.structures().totalCount());
+        check(m.blueprintsDone() == game::kBlueprintCount, "los cuatro planos de la base se pueden completar");
+    }
+    // Partida larga: 2 dias y 2 noches con el jugador quieto (invulnerable) en la base.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c = MatchConfig::zombies();
+        c.invulnerablePlayer = true;
+        c.seed = 77;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), world::zsites::kWakeSpot, 0.0f);
+        int penetrations = 0, maxAlive = 0;
+        const float total = 2.0f * (c.zombie.dayLength + c.zombie.nightLength);
+        for (int i = 0; i < static_cast<int>(total * 60.0f); ++i) {
+            stepWith(m, still, game::PlayerAim{});
+            maxAlive = std::max(maxAlive, m.zombiesAlive());
+            if (i % 30 != 0) continue;
+            for (int id = 1; id < m.entityCount(); ++id) {
+                if (m.alive(id) && penetrates(world.collision(), m.body(id).state())) ++penetrations;
+            }
+        }
+        printf("  %.0f s: dia %d, noches sobrevividas %d, zombis aparecidos %d (como mucho %d a la vez), golpes %d, "
+               "IA %.1f us/paso, dentro de solidos %d\n",
+               static_cast<double>(m.elapsed()), m.day(), m.nightsSurvived(), m.stats().zombiesSpawned, maxAlive,
+               m.stats().zombieHits, static_cast<double>(m.stats().aiMicros) / m.stats().steps, penetrations);
+        check(m.nightsSurvived() == 2 && m.day() == 3 && maxAlive <= game::kZombieSlots && m.stats().zombiesSpawned > 20 &&
+                  penetrations == 0 && m.phase() == game::MatchPhase::Playing,
+              "dos dias y dos noches seguidos: el ciclo avanza, los zombis no pasan del limite ni se meten en solidos");
+    }
+    // Despues, otra partida normal: lo del modo zombi desaparece y las ruinas vuelven a estar en pie.
+    {
+        Match m;
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        MatchConfig c;
+        c.botCount = 2;
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), kSpawn, 0.0f);
+        int wrong = 0;
+        for (size_t i = 0; i < world.harvestables().size(); ++i) {
+            const bool gone = m.objectDestroyed(static_cast<int>(i));
+            wrong += gone != world.harvestables()[i].zombieOnly ? 1 : 0;
+        }
+        bool tentCollides = world.collision().overlapsAny({{58.0f, 0.5f, 37.4f}, {58.6f, 1.2f, 37.8f}}, world::kBlocksMovement);
+        check(wrong == 0 && !tentCollides && !m.zombieMode(),
+              "la partida siguiente del battle royale vuelve al mapa normal (sin la base ni las ruinas)");
+    }
+}
+
 int main() {
     world::World world;
     if (!world.build()) {
@@ -2950,6 +3450,7 @@ int main() {
     testPatchCTraps(world, nav);
     testRealMatches(world, nav);
     testUpdate013(world, nav);
+    testUpdate014(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

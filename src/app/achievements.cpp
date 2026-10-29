@@ -25,6 +25,14 @@ const AchievementDef kAchievements[] = {
     {"top5", i18n::T::AchTopFive, i18n::T::AchTopFiveDesc, Stat::BestPlaceTop5, 1},
     {"veterano", i18n::T::AchVeteran, i18n::T::AchVeteranDesc, Stat::Matches, 20},
     {"medico", i18n::T::AchMedic, i18n::T::AchMedicDesc, Stat::ItemsUsed, 25},
+    // v0.14: modo zombi.
+    {"zombi_primera_noche", i18n::T::AchZFirstNight, i18n::T::AchZFirstNightDesc, Stat::ZombieNights, 1},
+    {"zombi_tres_noches", i18n::T::AchZThreeNights, i18n::T::AchZThreeNightsDesc, Stat::ZombieNights, 3},
+    {"zombi_semana", i18n::T::AchZWeek, i18n::T::AchZWeekDesc, Stat::ZombieNights, 7},
+    {"cazazombis", i18n::T::AchZHunter, i18n::T::AchZHunterDesc, Stat::ZombieKills, 100},
+    {"rescatador", i18n::T::AchZRescuer, i18n::T::AchZRescuerDesc, Stat::SurvivorsRescued, 5},
+    {"fortaleza", i18n::T::AchZFortress, i18n::T::AchZFortressDesc, Stat::BlueprintsDone, 4},
+    {"artesano", i18n::T::AchZCrafter, i18n::T::AchZCrafterDesc, Stat::ItemsCrafted, 10},
 };
 static_assert(sizeof(kAchievements) / sizeof(kAchievements[0]) == kAchievementCount, "falta un logro");
 

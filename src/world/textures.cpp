@@ -8,7 +8,8 @@
 namespace world {
 namespace {
 
-constexpr int kSize = 32;
+constexpr int kSize = 32;       // texturas procedurales (si falta el atlas)
+constexpr int kAtlasTile = 64;  // texturas del atlas de Recursos/Texturas
 
 u32 hash(u32 x, u32 y, u32 seed) {
     u32 h = x * 374761393u + y * 668265263u + seed * 2246822519u;
@@ -209,6 +210,32 @@ Rgb woodWall(int x, int y) {
     return scaled(base, s);
 }
 
+// v0.14 (modo zombi), por si falta el atlas: versiones oxidadas y apagadas.
+Rgb deadGrass(int x, int y) {
+    const float s = 0.82f + 0.30f * blotch(x, y, 4, 211) + 0.10f * (white(x, y, 212) - 0.5f);
+    return scaled({112, 104, 62}, s);
+}
+
+Rgb rust(int x, int y, u32 seed) {
+    const float s = 0.78f + 0.30f * blotch(x, y, 4, seed) + 0.12f * (white(x, y, seed + 1) - 0.5f);
+    return blotch(x, y, 6, seed + 2) > 0.55f ? scaled({150, 78, 42}, s) : scaled({150, 140, 128}, s);
+}
+
+Rgb murkyWater(int x, int y) {
+    const float s = 0.85f + 0.15f * blotch(x, y, 4, 241);
+    return scaled({58, 74, 52}, s);
+}
+
+Rgb rottenWood(int x, int y) {
+    const float s = 0.80f + 0.20f * white(x / 3, y, 251) + 0.10f * blotch(x, y, 4, 252);
+    return scaled({104, 82, 58}, (y % 8 == 0) ? s * 0.6f : s);
+}
+
+Rgb canvas(int x, int y) {
+    const float s = 0.88f + 0.08f * white(x, y, 261) + ((x + y) % 4 == 0 ? -0.06f : 0.0f);
+    return scaled({200, 196, 180}, s);
+}
+
 }  // namespace
 
 bool TextureLibrary::buildFromAtlas() {
@@ -217,16 +244,16 @@ bool TextureLibrary::buildFromAtlas() {
     unsigned char* rgba = stbi_load_from_memory(static_cast<const stbi_uc*>(png.data),
                                                 static_cast<int>(png.size), &w, &h, &channels, 4);
     if (!rgba) return false;
-    const int tilesPerRow = w / kSize;
-    bool ok = w == 128 && h == 128;
+    const int tilesPerRow = w / kAtlasTile;
+    bool ok = w == 4 * kAtlasTile && h == (kTexCount + 3) / 4 * kAtlasTile;
     for (int id = 0; ok && id < kTexCount; ++id) {
         gfx::Texture& tex = m_textures[id];
-        ok = gfx::createTexture(tex, kSize, kSize, GU_PSM_5551);
+        ok = gfx::createTexture(tex, kAtlasTile, kAtlasTile, GU_PSM_5551);
         if (!ok) break;
-        const int ox = (id % tilesPerRow) * kSize, oy = (id / tilesPerRow) * kSize;
+        const int ox = (id % tilesPerRow) * kAtlasTile, oy = (id / tilesPerRow) * kAtlasTile;
         auto* dst = static_cast<u16*>(tex.pixels);
-        for (int y = 0; y < kSize; ++y) {
-            for (int x = 0; x < kSize; ++x) {
+        for (int y = 0; y < kAtlasTile; ++y) {
+            for (int x = 0; x < kAtlasTile; ++x) {
                 const unsigned char* p = rgba + ((oy + y) * w + ox + x) * 4;
                 dst[y * tex.stride + x] = gfx::pack5551(p[0], p[1], p[2]);
             }
@@ -258,6 +285,14 @@ bool TextureLibrary::build() {
     ok &= generate(m_textures[kTexSand], sand);
     ok &= generate(m_textures[kTexBlockWall], blockWall);
     ok &= generate(m_textures[kTexWoodWall], woodWall);
+    ok &= generate(m_textures[kTexDeadGrass], deadGrass);
+    ok &= generate(m_textures[kTexRustSiding], [](int x, int y) { return rust(x, y, 221); });
+    ok &= generate(m_textures[kTexRustRoof], [](int x, int y) { return rust(x, y, 225); });
+    ok &= generate(m_textures[kTexRustContainer], [](int x, int y) { return rust(x, y, 229); });
+    ok &= generate(m_textures[kTexMurkyWater], murkyWater);
+    ok &= generate(m_textures[kTexCrackedConcrete], [](int x, int y) { return rust(x, y, 233); });
+    ok &= generate(m_textures[kTexRottenWood], rottenWood);
+    ok &= generate(m_textures[kTexCanvas], canvas);
     return ok;
 }
 
@@ -266,8 +301,21 @@ void TextureLibrary::destroy() {
 }
 
 const gfx::Texture* TextureLibrary::get(int id) const {
-    if (id < 0 || id >= kTexCount || !m_textures[id].pixels) return nullptr;
-    return &m_textures[id];
+    if (id < 0 || id >= kTexCount) return nullptr;
+    if (m_theme == TextureTheme::Ruined) {
+        switch (id) {
+            case kTexGrass: id = kTexDeadGrass; break;
+            case kTexMetalSiding: id = kTexRustSiding; break;
+            case kTexRoofPanel:
+            case kTexShutter: id = kTexRustRoof; break;
+            case kTexContainer: id = kTexRustContainer; break;
+            case kTexWater: id = kTexMurkyWater; break;
+            case kTexConcrete: id = kTexCrackedConcrete; break;
+            case kTexWood: id = kTexRottenWood; break;
+            default: break;
+        }
+    }
+    return m_textures[id].pixels ? &m_textures[id] : nullptr;
 }
 
 size_t TextureLibrary::totalBytes() const {

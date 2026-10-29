@@ -37,6 +37,10 @@ struct CharacterPalette {
     bool hasScarf;
     bool hasHelmet;   // casco en lugar de pelo (usa el color `hair`)
     bool camoPants;   // pantalon con el estampado de camuflaje
+    // v0.14: zombi (piel enferma, ojos hundidos y brillantes, ropa rota, heridas) y mochila a
+    // la espalda (lo que mas se ve desde la camara: todos los humanos la llevan).
+    bool zombie = false;
+    bool backpack = true;
 };
 
 namespace palettes {
@@ -44,6 +48,8 @@ extern const CharacterPalette kPlayer;    // como Referencias/Personaje
 extern const CharacterPalette kCommando;  // bots: negro y camuflaje gris
 extern const CharacterPalette kOrange;    // bots: mono naranja
 extern const CharacterPalette kRanger;    // bots: rojo y azul con casco
+extern const CharacterPalette kZombie;        // v0.14: zombi con ropa de calle
+extern const CharacterPalette kZombieWorker;  // v0.14: zombi con mono de trabajo
 }  // namespace palettes
 
 // Lo que hace el personaje este frame, ademas de su estado fisico (lo rellena la
@@ -92,6 +98,15 @@ struct CharacterAnim {
     float useBlend = 0.0f;
     float lean = 0.0f;         // inclinacion del tronco al correr (rad)
     float stride = 1.0f;       // +1 hacia delante, -1 hacia atras
+    // v0.14: giro del tronco con cada zancada, balanceo lateral, cambio de peso en reposo,
+    // hacia donde cae al ser eliminado, andar por el agua (levantando las rodillas) y el
+    // giro de lado al cambiar de direccion.
+    float twist = 0.0f;
+    float sway = 0.0f;
+    float deathSide = 1.0f;    // +1 de espaldas, -1 de bruces
+    float wadeBlend = 0.0f;
+    float turnLean = 0.0f;
+    float lastYaw = 0.0f;
 
     void update(const CharacterState& state, const AnimInput& in, float dt);
     // Forma corta (lobby, previsualizaciones): solo apuntar y vivo.
@@ -109,7 +124,8 @@ struct CharacterAnim {
 // Postura del cuerpo: normal, caida libre (tumbado boca abajo, brazos y piernas abiertos),
 // colgado del ala delta (brazos arriba), agachado (CRUCETA abajo) o bailando (CRUCETA
 // arriba). Lo que se lleva en la mano es un game::ItemModel (item_models.h).
-enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance };
+// v0.14: zombi (encorvado, brazos al frente, cojeando; el golpe es un zarpazo).
+enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance, Zombie };
 
 class CharacterModel {
 public:
@@ -120,10 +136,11 @@ public:
     // animacion no ha contado la caida, aparece ya tumbado). `lowDetail`: version de
     // pocos poligonos para personajes lejanos. Requiere gfx::begin3D().
     // `held`: lo que lleva en la mano derecha (de `items`; None o sin `items`: nada).
+    // `scale`: tamano (los brutos del modo zombi, 1.3).
     void draw(const CharacterState& state, const CharacterAnim& anim,
               const world::TextureLibrary& textures, bool eliminated,
               ItemModel held = ItemModel::None, bool lowDetail = false,
-              BodyPose pose = BodyPose::Normal, const ItemModels* items = nullptr) const;
+              BodyPose pose = BodyPose::Normal, const ItemModels* items = nullptr, float scale = 1.0f) const;
 
     // Triangulos del nivel de detalle alto / bajo (sin lo que lleva en la mano).
     int triangles() const { return m_triangles[0]; }
