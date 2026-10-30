@@ -4,6 +4,12 @@
 
 #include "core/config.h"
 
+#ifdef FORTNITEPSP_WEB
+namespace web {
+void pollPointer(float* dx, float* dy, int* slotKey);  // web/platform/web_input.cpp
+}  // namespace web
+#endif
+
 namespace input {
 
 namespace {
@@ -51,6 +57,9 @@ void Input::update(float dt) {
     m_pressed = m_current & ~m_previous;
     m_released = m_previous & ~m_current;
     normalizeStick(m_rawX, m_rawY, m_analogX, m_analogY);
+#ifdef FORTNITEPSP_WEB
+    web::pollPointer(&m_mouseDX, &m_mouseDY, &m_slotKey);
+#endif
 
     if (m_combo != 0 && held(m_combo)) {
         m_comboHeld += dt;

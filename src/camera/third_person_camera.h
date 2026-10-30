@@ -26,6 +26,8 @@ namespace camera {
 struct CameraInput {
     float turn = 0.0f;       // -1..1: + gira a la derecha
     float look = 0.0f;       // -1..1: + mira hacia arriba
+    float yawDelta = 0.0f;   // rad de giro inmediato (raton): + gira a la derecha
+    float lookDelta = 0.0f;  // rad de inclinacion inmediata (raton): + mira hacia arriba
     float followYaw = 0.0f;  // hacia donde mira el jugador
     float follow = 0.0f;     // 0..1: fuerza con la que la camara se coloca detras de el
     float distance = 5.0f;   // m del pivote al ojo (mas lejos en el autobus y cayendo)

@@ -437,6 +437,8 @@
     /* --- v0.14: modo zombi, tacticas de los bots y partidas de practica ------------------- */ \
     X(BotCamp, "Acampar", "Camp") \
     X(BotIdle, "Esperar", "Wait") \
+    X(BotDowned, "Derribado", "Downed") \
+    X(BotRevive, "Reanimar", "Revive") \
     X(ModeZombies, "SUPERVIVENCIA ZOMBI", "ZOMBIE SURVIVAL") \
     X(ModeZombiesDesc1, "Sobrevive a los zombis,", "Survive the zombies,") \
     X(ModeZombiesDesc2, "rescata gente y fortifica.", "rescue people, fortify.") \
@@ -506,7 +508,7 @@
     X(PickupBlueprint, "Plano", "Blueprint") \
     X(ResultZDays, "DIAS", "DAYS") \
     X(ResultZKills, "ZOMBIS", "ZOMBIES") \
-    X(ResultZRescued, "Rescatados %d   Planos %d   Fabricados %d", "Rescued %d   Blueprints %d   Crafted %d") \
+    X(ResultZRescued, "Rescatados %d  Planos %d  Fabricados %d  Objetivos %d", "Rescued %d  Plans %d  Crafted %d  Objectives %d") \
     X(ResultZDied, "Los zombis te han atrapado", "The zombies got you") \
     X(ResultZDayN, "Caiste el dia %d", "You fell on day %d") \
     X(ResultZBest, "Record: %d dias", "Best: %d days") \
@@ -525,4 +527,113 @@
     X(AchZFortressDesc, "Completa 4 planos de la base.", "Complete 4 base blueprints.") \
     X(AchZCrafter, "Artesano", "Crafter") \
     X(AchZCrafterDesc, "Fabrica 10 objetos.", "Craft 10 items.") \
-    X(AchZVbucks, "+%d pavos por dias sobrevividos", "+%d V-Bucks for days survived")
+ \
+    X(ItemCannedFood, "Lata de conservas", "Canned food") \
+    X(ItemRation, "Racion militar", "Military ration") \
+    X(ItemBed, "Cama", "Bed") \
+    X(ItemSleepingBag, "Saco de dormir", "Sleeping bag") \
+    X(ZombieFallen, "Aliado caido", "Fallen ally") \
+    X(RecipeBed, "Cama (para dormir)", "Bed (to sleep)") \
+    X(UseFullFood, "No tienes hambre", "You are not hungry") \
+    X(Site0, "La Casona", "The Manor") \
+    X(Site1, "Almacen del Polvorin", "Powder Storehouse") \
+    X(Site2, "Casa del guarda", "Keeper's house") \
+    X(Site3, "Casa del lago", "Lake house") \
+    X(Site4, "Granja abandonada", "Abandoned farm") \
+    X(Site5, "Cabana del bosque", "Forest cabin") \
+    X(Site6, "Puesto norte", "North outpost") \
+    X(Site7, "Puesto este", "East outpost") \
+    X(Site8, "Puesto del bosque", "Forest outpost") \
+    X(Site9, "Gasolinera", "Gas station") \
+    X(ObjKillZombies, "Abate zombis", "Kill zombies") \
+    X(ObjKillRunners, "Abate corredores", "Kill runners") \
+    X(ObjKillBrute, "Abate a un bruto", "Kill a brute") \
+    X(ObjOpenFridges, "Registra neveras", "Search fridges") \
+    X(ObjEatFood, "Come algo", "Eat something") \
+    X(ObjCraft, "Fabrica objetos", "Craft items") \
+    X(ObjBuildPieces, "Construye piezas", "Build pieces") \
+    X(ObjExplore, "Ve a: %s", "Go to: %s") \
+    X(ObjHarvest, "Pica material", "Gather materials") \
+    X(ObjSleepWell, "Duerme bien", "Sleep well") \
+    X(ObjHeadshots, "Tiros a la cabeza", "Headshots") \
+    X(RewardMaterials, "materiales", "materials") \
+    X(RewardAmmo, "municion", "ammo") \
+    X(RewardFood, "comida", "food") \
+    X(RewardHeals, "curas", "heals") \
+    X(ZObjectiveDone, "OBJETIVO CUMPLIDO: %s", "OBJECTIVE COMPLETE: %s") \
+    X(ZObjectivesTitle, "OBJETIVOS", "OBJECTIVES") \
+    X(ZFood, "HAMBRE", "FOOD") \
+    X(ZRest, "SUENO", "REST") \
+    X(ZHungry, "Tienes hambre: busca comida", "You are hungry: find food") \
+    X(ZStarving, "Te mueres de hambre...", "You are starving...") \
+    X(ZTired, "Tienes sueno: empiezas a fallar", "You are sleepy: you make mistakes") \
+    X(ZExhausted, "Agotado: necesitas dormir", "Exhausted: you need sleep") \
+    X(ZFumbleStumble, "Tropiezas de cansancio...", "You stumble, exhausted...") \
+    X(ZFumbleMisfire, "Se te escapa un disparo", "Your finger slips: a shot goes off") \
+    X(ZFumbleAmmo, "Se te caen balas al suelo", "You drop some ammo") \
+    X(ZSleepBlocked, "No puedes dormir: hay monstruos cerca", "You can't sleep: monsters nearby") \
+    X(ZSleepNotTired, "No tienes sueno", "You are not sleepy") \
+    X(ZSleeping, "Durmiendo... descanso %d%%", "Sleeping... rest %d%%") \
+    X(ZSleepWokeZombie, "Algo se acerca... te despiertas", "Something is coming... you wake up") \
+    X(ZSleepWokeHurt, "Te atacan mientras duermes!", "You are attacked in your sleep!") \
+    X(ZSleepRested, "Has descansado", "You feel rested") \
+    X(ZBedPlaced, "Cama colocada: CUADRADO junto a ella para dormir", "Bed placed: SQUARE next to it to sleep") \
+    X(ZBackpack, "Mochila: %d ranuras", "Backpack: %d slots") \
+    X(ZBackpackFull, "Ya llevas dos mochilas", "You already carry two backpacks") \
+    X(ZSiteFound, "%s", "%s") \
+    X(ZAllyDown, "%s ha caido...", "%s is down...") \
+    X(ZAllyTurned, "%s se ha levantado... y ya no es tu amigo", "%s got up... and is no longer your friend") \
+    X(ZAllyBuilt, "Tus aliados refuerzan la base", "Your allies reinforce the base") \
+    X(ZRestocked, "De noche alguien ha dejado cosas...", "Someone left things during the night...") \
+    X(ZSaved, "Partida guardada", "Game saved") \
+    X(ZSaveFailed, "No se pudo guardar", "Could not save") \
+    X(HintSleep, "dormir", "sleep") \
+    X(HintPlaceBed, "colocar cama", "place bed") \
+    X(HintWake, "despertar", "wake up") \
+    X(HintEat, "comer", "eat") \
+    X(HintAllyBag, "inventario", "inventory") \
+    X(HintTake, "quitar", "take") \
+    X(HintSearch, "registrar", "search") \
+    X(AllyTitle, "INVENTARIO DE %s", "%s'S INVENTORY") \
+    X(AllyYours, "TU INVENTARIO", "YOUR INVENTORY") \
+    X(AllyTheirs, "EL SUYO", "THEIRS") \
+    X(AllyNoRoom, "No cabe", "No room") \
+    X(AllyCantGive, "Eso no se lo puedes dar", "You can't give that") \
+    X(PauseSave, "GUARDAR PARTIDA", "SAVE GAME") \
+    X(PauseSaveExit, "GUARDAR Y SALIR", "SAVE AND QUIT") \
+    X(ModeZNew, "< Partida nueva >", "< New game >") \
+    X(ModeZContinue, "< Continuar: dia %d >", "< Continue: day %d >") \
+    X(ModeZNoSave, "Sin partida guardada", "No saved game") \
+    X(LoadingZContinue, "Polvorin en ruinas - continuando el dia %d", "Ruined Depot - continuing day %d") \
+    X(ResultZObjectives, "Objetivos cumplidos %d", "Objectives completed %d") \
+    X(PickupBackpack, "Mochila (+3 ranuras)", "Backpack (+3 slots)") \
+    X(ContainerFridge, "Nevera", "Fridge") \
+    X(ContainerPantry, "Despensa", "Pantry") \
+    X(ContainerBed, "Cama", "Bed") \
+    X(ZBaseStatus, "Gente %d/%d  Planos %d/%d", "People %d/%d  Plans %d/%d") \
+    X(TipZombieNeeds, "come y duerme: el hambre y el sueno matan.", "eat and sleep: hunger and fatigue kill.") \
+    X(ModeTeam, "EQUIPOS  < %s >", "TEAMS  < %s >") \
+    X(ModeTeamOff, "EQUIPOS  -  (solo battle royale)", "TEAMS  -  (battle royale only)") \
+    X(ModeTeamBots, "%d BOTS: %d equipos de %d", "%d BOTS: %d teams of %d") \
+    X(TeamSolo, "SOLO", "SOLO") \
+    X(TeamDuo, "DUO", "DUO") \
+    X(TeamSquad, "ESCUADRON", "SQUAD") \
+    X(ResultOfTeams, "de %d equipos", "of %d teams") \
+    X(TeamDown, "DERRIBADO", "DOWNED") \
+    X(TeamDownHelp, "Un companero puede reanimarte: %d s", "A teammate can revive you: %d s") \
+    X(TeamBeingRevived, "%s te esta reanimando", "%s is reviving you") \
+    X(TeamReviving, "Reanimando a %s", "Reviving %s") \
+    X(TeamHoldRevive, "mantener: reanimar a %s", "hold: revive %s") \
+    X(TeamMateDown, "%s esta derribado", "%s is down") \
+    X(TeamYouDowned, "Has derribado a %s", "You downed %s") \
+    X(TeamMateRevived, "%s vuelve a estar en pie", "%s is back on their feet") \
+    X(TeamYouRevived, "%s te ha reanimado", "%s revived you") \
+    X(HintAssignBed, "asignar cama", "assign bed") \
+    X(HintAssign, "asignar", "assign") \
+    X(BedTitle, "ASIGNAR CAMA", "ASSIGN BED") \
+    X(BedNobody, "Nadie (cama libre)", "Nobody (free bed)") \
+    X(BedOwnerNow, "%s: duerme aqui", "%s: sleeps here") \
+    X(BedOwner, "Cama de %s", "%s's bed") \
+    X(BedAssigned, "%s dormira en esta cama", "%s will sleep in this bed") \
+    X(BedFreed, "Cama libre", "Bed is free") \
+    X(ZSleepOccupied, "Esa cama esta asignada a un aliado", "That bed is assigned to an ally")

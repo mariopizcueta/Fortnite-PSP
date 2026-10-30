@@ -42,6 +42,7 @@ void Match::startBus() {
         b.glideHeight = m_rng.range(m_config.glideAutoHeight, m_config.glideAutoHeight + 14.0f);
         chooseLanding(b);
     }
+    teamLanding();
 }
 
 void Match::chooseLanding(Bot& b) {

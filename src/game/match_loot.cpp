@@ -25,28 +25,6 @@ constexpr float kAmmoAutoReach = 1.4f;   // la municion se recoge sola al pasar 
 
 constexpr float kLlamaReach = 2.8f;      // la llama es mas grande que un cofre
 
-// Puntuacion de un arma para los bots (mejor rareza y tipos mas versatiles primero).
-float weaponScore(ItemType type, Rarity rarity) {
-    float base = 0.0f;
-    switch (type) {
-        case ItemType::AssaultRifle: base = 30.0f; break;
-        case ItemType::BurstRifle: base = 28.0f; break;
-        case ItemType::ScopedRifle: base = 27.0f; break;
-        case ItemType::Shotgun: base = 27.0f; break;
-        case ItemType::TacticalShotgun: base = 26.0f; break;
-        case ItemType::Smg: base = 25.0f; break;
-        case ItemType::SubmachineGun: base = 24.0f; break;
-        case ItemType::RocketLauncher: base = 22.0f; break;
-        case ItemType::GrenadeLauncher: base = 20.0f; break;
-        case ItemType::Sniper: base = 20.0f; break;
-        case ItemType::SemiAutoSniper: base = 21.0f; break;
-        case ItemType::Revolver: base = 19.0f; break;
-        case ItemType::Pistol: base = 16.0f; break;
-        default: return 0.0f;
-    }
-    return base + 6.0f * static_cast<float>(rarity);
-}
-
 // Armas del botin con su peso (las mas comunes, mas a menudo).
 struct WeaponWeight {
     ItemType type;
@@ -269,6 +247,54 @@ void Match::spawnZombieSites() {
     dropAround(wake, bandages, 1, 3, 0.5f);
     dropAround(wake, ammoPickup(AmmoType::Light), 2, 3, 0.5f);
     addContainer(ContainerKind::Chest, {62.0f, 0.0f, 38.4f}, math3d::kPi);
+    // v0.15: neveras, despensas, cofres y municion de los lugares de interes, y algo de botin
+    // por el suelo de cada uno (mas en los grandes).
+    for (int i = 0; i < kSiteContainerCount; ++i) {
+        const ContainerSpot& spot = kSiteContainers[i];
+        const ContainerKind kind = spot.kind == SpotKind::Fridge   ? ContainerKind::Fridge
+                                   : spot.kind == SpotKind::Pantry ? ContainerKind::Pantry
+                                   : spot.kind == SpotKind::Chest  ? ContainerKind::Chest
+                                                                   : ContainerKind::AmmoBox;
+        Vec3 at{spot.x, 0.0f, spot.z};
+        at.y = m_world->supportHeight(at.x, at.z, 0.2f, 0.5f);
+        const int c = addContainer(kind, at, spot.yaw);
+        m_containers[c].site = siteAt(spot.x, spot.z, 2.0f);
+    }
+    for (int i = 0; i < kSiteCount; ++i) {
+        const Site& site = kSites[i];
+        const bool big = site.kind == SiteKind::BigHouse || site.kind == SiteKind::Storehouse;
+        const int n = big ? 3 : 1;
+        for (int k = 0; k < n; ++k) {
+            Vec3 p;
+            if (!m_nav->randomPointNear({site.x, 0.0f, site.z}, site.radius * 0.6f, m_rng, &p)) continue;
+            const float r = m_rng.uniform();
+            if (r < 0.35f) {
+                Pickup w = randomWeaponPickup(false);
+                dropAround(p, w, 0, 2);
+                dropAround(p, ammoPickup(static_cast<AmmoType>(weaponConfig(w.item, w.rarity).ammoType)), 1, 2);
+            } else if (r < 0.7f) {
+                dropAround(p, randomConsumablePickup(), 0, 1);
+            } else {
+                Pickup food;
+                food.active = true;
+                food.kind = PickupKind::Item;
+                food.item = ItemType::CannedFood;
+                food.rarity = itemDef(food.item).rarity;
+                food.count = 1;
+                dropAround(p, food, 0, 1);
+            }
+        }
+    }
+}
+
+static Pickup foodPickup(ItemType type, int count) {
+    Pickup p;
+    p.active = true;
+    p.kind = PickupKind::Item;
+    p.item = type;
+    p.rarity = itemDef(type).rarity;
+    p.count = count;
+    return p;
 }
 
 void Match::spawnLlama() {
@@ -387,6 +413,8 @@ void Match::spawnContainerLoot(int index, int opener) {
             dropAround(front, w, 0, total);
             dropAround(front, ammoPickup(ammo), 1, total);
             if (consumable) dropAround(front, randomConsumablePickup(), 2, total);
+            // Modo zombi (v0.15): a veces, una lata de comida.
+            if (zombieMode() && m_rng.chance(0.3f)) dropAround(front + forwardFromYaw(c.yaw) * 0.8f, foodPickup(ItemType::CannedFood, 1), 0, 1);
             // A veces, una trampa de pinchos (al lado, fuera del corro).
             if (m_rng.chance(0.2f) && m_config.mode == GameMode::BattleRoyale) {
                 dropAround(front + forwardFromYaw(c.yaw) * 0.8f, trapPickup(1), 0, 1);
@@ -396,11 +424,43 @@ void Match::spawnContainerLoot(int index, int opener) {
             break;
         }
         case ContainerKind::AmmoBox:
+            if (zombieMode()) {
+                // Modo zombi (v0.15): de todo tipo de municion (medio paquete de cada).
+                const int kinds = static_cast<int>(AmmoType::Count);
+                for (int a = 0; a < kinds; ++a) {
+                    Pickup p = ammoPickup(static_cast<AmmoType>(a));
+                    p.count = p.count / 2 + 1;
+                    dropAround(front, p, a, kinds, 0.7f);
+                }
+                break;
+            }
             dropAround(front, ammoPickup(randomAmmoType()), 0, 2);
             dropAround(front, ammoPickup(randomAmmoType()), 1, 2);
             break;
+        case ContainerKind::Fridge: {
+            // Nevera (v0.15): sobre todo comida; a veces vacia del todo (y huele a muerto).
+            const int cans = m_rng.chance(0.15f) ? 0 : 1 + m_rng.index(3);
+            int slot = 0;
+            const int total = cans > 0 ? 1 + (m_rng.chance(0.25f) ? 1 : 0) : 0;
+            if (cans > 0) dropAround(front, foodPickup(ItemType::CannedFood, cans), slot++, total + 1, 0.6f);
+            if (total > 1) dropAround(front, foodPickup(ItemType::Ration, 1), slot++, total + 1, 0.6f);
+            break;
+        }
+        case ContainerKind::Pantry: {
+            // Despensa (caja de viveres): comida, a veces raciones, vendas o municion.
+            dropAround(front, foodPickup(ItemType::CannedFood, 1 + m_rng.index(2)), 0, 3, 0.6f);
+            if (m_rng.chance(0.55f)) dropAround(front, foodPickup(ItemType::Ration, 1), 1, 3, 0.6f);
+            if (m_rng.chance(0.45f)) {
+                Pickup b = foodPickup(ItemType::Bandage, 3);
+                dropAround(front, b, 2, 3, 0.6f);
+            } else {
+                dropAround(front, ammoPickup(randomAmmoType()), 2, 3, 0.6f);
+            }
+            break;
+        }
         case ContainerKind::Workbench:
-            break;  // no se abre: es el menu de crafteo
+        case ContainerKind::Bed:
+            break;  // no se abren: el menu de crafteo y dormir
         case ContainerKind::Llama: {
             // Como en Fortnite: muchos materiales, municion de todo tipo, curas y granadas.
             // En corro alrededor de la llama (el suelo se ajusta a cada objeto).
@@ -471,7 +531,7 @@ void Match::spawnContainerLoot(int index, int opener) {
 
 Interactable Match::interactableFor(int id) const {
     Interactable result;
-    if (!alive(id) || m_air[id] != AirState::Ground) return result;
+    if (!alive(id) || m_air[id] != AirState::Ground || m_downed[id]) return result;
     const Vec3 pos = body(id).state().position;
     const Vec3 forward = id == 0 ? forwardFromYaw(m_input.cameraYaw) : forwardFromYaw(body(id).state().yaw);
     float best = 1e9f;
@@ -485,8 +545,13 @@ Interactable Match::interactableFor(int id) const {
     for (size_t i = 0; i < m_containers.size(); ++i) {
         const Container& c = m_containers[i];
         if (c.opened || !c.landed) continue;
-        if (c.kind == ContainerKind::Workbench && id != 0) continue;
-        const float reach = c.kind == ContainerKind::Llama ? kLlamaReach : (c.kind == ContainerKind::Workbench ? 2.7f : kContainerReach);
+        if ((c.kind == ContainerKind::Workbench || c.kind == ContainerKind::Bed || c.kind == ContainerKind::Fridge ||
+             c.kind == ContainerKind::Pantry) && id != 0) {
+            continue;
+        }
+        const float reach = c.kind == ContainerKind::Llama                                    ? kLlamaReach
+                            : (c.kind == ContainerKind::Workbench || c.kind == ContainerKind::Bed) ? 2.7f
+                                                                                              : kContainerReach;
         if (distXZ(c.position, pos) > reach || fabsf(c.position.y - pos.y) > 1.6f) continue;
         const float s = score(c.position);
         if (s < best) {
@@ -497,7 +562,8 @@ Interactable Match::interactableFor(int id) const {
     }
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
-        if (!p.active || (p.kind != PickupKind::Item && !(p.kind == PickupKind::Blueprint && id == 0))) continue;
+        const bool special = (p.kind == PickupKind::Blueprint || p.kind == PickupKind::Backpack) && id == 0;
+        if (!p.active || (p.kind != PickupKind::Item && !special)) continue;
         if (distXZ(p.position, pos) > kPickupReach || fabsf(p.position.y - pos.y) > 1.6f) continue;
         const float s = score(p.position);
         if (s < best) {
@@ -507,13 +573,15 @@ Interactable Match::interactableFor(int id) const {
         }
     }
     if (id != 0 || !zombieMode()) return result;
-    // Modo zombi: supervivientes que esperan ayuda y piezas fantasma de los planos.
+    // Modo zombi: supervivientes que esperan ayuda (o aliados: su inventario, v0.15) y piezas
+    // fantasma de los planos.
     for (int i = 0; i < botCount(); ++i) {
         const Bot& b = m_bots[i];
-        if (b.kind != BotKind::Survivor || b.rescued || b.state == BotState::Eliminated) continue;
+        if (b.kind != BotKind::Survivor || b.state == BotState::Eliminated) continue;
         const Vec3 sp = b.body.state().position;
-        if (distXZ(sp, pos) > 2.6f || fabsf(sp.y - pos.y) > 1.6f) continue;
-        const float s = score(sp) - 0.3f;
+        if (distXZ(sp, pos) > (b.rescued ? 2.2f : 2.6f) || fabsf(sp.y - pos.y) > 1.6f) continue;
+        // Los aliados van detras del jugador: el botin de delante tiene preferencia.
+        const float s = score(sp) + (b.rescued ? 0.8f : -0.3f);
         if (s < best) {
             best = s;
             result.kind = Interactable::Kind::Survivor;
@@ -540,7 +608,15 @@ Interactable Match::interactableFor(int id) const {
 
 bool Match::interact(int id, const Interactable& target) {
     if (target.kind == Interactable::Kind::Pickup) return pickUp(id, target.index);
-    if (target.kind == Interactable::Kind::Survivor) return id == 0 && giveToSurvivor(target.index);
+    if (target.kind == Interactable::Kind::Survivor) {
+        if (id != 0 || target.index < 0 || target.index >= botCount()) return false;
+        if (m_bots[target.index].rescued) {
+            // Aliado (v0.15): la aplicacion abre la gestion de su inventario.
+            pushEvent(GameEventType::SurvivorMenu, target.index + 1, -1, m_bots[target.index].body.state().position);
+            return true;
+        }
+        return giveToSurvivor(target.index);
+    }
     if (target.kind == Interactable::Kind::BlueprintPiece) {
         return id == 0 && buildBlueprintPiece(target.index / kMaxBlueprintPieces, target.index % kMaxBlueprintPieces);
     }
@@ -554,6 +630,8 @@ bool Match::interact(int id, const Interactable& target) {
         pushEvent(GameEventType::WorkbenchOpened, 0, target.index, c.position);
         return true;
     }
+    if (c.kind == ContainerKind::Bed) return id == 0 && trySleep(target.index);  // v0.15: dormir
+    if (c.kind == ContainerKind::Fridge || c.kind == ContainerKind::Pantry) objectiveEvent(ObjectiveType::OpenFridges);
     c.opened = true;
     c.openedAt = m_time;
     c.claimedBy = -1;
@@ -574,6 +652,14 @@ bool Match::pickUp(int id, int index) {
             p.count -= b.materials.add(p.resource, p.count);
             if (p.count <= 0) p.active = false;
             p.claimedBy = -1;
+            return true;
+        }
+        if (p.kind == PickupKind::Backpack) {
+            // Los aliados del modo zombi tambien las aprovechan (v0.16).
+            p.claimedBy = -1;
+            if (b.kind != BotKind::Survivor || !b.bag.addBackpack()) return false;
+            p.active = false;
+            pushEvent(GameEventType::PickedUp, id, -1, p.position);
             return true;
         }
         if (!botWants(b, p)) {
@@ -599,6 +685,14 @@ bool Match::pickUp(int id, int index) {
         // Plano: aparecen sus piezas fantasma en la base.
         p.active = false;
         giveBlueprint(p.count);
+        return true;
+    }
+    if (p.kind == PickupKind::Backpack) {
+        // Mochila (v0.15): tres ranuras mas (si ya se llevan dos, no cabe otra).
+        if (!m_inventory.addBackpack()) return false;
+        p.active = false;
+        pushEvent(GameEventType::BackpackFound, 0, -1, p.position);
+        m_events[(m_eventCount - 1) % kMaxEvents].amount = m_inventory.slotCount();
         return true;
     }
     if (p.kind == PickupKind::Ammo || p.kind == PickupKind::Materials) {
@@ -628,7 +722,7 @@ bool Match::pickUp(int id, int index) {
     if (p.count <= 0) p.active = false;
     // Con las manos libres (pico o ranura vacia) se coge lo recogido.
     if (handsFree) {
-        for (int i = 0; i < Inventory::kSlots; ++i) {
+        for (int i = 0; i < m_inventory.slotCount(); ++i) {
             if (m_inventory.slot(i).type == p.item) m_inventory.select(i);
         }
     }
@@ -642,6 +736,7 @@ int Match::pickupRoom(int index) const {
     if (!p.active) return 0;
     if (p.kind == PickupKind::Ammo) return p.count;
     if (p.kind == PickupKind::Blueprint || p.kind == PickupKind::Materials) return 1;
+    if (p.kind == PickupKind::Backpack) return m_inventory.slotCount() + Inventory::kBackpackSlots <= Inventory::kMaxSlots ? 1 : 0;
     if (itemDef(p.item).kind == ItemKind::Trap) return m_config.maxTrapsCarried - m_trapStock;
     return m_inventory.room(p.item);
 }
@@ -655,7 +750,7 @@ bool Match::pickupInReach(int index) const {
 }
 
 bool Match::swapPickup(int index, int slot) {
-    if (index < 0 || index >= static_cast<int>(m_pickups.size()) || slot < 0 || slot >= Inventory::kSlots) return false;
+    if (index < 0 || index >= static_cast<int>(m_pickups.size()) || slot < 0 || slot >= m_inventory.slotCount()) return false;
     if (!pickupInReach(index)) return false;
     const Pickup taken = m_pickups[index];
     const Vec3 pos = body(0).state().position;
@@ -690,7 +785,7 @@ void Match::dropSlot(const InventorySlot& slot, const Vec3& where) {
 
 void Match::autoPickupAmmo(int id) {
     // La municion y los materiales se recogen solos al pasar por encima.
-    if (id != 0 || !alive(0) || m_air[0] != AirState::Ground) return;
+    if (id != 0 || !alive(0) || m_air[0] != AirState::Ground || m_downed[0]) return;
     const Vec3 pos = body(0).state().position;
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
@@ -738,7 +833,7 @@ void Match::dropBotWeapon(int index) {
     Bot& b = m_bots[index];
     const Vec3 pos = b.body.state().position;
     int total = 0;
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const ItemType t = b.bag.slot(i).type;
         total += t == ItemType::None ? 0 : (isWeapon(t) ? 2 : 1);
     }
@@ -766,7 +861,7 @@ void Match::dropBotWeapon(int index) {
     const float turn = m_rng.range(0.0f, 2.0f * math3d::kPi);  // cada bot, su corro girado
     for (int k = 0; k < matCount; ++k) dropAround(pos, mats[k], total - matCount + k, total, 0.9f, turn);
     int slot = 0;
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const InventorySlot s = b.bag.take(i);
         if (s.type == ItemType::None) continue;
         Pickup w;
@@ -789,15 +884,21 @@ bool Match::botWants(const Bot& b, const Pickup& p) const {
     if (p.active && p.kind == PickupKind::Materials) {
         int total = 0;
         for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) total += b.materials.amount[r];
-        return total < m_config.botHarvestGoal;
+        return total < (b.kind == BotKind::Survivor ? m_config.zombie.allyMaterialGoal : m_config.botHarvestGoal);
+    }
+    if (p.active && p.kind == PickupKind::Backpack) {
+        return b.kind == BotKind::Survivor && b.bag.slotCount() + Inventory::kBackpackSlots <= Inventory::kMaxSlots;
     }
     if (!p.active || p.kind != PickupKind::Item) return false;
-    // Los bots no lanzan granadas ni ponen trampas.
-    if (itemDef(p.item).kind == ItemKind::Throwable || itemDef(p.item).kind == ItemKind::Trap) return false;
+    // Los bots no lanzan granadas, no ponen trampas ni comen (la comida es para el jugador).
+    if (itemDef(p.item).kind == ItemKind::Throwable || itemDef(p.item).kind == ItemKind::Trap || isFood(p.item) ||
+        itemDef(p.item).kind == ItemKind::Furniture) {
+        return false;
+    }
     if (!isWeapon(p.item)) {
         // Consumibles: si caben (en un monton suyo o en una ranura libre).
         if (!b.bag.full()) return true;
-        for (int i = 0; i < Inventory::kSlots; ++i) {
+        for (int i = 0; i < b.bag.slotCount(); ++i) {
             const InventorySlot& s = b.bag.slot(i);
             if (s.type == p.item && s.count < itemDef(p.item).maxStack) return true;
         }
@@ -815,7 +916,7 @@ int Match::botReplacedSlot(const Bot& b, const Pickup& p) const {
     // esta lleno, la peor (un consumible cuenta menos que cualquier arma). -1: hay hueco.
     int worst = -1;
     float worstScore = 1e9f;
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const InventorySlot& s = b.bag.slot(i);
         if (isWeapon(s.type) && s.type == p.item) return i;
         const float score = isWeapon(s.type) ? weaponScore(s.type, s.rarity) : 5.0f;
@@ -832,7 +933,7 @@ void Match::botEquip(Bot& b, float distance) {
     // si no, la mejor (rareza y tipo).
     int best = -1;
     float bestScore = -1e9f;
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const InventorySlot& s = b.bag.slot(i);
         if (!isWeapon(s.type)) continue;
         float score = weaponScore(s.type, s.rarity);

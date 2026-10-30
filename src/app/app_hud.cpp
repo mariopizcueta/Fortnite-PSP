@@ -41,6 +41,18 @@ constexpr float kWeaponRowY = 230.0f;
 constexpr float kWeaponSlotX = 254.0f, kWeaponSlotStep = 37.0f, kWeaponSlotSize = 34.0f;
 constexpr int kWeaponSlots = 6;
 
+// Fila de objetos (el pico y las ranuras). Con mochilas (modo zombi, v0.15) hay hasta 11
+// ranuras: mas pequenas y empezando mas a la izquierda (sin tapar la vida).
+struct SlotRow {
+    float x, step, size, scale;
+    float slotX(int i) const { return x + i * step; }  // i = 0: el pico
+};
+SlotRow slotRow(int slots) {
+    if (slots <= game::Inventory::kSlots) return {kWeaponSlotX, kWeaponSlotStep, kWeaponSlotSize, 1.0f};
+    const float size = slots <= 8 ? 28.0f : 22.0f, step = size + 2.0f;
+    return {478.0f - step * static_cast<float>(slots + 1), step, size, (size - 2.0f) / 32.0f};
+}
+
 // Barras de escudo y vida.
 constexpr float kBarX = 32.0f, kBarW = 144.0f;
 constexpr float kShieldY = 239.0f, kHealthY = 253.0f;
@@ -204,6 +216,11 @@ const assets::ui::Rect* slotArt(game::ItemType type, game::Rarity rarity) {
         case game::ItemType::Medkit: return &a::kSlotBotiquin;
         case game::ItemType::SmallShield: return &a::kSlotMinipocion;
         case game::ItemType::ShieldPotion: return &a::kSlotPocionEscudo;
+        // v0.15 (modo zombi): iconos dibujados en tools/prepare_assets.py.
+        case game::ItemType::CannedFood: return &a::kSlotLata;
+        case game::ItemType::Ration: return &a::kSlotRacion;
+        case game::ItemType::Bed: return &a::kSlotCama;
+        case game::ItemType::SleepingBag: return &a::kSlotSaco;
         case game::ItemType::None:
         case game::ItemType::Count: break;
     }
@@ -291,6 +308,13 @@ void App::renderFullMap() const {
         drawZombieMarkers(kFullMapX + world::kMapHalfSize * scale, kFullMapY + world::kMapHalfSize * scale, scale, kFullMapX,
                           kFullMapY, kFullMapX + kFullMapSize, kFullMapY + kFullMapSize, true);
     }
+    // Companeros del equipo (v0.16).
+    if (m_match.teamMode()) {
+        for (int id = 1; id < m_matchConfig.teamSize && id < m_match.entityCount(); ++id) {
+            const Vec3& p = m_match.body(id).state().position;
+            if (m_match.alive(id) && toMap(p.x, p.z, &sx, &sy)) gfx::fillRect(sx - 2, sy - 2, 5, 5, m_match.downed(id) ? kErrorRed : kMateColor);
+        }
+    }
     const game::CharacterState followed = renderState(spectateTarget());
     if (toMap(followed.position.x, followed.position.z, &sx, &sy)) {
         const float fx = -sinf(followed.yaw), fy = -cosf(followed.yaw);
@@ -337,7 +361,7 @@ void App::renderGameHud() const {
     if (m_match.alive(0) && m_match.airState(0) != game::AirState::Ground) {
         renderAirHud();
     } else {
-        renderCrosshair();
+        if (!m_match.downed(0)) renderCrosshair();
         int n = 0;
         if (const ui::Hint* hint = m_swapOpen ? nullptr : interactionHint(&n)) {
             gfx::fillRect(0, kPromptY - 4, gfx::kScreenWidth, 16, rgba(0, 0, 0, 90));
@@ -345,13 +369,146 @@ void App::renderGameHud() const {
         }
     }
     if (m_match.cheats().wallhack) renderWallhack();
+    renderMateMarkers();
     renderMinimap();
     renderVitals();
     renderSlots();
     if (m_swapOpen) renderSwapChooser();
     renderDamageNumbers();
+    renderMateBars();
     if (m_inventoryOpen) renderInventoryScreen();
     if (m_match.zombieMode()) renderZombieHud();
+    else if (m_match.teamMode()) renderTeamHud();
+}
+
+// --- Companeros y aliados (v0.16) ---------------------------------------------------------------
+// Arriba a la izquierda, en pequeno, una fila por companero (equipos) o aliado (modo zombi):
+// nombre, escudo y vida. En rojo si esta derribado, y "Zz" si duerme en su cama.
+constexpr float kMateBarsY = 25.0f, kMateRowH = 13.0f;
+constexpr float kMateBarX = 54.0f, kMateBarW = 58.0f;
+
+int App::hudMates(int* ids) const {
+    int n = 0;
+    if (m_match.zombieMode()) {
+        if (m_wakeTime < 3.4f) return 0;
+        for (int i = game::kZombieSlots; i < m_match.botCount() && n < game::kSurvivorCount; ++i) {
+            const game::Bot& b = m_match.bot(i);
+            if (b.kind == game::BotKind::Survivor && b.rescued && b.state != game::BotState::Eliminated) ids[n++] = i + 1;
+        }
+    } else if (m_match.teamMode()) {
+        for (int id = 1; id < m_matchConfig.teamSize && id < m_match.entityCount(); ++id) ids[n++] = id;
+    }
+    return n;
+}
+
+void App::renderMateBars() const {
+    int ids[game::kSurvivorCount + 4];
+    const int n = hudMates(ids);
+    if (n == 0 || m_mapOpen) return;
+    gfx::fillRect(3, kMateBarsY - 2, kMateBarX + kMateBarW, n * kMateRowH + 2, rgba(0, 0, 0, 90));
+    for (int i = 0; i < n; ++i) {
+        const int id = ids[i];
+        const game::CharacterState& s = m_match.body(id).state();
+        const float y = kMateBarsY + i * kMateRowH;
+        gfx::fillRect(kMateBarX, y + 1, kMateBarW, 3, rgba(255, 255, 255, 35));
+        gfx::fillRect(kMateBarX, y + 5, kMateBarW, 4, rgba(255, 255, 255, 35));
+        if (!m_match.alive(id)) continue;
+        const float shield = s.maxShield > 0.0f ? math3d::clampf(s.shield / s.maxShield, 0.0f, 1.0f) : 0.0f;
+        const float health = s.maxHealth > 0.0f ? math3d::clampf(s.health / s.maxHealth, 0.0f, 1.0f) : 0.0f;
+        gfx::fillRect(kMateBarX, y + 1, kMateBarW * shield, 3, kShieldBlue);
+        gfx::fillRect(kMateBarX, y + 5, kMateBarW * health, 4, m_match.downed(id) ? kErrorRed : kHealthGreen);
+        if (m_match.downed(id) && m_match.reviveProgress(id) > 0.0f) {
+            gfx::fillRect(kMateBarX, y + 1, kMateBarW * m_match.reviveProgress(id), 3, kYellow);
+        }
+    }
+}
+
+void App::overlayMateBars() const {
+    int ids[game::kSurvivorCount + 4];
+    const int n = hudMates(ids);
+    if (n == 0 || m_mapOpen) return;
+    for (int i = 0; i < n; ++i) {
+        const int id = ids[i];
+        const int y = static_cast<int>(kMateBarsY + i * kMateRowH);
+        const bool blink = m_match.downed(id) && fmodf(m_blinkTime, 0.8f) < 0.4f;
+        const u32 color = !m_match.alive(id) ? kDimGrey : (blink ? kErrorRed : kWhite);
+        gfx::text::printShadow(6, y + 1, color, "%.6s", m_match.name(id));
+        if (m_match.isSurvivor(id) && m_match.bot(id - 1).sleeping) {
+            gfx::text::printShadow(static_cast<int>(kMateBarX + kMateBarW) + 6, y + 1, rgba(180, 200, 255), "Zz");
+        }
+    }
+}
+
+void App::renderMateMarkers() const {
+    // Rombo sobre la cabeza: se ve de lejos quien es de los tuyos (y quien esta derribado).
+    int ids[game::kSurvivorCount + 4];
+    const int n = hudMates(ids);
+    for (int i = 0; i < n; ++i) {
+        const int id = ids[i];
+        if (!m_match.alive(id) || m_match.airState(id) == game::AirState::Bus) continue;
+        if (m_match.isSurvivor(id) && m_match.bot(id - 1).sleeping) continue;
+        float x, y;
+        const Vec3 head = renderState(id).position + Vec3{0.0f, m_match.downed(id) ? 1.2f : 2.25f, 0.0f};
+        if (!projectToScreen(m_viewProjection, head, &x, &y)) continue;
+        const u32 c = m_match.downed(id) ? kErrorRed : kMateColor;
+        gfx::fillRect(x - 1, y - 3, 3, 7, c);
+        gfx::fillRect(x - 3, y - 1, 7, 3, c);
+    }
+}
+
+void App::overlayMateMarkers() const {
+    // (Derribado o reanimando, el centro de la pantalla es para eso.)
+    if (m_match.downed(0) || m_match.playerReviving() >= 0) return;
+    int ids[game::kSurvivorCount + 4];
+    const int n = hudMates(ids);
+    for (int i = 0; i < n; ++i) {
+        const int id = ids[i];
+        if (!m_match.alive(id) || m_match.airState(id) == game::AirState::Bus) continue;
+        if (m_match.isSurvivor(id) && m_match.bot(id - 1).sleeping) continue;
+        const Vec3 p = renderState(id).position;
+        if (math3d::length(p - cameraEye()) > 30.0f) continue;
+        float x, y;
+        if (!projectToScreen(m_viewProjection, p + Vec3{0.0f, m_match.downed(id) ? 1.2f : 2.25f, 0.0f}, &x, &y)) continue;
+        if (x < 30.0f || x > 450.0f || y < 12.0f || y > 262.0f) continue;
+        char name[8];
+        snprintf(name, sizeof(name), "%.6s", m_match.name(id));
+        printCenteredAt(static_cast<int>(x), static_cast<int>(y) - 13, m_match.downed(id) ? kErrorRed : kMateColor, name);
+    }
+}
+
+void App::renderTeamHud() const {
+    renderBigMessage();
+    // Barra de reanimar: la del jugador derribado (se llena mientras le atienden; si no, lo
+    // que le queda) o la del companero al que se esta reanimando.
+    const int mate = m_match.playerReviving();
+    if (m_match.downed(0) || mate >= 0) {
+        const float x = 170.0f, y = 138.0f, w = 140.0f;
+        const float value = mate >= 0 ? m_match.reviveProgress(mate)
+                            : m_match.reviver(0) >= 0 ? m_match.reviveProgress(0)
+                                                      : m_match.body(0).state().health / fmaxf(m_match.body(0).state().maxHealth, 1.0f);
+        const bool reviving = mate >= 0 || m_match.reviver(0) >= 0;
+        gfx::fillRect(x - 2, y - 2, w + 4, 9, rgba(0, 0, 0, 170));
+        gfx::fillRect(x, y, w * math3d::clampf(value, 0.0f, 1.0f), 5, reviving ? kYellow : kErrorRed);
+    }
+}
+
+void App::overlayTeamHud() const {
+    overlayBigMessage();
+    char line[64];
+    const int mate = m_match.playerReviving();
+    if (m_match.downed(0)) {
+        printCenteredShadow(112, kErrorRed, tr(T::TeamDown));
+        if (m_match.reviver(0) >= 0) {
+            snprintf(line, sizeof(line), tr(T::TeamBeingRevived), m_match.name(m_match.reviver(0)));
+            printCenteredShadow(124, kYellow, line);
+        } else {
+            snprintf(line, sizeof(line), tr(T::TeamDownHelp), static_cast<int>(m_match.bleedLeft(0)) + 1);
+            printCenteredShadow(124, kWhite, line);
+        }
+    } else if (mate >= 0) {
+        snprintf(line, sizeof(line), tr(T::TeamReviving), m_match.name(mate));
+        printCenteredShadow(124, kYellow, line);
+    }
 }
 
 // --- Inventario (L + R a la vez, v0.13) ---------------------------------------------------------
@@ -363,10 +520,17 @@ constexpr float kInvSlot = 44.0f, kInvStep = 54.0f, kInvSlotY = 64.0f;
 const ui::Hint kInventoryHints[] = {{B::Left, T::None},          {B::Right, T::HintSelect}, {B::Cross, T::HintMove},
                                     {B::Square, T::HintDrop},    {B::Triangle, T::HintHand}, {B::Circle, T::HintClose}};
 
-float inventorySlotX(int i) { return 240.0f - (game::Inventory::kSlots * kInvStep - (kInvStep - kInvSlot)) * 0.5f + i * kInvStep; }
+// Con mochilas caben hasta 11 ranuras: se estrechan para que quepan en el panel.
+float inventoryStep(int slots) { return fminf(kInvStep, (kInvW - 24.0f) / static_cast<float>(slots)); }
+float inventorySlotSize(int slots) { return inventoryStep(slots) >= kInvStep ? kInvSlot : inventoryStep(slots) - 5.0f; }
+float inventorySlotX(int i, int slots) {
+    const float step = inventoryStep(slots), size = inventorySlotSize(slots);
+    return 240.0f - (slots * step - (step - size)) * 0.5f + i * step;
+}
 
 void App::updateInventoryScreen(const input::Input& in) {
-    const int slots = game::Inventory::kSlots;
+    const int slots = m_match.inventory().slotCount();
+    if (m_invCursor >= slots) m_invCursor = 0;
     const int step = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
     if (step != 0) {
         m_invCursor = (m_invCursor + slots + step) % slots;
@@ -406,21 +570,23 @@ void App::renderInventoryScreen() const {
     ui::frame(kInvX, kInvY, kInvW, kInvH, 2, rgba(90, 160, 255));
     gfx::fillRect(kInvX, kInvY, kInvW, 18, kFortniteBlue);
     const game::Inventory& inv = m_match.inventory();
-    for (int i = 0; i < game::Inventory::kSlots; ++i) {
+    const int slots = inv.slotCount();
+    const float size = inventorySlotSize(slots), art0 = (size - 32.0f * fminf(1.0f, (size - 4.0f) / 32.0f)) * 0.5f;
+    for (int i = 0; i < slots; ++i) {
         const game::InventorySlot& slot = inv.slot(i);
-        const float x = inventorySlotX(i);
+        const float x = inventorySlotX(i, slots);
         const float y = kInvSlotY - (i == m_invHeld ? 6.0f : 0.0f);
         const atlas::Rect* art = slotArt(slot.type, slot.rarity);
-        slotBox(x, y, kInvSlot, slot.type == game::ItemType::None ? rgba(0, 0, 0, 90) : rarityColor(slot.rarity),
+        slotBox(x, y, size, slot.type == game::ItemType::None ? rgba(0, 0, 0, 90) : rarityColor(slot.rarity),
                 rgba(255, 255, 255, 150));
-        if (art && m_atlas.ready()) m_atlas.draw(*art, x + 6, y + 6);
+        if (art && m_atlas.ready()) m_atlas.draw(*art, x + art0, y + art0, fminf(1.0f, (size - 4.0f) / 32.0f));
         // En la mano: una marca debajo.
-        if (!inv.pickaxe() && inv.selected() == i) gfx::fillRect(x + kInvSlot * 0.5f - 6, kInvSlotY + kInvSlot + 3, 12, 3, kWhite);
+        if (!inv.pickaxe() && inv.selected() == i) gfx::fillRect(x + size * 0.5f - 6, kInvSlotY + size + 3, 12, 3, kWhite);
         if (i == m_invCursor) {
             const u32 alpha = static_cast<u32>(200.0f + 55.0f * sinf(m_blinkTime * 8.0f));
-            ui::frame(x - 3, y - 3, kInvSlot + 6, kInvSlot + 6, 2, rgba(250, 216, 40, alpha));
+            ui::frame(x - 3, y - 3, size + 6, size + 6, 2, rgba(250, 216, 40, alpha));
         }
-        if (i == m_invHeld) ui::frame(x - 1, y - 1, kInvSlot + 2, kInvSlot + 2, 1, kWhite);
+        if (i == m_invHeld) ui::frame(x - 1, y - 1, size + 2, size + 2, 1, kWhite);
     }
     // Materiales con sus iconos.
     if (m_atlas.ready()) {
@@ -437,7 +603,7 @@ void App::overlayInventoryScreen() const {
     const game::Inventory& inv = m_match.inventory();
     const game::InventorySlot& slot = inv.slot(m_invCursor);
     char line[64];
-    const int infoY = static_cast<int>(kInvSlotY + kInvSlot) + 10;
+    const int infoY = static_cast<int>(kInvSlotY + inventorySlotSize(inv.slotCount())) + 10;
     if (slot.type == game::ItemType::None) {
         printCenteredAt(240, infoY, kDimGrey, tr(T::InventoryEmpty));
     } else {
@@ -471,6 +637,110 @@ void App::overlayInventoryScreen() const {
                    kInventoryHints, 6);
 }
 
+// --- Inventario de un aliado (CUADRADO junto a el, v0.15) ----------------------------------------
+// Arriba las ranuras del jugador, abajo las del aliado: izquierda / derecha eligen, arriba /
+// abajo cambian de fila, X se lo da (fila de arriba) o se lo quita (fila de abajo), CIRCULO
+// cierra. La partida sigue (cuidado con los zombis).
+constexpr float kAllyX = 30.0f, kAllyY = 34.0f, kAllyW = 420.0f, kAllyH = 196.0f;
+constexpr float kAllySlot = 30.0f, kAllyStep = 34.0f;
+constexpr float kAllyRowY[2] = {kAllyY + 40.0f, kAllyY + 104.0f};
+const ui::Hint kAllyHints[] = {{B::Left, T::None},    {B::Right, T::HintSelect}, {B::Up, T::None},
+                               {B::Down, T::HintChange}, {B::Cross, T::HintGive},  {B::Circle, T::HintClose}};
+
+float allySlotX(int i, int slots) { return 240.0f - (slots * kAllyStep - (kAllyStep - kAllySlot)) * 0.5f + i * kAllyStep; }
+
+void App::updateAllyMenu(const input::Input& in) {
+    if (m_allyBot < 0 || m_allyBot >= m_match.botCount()) {
+        m_allyOpen = false;
+        return;
+    }
+    const game::Bot& ally = m_match.bot(m_allyBot);
+    const int counts[2] = {m_match.inventory().slotCount(), ally.bag.slotCount()};
+    const int step = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
+    if (step != 0) {
+        m_allyCursor = (m_allyCursor + counts[m_allySide] + step) % counts[m_allySide];
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+    if (in.pressed(PSP_CTRL_UP) || in.pressed(PSP_CTRL_DOWN)) {
+        m_allySide = 1 - m_allySide;
+        if (m_allyCursor >= counts[m_allySide]) m_allyCursor = counts[m_allySide] - 1;
+        playSfx(audio::Sfx::MenuMove, 0.5f);
+    }
+    if (in.pressed(PSP_CTRL_CROSS)) {
+        const bool ok = m_allySide == 0 ? m_match.allyGive(m_allyBot, m_allyCursor) : m_match.allyTake(m_allyBot, m_allyCursor);
+        if (ok) {
+            playSfx(audio::Sfx::Pickup, 0.8f);
+        } else {
+            const game::ItemType type =
+                m_allySide == 0 ? m_match.inventory().slot(m_allyCursor).type : ally.bag.slot(m_allyCursor).type;
+            const game::ItemKind kind = game::itemDef(type).kind;
+            m_allyMessage = type == game::ItemType::None ? T::None
+                            : m_allySide == 0 && kind != game::ItemKind::Weapon && kind != game::ItemKind::Consumable &&
+                                      kind != game::ItemKind::Throwable
+                                ? T::AllyCantGive
+                                : T::AllyNoRoom;
+            m_allyMessageTime = 2.0f;
+            playSfx(audio::Sfx::MenuMove, 0.4f);
+        }
+    } else if (in.pressed(PSP_CTRL_CIRCLE)) {
+        m_allyOpen = false;
+        playSfx(audio::Sfx::MenuMove, 0.6f);
+    }
+}
+
+void App::renderAllyMenu() const {
+    if (m_allyBot < 0 || m_allyBot >= m_match.botCount()) return;
+    gfx::fillRect(kAllyX, kAllyY, kAllyW, kAllyH, rgba(14, 22, 12, 238));
+    ui::frame(kAllyX, kAllyY, kAllyW, kAllyH, 2, rgba(150, 220, 110));
+    gfx::fillRect(kAllyX, kAllyY, kAllyW, 18, rgba(50, 90, 36));
+    const game::Inventory* bags[2] = {&m_match.inventory(), &m_match.bot(m_allyBot).bag};
+    const float scale = (kAllySlot - 2.0f) / 32.0f;
+    for (int side = 0; side < 2; ++side) {
+        const int slots = bags[side]->slotCount();
+        for (int i = 0; i < slots; ++i) {
+            const game::InventorySlot& slot = bags[side]->slot(i);
+            const float x = allySlotX(i, slots), y = kAllyRowY[side];
+            slotBox(x, y, kAllySlot, slot.type == game::ItemType::None ? rgba(0, 0, 0, 90) : rarityColor(slot.rarity),
+                    rgba(255, 255, 255, 140));
+            const atlas::Rect* art = slotArt(slot.type, slot.rarity);
+            if (art && m_atlas.ready()) m_atlas.draw(*art, x + 1, y + 1, scale);
+            if (side == m_allySide && i == m_allyCursor) {
+                const u32 alpha = static_cast<u32>(200.0f + 55.0f * sinf(m_blinkTime * 8.0f));
+                ui::frame(x - 3, y - 3, kAllySlot + 6, kAllySlot + 6, 2, rgba(250, 216, 40, alpha));
+            }
+        }
+    }
+    // Flecha entre las filas: hacia donde va lo elegido.
+    const float ax = 240.0f, ay = (kAllyRowY[0] + kAllySlot + kAllyRowY[1]) * 0.5f;
+    gfx::fillRect(ax - 2, ay - 6, 4, 12, kYellow);
+    gfx::fillRect(ax - 6, m_allySide == 0 ? ay + 4 : ay - 7, 12, 3, kYellow);
+    ui::drawHintIcons(m_atlas, static_cast<int>(240 - ui::hintsWidth(kAllyHints, 6) / 2), static_cast<int>(kAllyY + kAllyH) - 15,
+                      kAllyHints, 6);
+}
+
+void App::overlayAllyMenu() const {
+    if (m_allyBot < 0 || m_allyBot >= m_match.botCount()) return;
+    char line[64];
+    snprintf(line, sizeof(line), tr(T::AllyTitle), m_match.name(m_allyBot + 1));
+    printCenteredAt(240, static_cast<int>(kAllyY) + 5, kWhite, line);
+    printCenteredAt(240, static_cast<int>(kAllyRowY[0]) - 12, m_allySide == 0 ? kYellow : kLightGrey, tr(T::AllyYours));
+    printCenteredAt(240, static_cast<int>(kAllyRowY[1]) - 12, m_allySide == 1 ? kYellow : kLightGrey, tr(T::AllyTheirs));
+    const game::Inventory& bag = m_allySide == 0 ? m_match.inventory() : m_match.bot(m_allyBot).bag;
+    const game::InventorySlot& slot = bag.slot(m_allyCursor);
+    const int infoY = static_cast<int>(kAllyRowY[1] + kAllySlot) + 8;
+    if (slot.type != game::ItemType::None) {
+        const char* name = game::isWeapon(slot.type) ? slot.weapon.config().name : game::itemName(slot.type);
+        if (slot.count > 1) snprintf(line, sizeof(line), "%s x%d - %s", name, slot.count, game::rarityName(slot.rarity));
+        else snprintf(line, sizeof(line), "%s - %s", name, game::rarityName(slot.rarity));
+        printCenteredAt(240, infoY, rarityTextColor(slot.rarity), line);
+    }
+    snprintf(line, sizeof(line), "%s: %s", tr(m_allySide == 0 ? T::HintGive : T::HintTake),
+             m_allySide == 0 ? tr(T::AllyTheirs) : tr(T::AllyYours));
+    printCenteredAt(240, infoY + 11, kDimGrey, line);
+    if (m_allyMessageTime > 0.0f && m_allyMessage != T::None) printCenteredAt(240, infoY + 22, kErrorRed, tr(m_allyMessage));
+    ui::printHints(240 - ui::hintsWidth(kAllyHints, 6) / 2, static_cast<int>(kAllyY + kAllyH) - 15, kLightGrey, kAllyHints, 6);
+}
+
 void App::renderWallhack() const {
     // Truco "wallhack": una caja roja por rival vivo, a traves de paredes, con su vida.
     for (int id = 1; id < m_match.entityCount(); ++id) {
@@ -499,10 +769,11 @@ const ui::Hint kSwapHints[] = {{B::Left, T::None}, {B::Right, T::HintSelect}, {B
 constexpr float kSwapPanelY = 154.0f;
 
 void App::renderSwapChooser() const {
-    const float x = kWeaponSlotX + (m_swapCursor + 1) * kWeaponSlotStep;
+    const SlotRow row = slotRow(m_match.inventory().slotCount());
+    const float x = row.slotX(m_swapCursor + 1);
     const u32 alpha = static_cast<u32>(200.0f + 55.0f * sinf(m_blinkTime * 8.0f));
-    ui::frame(x - 3, kWeaponRowY - 6, kWeaponSlotSize + 6, kWeaponSlotSize + 6, 3, rgba(250, 216, 40, alpha));
-    gfx::fillRect(x + kWeaponSlotSize * 0.5f - 4, kWeaponRowY - 13, 8, 5, kYellow);
+    ui::frame(x - 3, kWeaponRowY - 6, row.size + 6, row.size + 6, 3, rgba(250, 216, 40, alpha));
+    gfx::fillRect(x + row.size * 0.5f - 4, kWeaponRowY - 13, 8, 5, kYellow);
     gfx::fillRect(110, kSwapPanelY, 260, 34, rgba(8, 18, 48, 210));
     ui::frame(110, kSwapPanelY, 260, 34, 1, kYellow);
     ui::drawHintIcons(m_atlas, (gfx::kScreenWidth - ui::hintsWidth(kSwapHints, 4)) / 2, static_cast<int>(kSwapPanelY) + 22,
@@ -514,15 +785,31 @@ const ui::Hint* App::interactionHint(int* count) const {
     static ui::Hint hint{ui::Button::Interact, T::None};
     static char text[64];
     // (Curandose no se puede recoger ni abrir nada: no se ofrece.)
-    if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground || m_match.useProgress() >= 0.0f) {
+    if (!m_match.alive(0) || m_buildMode || m_match.airState(0) != game::AirState::Ground || m_match.useProgress() >= 0.0f ||
+        m_match.downed(0)) {
         return nullptr;
+    }
+    // v0.16: junto a un companero derribado, reanimarle va antes que nada.
+    const int mate = m_match.reviveTarget();
+    if (mate >= 0) {
+        if (m_match.playerReviving() >= 0) return nullptr;
+        snprintf(text, sizeof(text), tr(T::TeamHoldRevive), m_match.name(mate));
+        hint.raw = text;
+        *count = 1;
+        return &hint;
     }
     const game::Interactable it = m_match.playerInteractable();
     if (it.kind == game::Interactable::Kind::None) return nullptr;
     // Modo zombi: supervivientes, piezas de los planos y centros de crafteo.
-    const bool workbench = it.kind == game::Interactable::Kind::Container &&
-                           m_match.containers()[it.index].kind == game::ContainerKind::Workbench;
-    if (it.kind == game::Interactable::Kind::Survivor || it.kind == game::Interactable::Kind::BlueprintPiece || workbench) {
+    // v0.15: tambien camas, neveras, despensas, mochilas y aliados.
+    const game::ContainerKind containerKind =
+        it.kind == game::Interactable::Kind::Container ? m_match.containers()[it.index].kind : game::ContainerKind::Chest;
+    const bool zombieContainer = it.kind == game::Interactable::Kind::Container &&
+                                 (containerKind == game::ContainerKind::Workbench || containerKind == game::ContainerKind::Bed ||
+                                  containerKind == game::ContainerKind::Fridge || containerKind == game::ContainerKind::Pantry);
+    const bool backpack = it.kind == game::Interactable::Kind::Pickup && m_match.pickups()[it.index].kind == game::PickupKind::Backpack;
+    if (it.kind == game::Interactable::Kind::Survivor || it.kind == game::Interactable::Kind::BlueprintPiece || zombieContainer ||
+        backpack) {
         if (!zombieInteractionText(it, text, sizeof(text))) return nullptr;
     } else if (it.kind == game::Interactable::Kind::Pickup && m_match.pickups()[it.index].kind == game::PickupKind::Blueprint) {
         snprintf(text, sizeof(text), tr(T::ZBlueprintFound), tr(game::blueprint(m_match.pickups()[it.index].count).name));
@@ -746,6 +1033,15 @@ void App::renderMinimap() const {
                           kMapX + kMapSize, kMapY + kMapSize, false);
     }
 
+    // Companeros del equipo (v0.16).
+    if (m_match.teamMode()) {
+        for (int id = 1; id < m_matchConfig.teamSize && id < m_match.entityCount(); ++id) {
+            const Vec3& p = m_match.body(id).state().position;
+            float sx, sy;
+            if (m_match.alive(id) && toMap(p.x, p.z, &sx, &sy)) gfx::fillRect(sx - 1, sy - 1, 3, 3, m_match.downed(id) ? kErrorRed : kMateColor);
+        }
+    }
+
     // Fila de iconos: zona, vivos y bajas.
     if (m_atlas.ready()) {
         m_atlas.draw(atlas::kIconZona, 360, 86);
@@ -838,27 +1134,30 @@ void App::renderSlots() const {
         }
     }
 
-    // Fila de objetos: el pico (TRIANGULO) y las 5 ranuras del inventario (cruceta), con
-    // el fondo del color de la rareza.
+    // Fila de objetos: el pico (TRIANGULO) y las ranuras del inventario (cruceta; 5, o mas
+    // con mochilas), con el fondo del color de la rareza.
     const game::Inventory& inv = m_match.inventory();
-    for (int i = 0; i < kWeaponSlots; ++i) {
+    const SlotRow row = slotRow(inv.slotCount());
+    for (int i = 0; i <= inv.slotCount() && i < 1 + game::Inventory::kMaxSlots; ++i) {
         const bool selected = !m_buildMode && (i == 0 ? inv.pickaxe() : !inv.pickaxe() && inv.selected() == i - 1);
-        const float x = kWeaponSlotX + i * kWeaponSlotStep;
+        const float x = row.slotX(i);
         const float y = kWeaponRowY - (selected ? 3.0f : 0.0f);
         const game::ItemType type = i == 0 ? game::ItemType::None : inv.slot(i - 1).type;
         // Cada objeto tiene su ranura completa dibujada en Recursos (con su fondo de rareza).
         const atlas::Rect* art = slotArt(type, i == 0 ? game::Rarity::Common : inv.slot(i - 1).rarity);
         if (art && m_atlas.ready()) {
-            m_atlas.draw(*art, x + 1, y + 1);
-            ui::frame(x, y, kWeaponSlotSize, kWeaponSlotSize, 1, rgba(255, 255, 255, 170));
+            m_atlas.draw(*art, x + 1, y + 1, row.scale);
+            ui::frame(x, y, row.size, row.size, 1, rgba(255, 255, 255, 170));
         } else {
             u32 fill = rgba(0, 0, 0, 50);
             if (i == 0) fill = rgba(170, 180, 200, 170);
             else if (type != game::ItemType::None) fill = rarityColor(game::itemDef(type).rarity);
-            slotBox(x, y, kWeaponSlotSize, fill, rgba(255, 255, 255, 170));
+            slotBox(x, y, row.size, fill, rgba(255, 255, 255, 170));
         }
-        if (selected) ui::frame(x - 2, y - 2, kWeaponSlotSize + 4, kWeaponSlotSize + 4, 2, kWhite);
-        if (i == 0 && m_atlas.ready()) m_atlas.draw(atlas::kPico, x + 4, y + 4);
+        // Las ranuras de las mochilas, con una marca marron arriba.
+        if (i > game::Inventory::kSlots) gfx::fillRect(x + 2, y - 2, row.size - 4, 2, rgba(150, 100, 50));
+        if (selected) ui::frame(x - 2, y - 2, row.size + 4, row.size + 4, 2, kWhite);
+        if (i == 0 && m_atlas.ready()) m_atlas.draw(atlas::kPico, x + 4 * row.scale, y + 4 * row.scale, row.scale);
     }
 }
 
@@ -947,6 +1246,16 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         overlayCraftMenu();
         return;
     }
+    if (m_allyOpen) {
+        overlayAllyMenu();
+        return;
+    }
+    if (m_bedOpen) {
+        overlayBedMenu();
+        return;
+    }
+    overlayMateBars();
+    overlayMateMarkers();
 
     // Autobus y caida.
     const game::AirState air = m_match.airState(0);
@@ -988,6 +1297,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         }
     }
     if (m_match.zombieMode()) overlayZombieHud();
+    else if (m_match.teamMode()) overlayTeamHud();
     if (m_stormMessage > 0.0f && fmodf(m_stormMessage, 0.8f) > 0.2f) {
         printCenteredShadow(107, rgba(210, 150, 255), tr(T::StormClosingNow));
     }
@@ -1038,8 +1348,9 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         }
     }
 
-    // Registro de eliminaciones.
-    int y = 28;
+    // Registro de eliminaciones (debajo de las barras de los companeros).
+    int mateIds[game::kSurvivorCount + 4];
+    int y = 28 + static_cast<int>(hudMates(mateIds) * kMateRowH);
     for (int i = 0; i < m_match.killEventCount(); ++i) {
         const game::KillEvent& e = m_match.killEvent(i);
         if (m_match.elapsed() - e.time > kKillFeedSeconds) continue;
@@ -1094,15 +1405,16 @@ void App::overlayGameHud(const FrameInfo& frame) const {
                                static_cast<int>(kBuildRowY) + 19, kWhite, "%d", m_match.trapStock());
     }
     // Cantidades en las ranuras: balas en reserva del arma y unidades de los consumibles.
-    for (int i = 0; i < game::Inventory::kSlots; ++i) {
+    const SlotRow row = slotRow(inv.slotCount());
+    for (int i = 0; i < inv.slotCount(); ++i) {
         const game::InventorySlot& slot = inv.slot(i);
         if (slot.type == game::ItemType::None) continue;
         const bool weapon = game::itemDef(slot.type).kind == game::ItemKind::Weapon;
         const int n = weapon ? inv.ammo(static_cast<game::AmmoType>(slot.weapon.config().ammoType)) : slot.count;
         if (n < 0 || (!weapon && n <= 1 && game::itemDef(slot.type).maxStack == 1)) continue;
         const bool selected = !m_buildMode && !inv.pickaxe() && inv.selected() == i;
-        const int sx = static_cast<int>(kWeaponSlotX + (i + 1) * kWeaponSlotStep) + 33 - 8 * (n >= 100 ? 3 : n >= 10 ? 2 : 1);
-        gfx::text::printShadow(sx, static_cast<int>(kWeaponRowY) + 25 - (selected ? 3 : 0), kWhite, "%d", n);
+        const int sx = static_cast<int>(row.slotX(i + 1) + row.size) - 1 - 8 * (n >= 100 ? 3 : n >= 10 ? 2 : 1);
+        gfx::text::printShadow(sx, static_cast<int>(kWeaponRowY + row.size) - 9 - (selected ? 3 : 0), kWhite, "%d", n);
     }
     // Nombre de lo que se lleva en la mano, sobre la fila de objetos.
     if (!m_buildMode && m_match.alive(0)) {
@@ -1110,7 +1422,7 @@ void App::overlayGameHud(const FrameInfo& frame) const {
         const char* name = inv.pickaxe() ? tr(T::WeaponPickaxe)
                            : game::isWeapon(held.type) ? held.weapon.config().name
                                                         : game::itemName(held.type);
-        if (name[0]) gfx::text::printShadow(static_cast<int>(kWeaponSlotX), static_cast<int>(kWeaponRowY) - 12, kWhite,
+        if (name[0]) gfx::text::printShadow(static_cast<int>(row.x), static_cast<int>(kWeaponRowY) - 12, kWhite,
                                             "%s", name);
     }
     // Consumible en uso, o por que no se puede usar.

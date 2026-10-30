@@ -125,7 +125,9 @@ struct CharacterAnim {
 // colgado del ala delta (brazos arriba), agachado (CRUCETA abajo) o bailando (CRUCETA
 // arriba). Lo que se lleva en la mano es un game::ItemModel (item_models.h).
 // v0.14: zombi (encorvado, brazos al frente, cojeando; el golpe es un zarpazo).
-enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance, Zombie };
+// Sleep (v0.15): tumbado boca arriba (en una cama o en el saco), la cabeza hacia +Z.
+// Downed (v0.16): derribado, a cuatro patas, gateando al moverse.
+enum class BodyPose : u8 { Normal, Skydive, Glide, Crouch, Dance, Zombie, Sleep, Downed };
 
 class CharacterModel {
 public:

@@ -39,7 +39,8 @@ struct BuildConfig {
     int maxWallsPerBot = 6;      // v0.14: una caja de cuatro paredes y una rampa
 };
 
-constexpr int kMaxWallCapacity = 64;  // limite tecnico de piezas en pie
+// Limite tecnico de piezas en pie (v0.15: 128; el modo zombi no tiene otro limite).
+constexpr int kMaxWallCapacity = 128;
 constexpr int kRampSteps = 8;         // escalones de 0.375 m (kStepHeight = 0.45)
 constexpr int kMaxPieceBoxes = kRampSteps;
 
@@ -108,8 +109,12 @@ public:
     // plan(): solo que no repita otra pieza y que quede sitio. `healthScale`: reforzada.
     int placeForced(const WallPlacement& placement, int owner, float healthScale);
     bool remove(int index);
+    // Ya hay una pieza igual en ese sitio (v0.16: las de los aliados junto a sus camas).
+    bool occupied(const WallPlacement& placement) const { return duplicates(placement); }
     // Resta vida; devuelve true si la pared se ha destruido.
     bool damage(int index, float amount);
+    // Vida de una pieza en pie (reparar; cargar una partida guardada), sin pasar de su maximo.
+    void setHealth(int index, float health);
     void update(float dt);
 
     // Pared a la que pertenece una caja dinamica (o -1).

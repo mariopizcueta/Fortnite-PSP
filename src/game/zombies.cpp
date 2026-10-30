@@ -12,6 +12,7 @@ const ZombieDef kZombies[] = {
     {T::ZombieWalker, 100.0f, 0.42f, 0.56f, 14.0f, 40.0f, 1.10f, 1.45f, 1.0f},
     {T::ZombieRunner, 65.0f, 0.78f, 0.96f, 9.0f, 25.0f, 0.80f, 1.40f, 0.95f},
     {T::ZombieBrute, 420.0f, 0.36f, 0.46f, 32.0f, 120.0f, 1.60f, 1.90f, 1.3f},
+    {T::ZombieFallen, 170.0f, 0.40f, 0.50f, 12.0f, 45.0f, 1.20f, 1.45f, 1.0f},
 };
 static_assert(sizeof(kZombies) / sizeof(kZombies[0]) == static_cast<int>(ZombieType::Count), "falta un zombi");
 
@@ -27,6 +28,7 @@ const Recipe kRecipes[] = {
     {T::RecipeBandages, ItemType::Bandage, Rarity::Common, 5, {30, 0, 0}},
     {T::RecipeMedkit, ItemType::Medkit, Rarity::Uncommon, 1, {40, 20, 0}},
     {T::RecipeAmmo, ItemType::None, Rarity::Common, 2, {0, 0, 15}},
+    {T::RecipeBed, ItemType::Bed, Rarity::Rare, 1, {50, 0, 15}},
 };
 
 // Planos de la base (x 56..68, z 28..40, celdas de 4 m). Muros del perimetro (la puerta,

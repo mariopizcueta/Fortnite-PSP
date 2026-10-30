@@ -472,6 +472,77 @@ def amanecer():
     return normalize(arpeggio([523, 659, 784, 1046], 0.16, 0.5, 1.6), 0.5)
 
 
+# --- v0.15: modo zombi, mas miedo (al final: los anteriores siguen saliendo identicos) --------
+
+def latido():
+    """Latido del corazon (lub-dub) grave: suena cuando hay zombis cerca o poca vida."""
+    out = np.zeros(int(0.9 * RATE))
+    for at, f, g in ((0.0, 55, 1.0), (0.22, 48, 0.7)):
+        n = int(0.16 * RATE)
+        tt = np.arange(n) / RATE
+        thump = np.sin(2 * math.pi * f * tt) * env(n, 0.006, 0.05)
+        place(out, at, lowpass(thump, 0.25), g)
+    return normalize(out, 0.75)
+
+
+def grito():
+    """Grito lejano en la noche: un chillido que sube y se quiebra, filtrado (lejos)."""
+    tt = t(1.6)
+    f = 520 + 380 * np.sin(math.pi * np.clip(tt / 1.2, 0, 1)) + 25 * np.sin(2 * math.pi * 7 * tt)
+    phase = 2 * math.pi * np.cumsum(f) / RATE
+    voice = np.sin(phase) + 0.4 * np.sin(2 * phase) + 0.2 * rng.standard_normal(len(tt))
+    e = np.minimum(1, tt / 0.08) * np.clip((1.6 - tt) / 0.7, 0, 1)
+    return normalize(lowpass(voice * e, 0.12), 0.55)
+
+
+def susurro():
+    """Susurros y un zumbido grave que va y viene (alucinaciones, ambiente de la noche)."""
+    tt = t(3.0)
+    drone = np.sin(2 * math.pi * 41 * tt) * 0.5 + np.sin(2 * math.pi * 61.7 * tt) * 0.3
+    breath = lowpass(rng.standard_normal(len(tt)), 0.35) - lowpass(rng.standard_normal(len(tt)), 0.05)
+    words = (np.sin(2 * math.pi * 2.3 * tt) ** 8) * breath
+    e = np.sin(math.pi * tt / 3.0) ** 2
+    return normalize((drone * 0.5 + words * 1.4) * e, 0.5)
+
+
+def sobresalto():
+    """Golpe de miedo: un zombi se levanta de entre las ruinas (cuerdas disonantes y golpe)."""
+    tt = t(1.4)
+    strings = sum(np.sign(np.sin(2 * math.pi * f * tt)) * 0.25 for f in (311, 330, 466))
+    strings = lowpass(strings, 0.3) * np.exp(-tt / 0.6)
+    out = strings * np.minimum(1, tt / 0.01)
+    place(out, 0.0, thunk(70, 0.3), 1.2)
+    return normalize(out, 0.8)
+
+
+def comer():
+    """Comer de una lata: cuchara contra el metal y masticar."""
+    out = np.zeros(int(1.2 * RATE))
+    for k in range(3):
+        place(out, 0.05 + 0.32 * k, clack(2400, 0.02, 0.2), 0.5)
+        n = int(0.18 * RATE)
+        chew = lowpass(rng.standard_normal(n), 0.15) * env(n, 0.02, 0.06)
+        place(out, 0.15 + 0.32 * k, chew, 0.8)
+    return normalize(out, 0.55)
+
+
+def mochila():
+    """Cremallera de una mochila."""
+    n = int(0.45 * RATE)
+    tt = np.arange(n) / RATE
+    teeth = (np.sin(2 * math.pi * (60 + 90 * tt) * tt) > 0.6).astype(float)
+    zip_ = lowpass(rng.standard_normal(n) * teeth, 0.6) * np.minimum(1, tt / 0.02) * np.clip((0.45 - tt) / 0.1, 0, 1)
+    return normalize(zip_, 0.55)
+
+
+def roncar():
+    """Respiracion de dormir (para el saco y la cama)."""
+    tt = t(2.6)
+    breath = lowpass(rng.standard_normal(len(tt)), 0.08)
+    e = np.sin(math.pi * np.clip(tt / 1.3, 0, 1)) ** 2 + 0.6 * np.sin(math.pi * np.clip((tt - 1.3) / 1.3, 0, 1)) ** 2
+    return normalize(breath * e, 0.35)
+
+
 SOUNDS = {
     "disparo": disparo, "impacto": impacto, "herido": herido, "eliminacion": eliminacion,
     "pared": pared, "pared_rota": pared_rota, "recarga": recarga, "menu_mover": menu_mover,
@@ -488,6 +559,9 @@ SOUNDS = {
     # v0.14: modo zombi y agua (al final, por lo mismo).
     "zombie_gemido": zombie_gemido, "zombie_golpe": zombie_golpe, "horda": horda, "chapoteo": chapoteo,
     "fabricar": fabricar, "amanecer": amanecer,
+    # v0.15: modo zombi (al final, por lo mismo).
+    "latido": latido, "grito": grito, "susurro": susurro, "sobresalto": sobresalto, "comer": comer,
+    "mochila": mochila, "roncar": roncar,
 }
 
 

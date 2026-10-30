@@ -14,7 +14,6 @@
 // Uso: sh tools/match_sim/build_and_run.sh   (o: make match-sim). Sale con 1 si algo falla.
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include <algorithm>
 #include <string>
@@ -58,7 +57,8 @@ float distXZ(const Vec3& a, const Vec3& b) {
 }
 
 bool penetrates(const world::CollisionWorld& w, const game::CharacterState& s) {
-    const float r = game::tuning::kBodyRadius - 0.01f;
+    // 2 cm de tolerancia: al subir a una rampa propia el cuerpo puede rozar un escalon un paso.
+    const float r = game::tuning::kBodyRadius - 0.02f;
     const world::Aabb body{{s.position.x - r, s.position.y + game::tuning::kStepHeight, s.position.z - r},
                            {s.position.x + r, s.position.y + game::tuning::kBodyHeight - 0.01f, s.position.z + r}};
     return w.overlapsAny(body, world::kBlocksMovement);
@@ -3168,7 +3168,8 @@ void testUpdate014(world::World& world, game::NavGrid& nav) {
             stepWith(z, still, game::PlayerAim{});
             for (int id = 1; id <= game::kZombieSlots; ++id) {
                 const bool now = z.alive(id);
-                if (now && !wasAlive[id]) {  // acaba de aparecer
+                // Los guardianes de los lugares de interes (v0.15) aparecen en su lugar.
+                if (now && !wasAlive[id] && z.bot(id - 1).site < 0) {  // acaba de aparecer
                     const Vec3 p = z.body(id).state().position;
                     nearestSpawn = fminf(nearestSpawn, distXZ(p, base));
                     insideBase += world::zsites::insideBase(p.x, p.z) ? 1 : 0;
@@ -3190,6 +3191,7 @@ void testUpdate014(world::World& world, game::NavGrid& nav) {
         MatchConfig c = MatchConfig::zombies();
         c.zombie.dayZombies = 0;
         c.zombie.zombiesPerDay = 0;
+        c.zombie.siteGuardRange = -1000.0f;  // sin los guardianes de la casa de al lado (v0.15)
         c.seed = 4;
         m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), {20.0f, 0.0f, 40.0f}, 0.0f);
         // Un zombi aparece en un hueco libre: se fuerza con la aparicion del dia.
@@ -3271,10 +3273,17 @@ void testUpdate014(world::World& world, game::NavGrid& nav) {
         const int needsBefore = m.survivorNeeds(survivor);
         m.giveItem(ItemType::Pistol, 1, Rarity::Rare);
         m.giveItem(ItemType::Bandage, 5);
-        m.selectSlot(0);
+        // v0.15: la ranura 0 es el saco de dormir con que se empieza.
+        auto slotOf = [&](ItemType type) {
+            for (int i = 0; i < m.inventory().slotCount(); ++i) {
+                if (m.inventory().slot(i).type == type) return i;
+            }
+            return 0;
+        };
+        m.selectSlot(slotOf(ItemType::Pistol));
         const bool gaveWeapon = m.interact(0, it);
         const int needsMid = m.survivorNeeds(survivor);
-        m.selectSlot(1);
+        m.selectSlot(slotOf(ItemType::Bandage));
         m.giveToSurvivor(survivor);
         printf("  superviviente: necesita %d -> tras el arma %d -> tras las vendas %d; rescatado %s\n", needsBefore, needsMid,
                m.survivorNeeds(survivor), m.bot(survivor).rescued ? "si" : "no");
@@ -3293,7 +3302,7 @@ void testUpdate014(world::World& world, game::NavGrid& nav) {
         aim.eye = m.chestOf(0);
         aim.direction = math3d::normalize(m.chestOf(survivor + 1) - aim.eye);
         const game::ShotResult shot = m.playerShot(aim, 50.0f, 60.0f);
-        check(shot.victim != survivor + 1 && m.body(survivor + 1).state().health == 100.0f,
+        check(shot.victim != survivor + 1 && m.body(survivor + 1).state().health == 125.0f,
               "las balas del jugador atraviesan a los supervivientes (sin fuego amigo)");
     }
     // Crafteo y planos.
@@ -3417,6 +3426,890 @@ void testUpdate014(world::World& world, game::NavGrid& nav) {
     }
 }
 
+void testUpdate016(world::World& world, game::NavGrid& nav);
+
+void testUpdate015(world::World& world, game::NavGrid& nav) {
+    printf("\n21) v0.15: Supervivencia zombi (lugares, hambre, sueno, aliados, mochilas, objetivos, guardar)\n");
+    using game::ItemType;
+    using game::Rarity;
+    using game::ContainerKind;
+    game::PlayerInput still;
+    auto quiet = []() {
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 0;
+        c.zombie.zombiesPerDay = 0;
+        c.zombie.nightZombies = 0;
+        c.zombie.hordeBase = 0;
+        c.zombie.hordePerDay = 0;
+        c.zombie.siteGuardRange = -1000.0f;
+        c.invulnerablePlayer = true;
+        c.seed = 15;
+        return c;
+    };
+    auto fresh = [&](Match& m, const MatchConfig& c, const Vec3& spawn) {
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), spawn, 0.0f);
+    };
+    auto run = [&](Match& m, float seconds) {
+        for (int i = 0; i < static_cast<int>(seconds * 60.0f); ++i) stepWith(m, still, game::PlayerAim{});
+    };
+    auto slotOf = [](const Match& m, ItemType type) {
+        for (int i = 0; i < m.inventory().slotCount(); ++i) {
+            if (m.inventory().slot(i).type == type) return i;
+        }
+        return -1;
+    };
+    auto countPickups = [](const Match& m, ItemType type) {
+        int n = 0;
+        for (const game::Pickup& p : m.pickups()) n += p.active && p.kind == game::PickupKind::Item && p.item == type ? p.count : 0;
+        return n;
+    };
+
+    // --- Lugares de interes: sus contenedores se alcanzan y dan lo suyo ---------------------------
+    {
+        Match m;
+        fresh(m, quiet(), world::zsites::kWakeSpot);
+        int total = 0, reachable = 0, fridges = 0, pantries = 0, foodBefore = 0;
+        bool allAmmo = true;
+        foodBefore = countPickups(m, ItemType::CannedFood) + countPickups(m, ItemType::Ration);
+        for (int i = 0; i < static_cast<int>(m.containers().size()); ++i) {
+            const game::Container c = m.containers()[i];
+            if (c.site < 0) continue;
+            ++total;
+            fridges += c.kind == ContainerKind::Fridge ? 1 : 0;
+            pantries += c.kind == ContainerKind::Pantry ? 1 : 0;
+            const Vec3 front = c.position + game::forwardFromYaw(c.yaw) * 1.1f;
+            m.teleport(0, front, c.yaw + math3d::kPi);
+            // Delante hay sitio, el contenedor no esta metido en nada y se ve desde ahi.
+            const bool inside = penetrates(world.collision(), m.body(0).state());
+            const world::Aabb box{c.position + Vec3{-0.3f, 0.1f, -0.3f}, c.position + Vec3{0.3f, 0.6f, 0.3f}};
+            const bool buried = world.collision().overlapsAny(box, world::kBlocksMovement);
+            const bool visible = m.lineOfSight(m.chestOf(0), c.position + Vec3{0.0f, 0.5f, 0.0f});
+            game::Interactable it;
+            it.kind = game::Interactable::Kind::Container;
+            it.index = i;
+            if (!inside && !buried && visible) {
+                ++reachable;
+                int ammoBefore[5];
+                for (int a = 0; a < 5; ++a) ammoBefore[a] = 0;
+                const size_t pickupsBefore = m.pickups().size();
+                m.interact(0, it);
+                if (c.kind == ContainerKind::AmmoBox) {
+                    int kinds = 0;
+                    bool seen[5] = {};
+                    for (size_t k = pickupsBefore; k < m.pickups().size(); ++k) {
+                        const game::Pickup& p = m.pickups()[k];
+                        if (p.active && p.kind == game::PickupKind::Ammo && !seen[static_cast<int>(p.ammo)]) {
+                            seen[static_cast<int>(p.ammo)] = true;
+                            ++kinds;
+                        }
+                    }
+                    allAmmo &= kinds == 5;
+                    (void)ammoBefore;
+                }
+            } else {
+                printf("    contenedor %d (tipo %d) en (%.1f, %.1f): delante %s, metido en algo %s, se ve %s\n", i,
+                       static_cast<int>(c.kind), static_cast<double>(c.position.x), static_cast<double>(c.position.z),
+                       inside ? "DENTRO DE UN SOLIDO" : "libre", buried ? "SI" : "no", visible ? "si" : "NO");
+            }
+        }
+        const int foodAfter = countPickups(m, ItemType::CannedFood) + countPickups(m, ItemType::Ration);
+        int zombieOnly = 0, standing = 0;
+        for (size_t i = 0; i < world.harvestables().size(); ++i) {
+            if (!world.harvestables()[i].zombieOnly) continue;
+            ++zombieOnly;
+            standing += m.objectDestroyed(static_cast<int>(i)) ? 0 : 1;
+        }
+        printf("  %d lugares, %d objetos del modo zombi (%d en pie), %d contenedores (%d neveras, %d despensas), %d alcanzables; "
+               "comida en el suelo %d -> %d\n",
+               world::zsites::kSiteCount, zombieOnly, standing, total, fridges, pantries, reachable, foodBefore, foodAfter);
+        check(total == world::zsites::kSiteContainerCount && reachable == total && fridges >= 8 && pantries >= 7,
+              "las neveras, despensas, cofres y cajas de los lugares de interes se alcanzan y se abren");
+        check(foodAfter > foodBefore + 10, "las neveras y despensas dan comida");
+        check(allAmmo, "las cajas de municion del modo zombi dan municion de todos los tipos");
+    }
+
+    // --- Hambre: baja, quita vida a cero y se come -------------------------------------------------
+    {
+        Match m;
+        MatchConfig c = quiet();
+        c.invulnerablePlayer = false;
+        fresh(m, c, world::zsites::kWakeSpot);
+        const float food0 = m.food();
+        run(m, 60.0f);
+        const float food1 = m.food();
+        m.setNeeds(0.0f, 100.0f);
+        const float health0 = m.body(0).state().health;
+        run(m, 10.0f);
+        const float health1 = m.body(0).state().health;
+        m.giveItem(ItemType::CannedFood, 2);
+        m.selectSlot(slotOf(m, ItemType::CannedFood));
+        m.startUse();
+        run(m, 3.0f);
+        const float eaten = m.food();
+        m.setNeeds(100.0f, 100.0f);
+        const bool refused = !m.startUse() && m.lastUseError() == game::UseError::FullFood;
+        printf("  hambre: %.1f -> %.1f en 60 s; a cero, vida %.0f -> %.0f en 10 s; tras una lata %.0f; saciado %s\n",
+               static_cast<double>(food0), static_cast<double>(food1), static_cast<double>(health0), static_cast<double>(health1),
+               static_cast<double>(eaten), refused ? "no come" : "COME");
+        check(food1 < food0 - 5.0f && food1 > food0 - 15.0f, "el hambre baja poco a poco (~1,5 dias para vaciarse)");
+        check(health1 < health0 - 4.0f && health1 > health0 - 12.0f, "muerto de hambre se pierde vida poco a poco");
+        check(eaten >= 29.0f && refused, "comer quita el hambre; sin hambre no se come");
+    }
+
+    // --- Sueno: cansado se falla mas; saco de dormir y cama; no con zombis cerca --------------------
+    {
+        Match m;
+        fresh(m, quiet(), world::zsites::kWakeSpot);
+        const int bag = slotOf(m, ItemType::SleepingBag);
+        m.giveItem(ItemType::Pistol, 1, Rarity::Rare);
+        m.giveAmmo(game::AmmoType::Light, 60);
+        m.selectSlot(slotOf(m, ItemType::Pistol));
+        const float spreadRested = m.playerSpreadNow();
+        m.setNeeds(100.0f, 5.0f);
+        const float spreadTired = m.playerSpreadNow();
+        // Con un zombi cerca no se puede dormir.
+        const int zombie = m.spawnZombieAt(game::ZombieType::Walker, world::zsites::kWakeSpot + Vec3{-8.0f, 0.0f, 0.0f});
+        m.selectSlot(bag);
+        const bool blocked = !m.trySleep(-1);
+        if (zombie >= 0) m.applyDamage(zombie + 1, 10000.0f, 0);
+        run(m, 9.0f);  // el cuerpo desaparece
+        // Saco de dormir: una noche entera de reloj (el tiempo corre x8).
+        m.setNeeds(100.0f, 0.0f);
+        const float clock0 = m.timeToChange();
+        const int day0 = m.day();
+        const bool slept = m.trySleep(-1);
+        float real = 0.0f;
+        while (m.sleeping() && real < 120.0f) {
+            stepWith(m, still, game::PlayerAim{});
+            real += game::FixedTimestep::kStep;
+        }
+        const float bagClock = real * m.config().zombie.sleepTimeScale;
+        (void)clock0;
+        (void)day0;
+        printf("  cansado: dispersion %.1f -> %.1f; con un zombi a 8 m duerme %s; saco: %s, descanso lleno en %.0f s reales "
+               "(%.0f s de reloj; una noche son %.0f)\n",
+               static_cast<double>(spreadRested), static_cast<double>(spreadTired), blocked ? "no" : "SI", slept ? "duerme" : "NO",
+               static_cast<double>(real), static_cast<double>(bagClock), static_cast<double>(m.config().zombie.nightLength));
+        check(spreadTired > spreadRested + 2.0f, "con sueno el pulso tiembla (mas dispersion)");
+        check(blocked, "no se puede dormir con monstruos cerca");
+        check(slept && m.rest() >= 99.0f && fabsf(bagClock - m.config().zombie.nightLength) < 12.0f,
+              "en el saco de dormir el descanso se llena en una noche (el tiempo pasa deprisa)");
+    }
+
+    // --- Cama: se fabrica, se coloca y llena el descanso en media noche ----------------------------
+    {
+        Match m;
+        fresh(m, quiet(), world::zsites::kWakeSpot);
+        const Vec3 bench = world::zsites::kWorkbenches[0];
+        m.teleport(0, bench + Vec3{0.0f, 0.0f, -1.6f}, 0.0f);
+        int bedRecipe = -1;
+        for (int r = 0; r < game::recipeCount(); ++r) {
+            if (game::recipe(r).item == ItemType::Bed) bedRecipe = r;
+        }
+        const bool noMats = !m.craft(bedRecipe);
+        m.giveMaterials(world::Resource::Wood, 200);
+        m.giveMaterials(world::Resource::Metal, 200);
+        const bool crafted = m.craft(bedRecipe) && slotOf(m, ItemType::Bed) >= 0;
+        m.teleport(0, {62.0f, 0.0f, 35.5f}, 0.0f);  // en la base, mirando al norte
+        m.selectSlot(slotOf(m, ItemType::Bed));
+        game::PlayerInput in;
+        in.cameraYaw = 0.0f;
+        m.setPlayerInput(in, game::PlayerAim{});
+        const int bed = m.placeBed();
+        m.setNeeds(100.0f, 0.0f);
+        const bool slept = bed >= 0 && m.trySleep(bed);
+        float real = 0.0f;
+        while (m.sleeping() && real < 120.0f) {
+            stepWith(m, still, game::PlayerAim{});
+            real += game::FixedTimestep::kStep;
+        }
+        const float bedClock = real * m.config().zombie.sleepTimeScale;
+        printf("  cama: sin material %s, fabricada %s, colocada %d, durmiendo %s: lleno en %.0f s de reloj (media noche %.0f)\n",
+               noMats ? "no" : "SI", crafted ? "si" : "no", bed, slept ? "si" : "no", static_cast<double>(bedClock),
+               static_cast<double>(m.config().zombie.nightLength * 0.5f));
+        check(noMats && crafted && bed >= 0 && slept, "la cama se fabrica en un centro de crafteo, se coloca y se duerme en ella");
+        check(fabsf(bedClock - m.config().zombie.nightLength * 0.5f) < 8.0f, "en la cama el descanso se llena en media noche");
+    }
+
+    // --- Mochilas: los brutos sueltan una; +3 ranuras, como mucho dos ------------------------------
+    {
+        Match m;
+        fresh(m, quiet(), {20.0f, 0.0f, 40.0f});
+        int packs = 0;
+        int slotsSeen[3] = {0, 0, 0};
+        for (int k = 0; k < 3; ++k) {
+            const int brute = m.spawnZombieAt(game::ZombieType::Brute, {24.0f, 0.0f, 44.0f});
+            if (brute < 0) continue;
+            m.applyDamage(brute + 1, 10000.0f, 0);
+            int pack = -1;
+            for (size_t i = 0; i < m.pickups().size(); ++i) {
+                if (m.pickups()[i].active && m.pickups()[i].kind == game::PickupKind::Backpack) pack = static_cast<int>(i);
+            }
+            if (pack < 0) continue;
+            ++packs;
+            m.teleport(0, m.pickups()[pack].position + Vec3{0.0f, 0.0f, 0.8f}, 0.0f);
+            game::Interactable it;
+            it.kind = game::Interactable::Kind::Pickup;
+            it.index = pack;
+            m.interact(0, it);
+            slotsSeen[k] = m.inventory().slotCount();
+            if (m.pickups()[pack].active) m.dropPickup(game::Pickup{});  // la tercera se queda en el suelo
+        }
+        printf("  mochilas: %d soltadas; ranuras %d -> %d -> %d\n", packs, slotsSeen[0], slotsSeen[1], slotsSeen[2]);
+        check(packs == 3 && slotsSeen[0] == 8 && slotsSeen[1] == 11 && slotsSeen[2] == 11,
+              "cada bruto suelta una mochila (+3 ranuras, como mucho dos)");
+        // Las ranuras nuevas se usan.
+        for (int i = 0; i < 12; ++i) m.giveItem(ItemType::Pistol, 1);
+        int used = 0;
+        for (int i = 0; i < m.inventory().slotCount(); ++i) used += m.inventory().slot(i).type != ItemType::None ? 1 : 0;
+        check(used == 11, "con dos mochilas caben 11 objetos");
+    }
+
+    // --- Aliados: inventario, caen y se levantan armados, sueltan su mochila -------------------------
+    {
+        Match m;
+        fresh(m, quiet(), world::zsites::kWakeSpot);
+        const int survivor = game::kZombieSlots;
+        const Vec3 camp = m.body(survivor + 1).state().position;
+        m.teleport(0, camp + Vec3{0.0f, 0.0f, 1.6f}, 3.1416f);
+        m.giveItem(ItemType::Pistol, 1, Rarity::Rare);
+        m.giveItem(ItemType::Bandage, 5);
+        m.selectSlot(slotOf(m, ItemType::Pistol));
+        m.giveToSurvivor(survivor);
+        m.selectSlot(slotOf(m, ItemType::Bandage));
+        m.giveToSurvivor(survivor);
+        const bool rescued = m.bot(survivor).rescued;
+        // CUADRADO junto a un aliado: su inventario.
+        const u32 from = m.eventCount();
+        m.interact(0, m.playerInteractable());
+        const bool menu = eventsOf(m, from, game::GameEventType::SurvivorMenu) == 1;
+        m.giveItem(ItemType::Shotgun, 1, Rarity::Epic);
+        const bool gave = m.allyGive(survivor, slotOf(m, ItemType::Shotgun));
+        int botShotgun = -1;
+        for (int i = 0; i < m.bot(survivor).bag.slotCount(); ++i) {
+            if (m.bot(survivor).bag.slot(i).type == ItemType::Shotgun) botShotgun = i;
+        }
+        const bool took = botShotgun >= 0 && m.allyTake(survivor, botShotgun) && slotOf(m, ItemType::Shotgun) >= 0;
+        // Cae a manos de un zombi: al rato se levanta como zombi armado.
+        const int z = m.spawnZombieAt(game::ZombieType::Walker, camp + Vec3{6.0f, 0.0f, 0.0f});
+        m.applyDamage(survivor + 1, 1000.0f, z + 1);
+        const bool down = !m.alive(survivor + 1);
+        if (z >= 0) m.applyDamage(z + 1, 10000.0f, 0);
+        m.teleport(0, camp + Vec3{30.0f, 0.0f, 0.0f}, 0.0f);
+        run(m, 5.0f);
+        const bool turned = m.alive(survivor + 1) && m.isZombie(survivor + 1) &&
+                            m.bot(survivor).zombieType == game::ZombieType::Fallen && m.bot(survivor).armed;
+        const bool hostile = m.hostile(0, survivor + 1);
+        // Dispara al jugador (que se pone delante).
+        m.teleport(0, m.body(survivor + 1).state().position + Vec3{0.0f, 0.0f, 9.0f}, 0.0f);
+        const int shotsBefore = m.stats().shotsFired;
+        run(m, 4.0f);
+        const int shots = m.stats().shotsFired - shotsBefore;
+        m.applyDamage(survivor + 1, 10000.0f, 0);
+        bool pack = false;
+        for (const game::Pickup& p : m.pickups()) pack |= p.active && p.kind == game::PickupKind::Backpack;
+        printf("  aliado: rescatado %s, menu %s, darle %s, quitarle %s; cae %s, se levanta armado %s, dispara %d veces; "
+               "al abatirlo mochila %s\n",
+               rescued ? "si" : "no", menu ? "si" : "no", gave ? "si" : "no", took ? "si" : "no", down ? "si" : "no",
+               turned ? "si" : "no", shots, pack ? "si" : "no");
+        check(rescued && menu && gave && took, "CUADRADO junto a un aliado gestiona su inventario (dar y quitar armas)");
+        check(down && turned && hostile && shots > 0, "un aliado caido se levanta como zombi armado y dispara");
+        check(pack, "el aliado zombi abatido suelta una mochila");
+    }
+
+    // --- Aliados en la base: levantan el muro sin planos y duermen en su cama -----------------------
+    {
+        Match m;
+        fresh(m, quiet(), world::zsites::kWakeSpot);
+        const int survivor = game::kZombieSlots;
+        const Vec3 camp = m.body(survivor + 1).state().position;
+        m.teleport(0, camp + Vec3{0.0f, 0.0f, 1.6f}, 3.1416f);
+        m.giveItem(ItemType::Pistol, 1, Rarity::Rare);
+        m.giveItem(ItemType::Bandage, 5);
+        m.selectSlot(slotOf(m, ItemType::Pistol));
+        m.giveToSurvivor(survivor);
+        m.selectSlot(slotOf(m, ItemType::Bandage));
+        m.giveToSurvivor(survivor);
+        m.teleport(0, world::zsites::kBaseCenter + Vec3{0.0f, 0.0f, 1.0f}, 0.0f);
+        m.teleport(survivor + 1, world::zsites::kBaseCenter + Vec3{-2.0f, 0.0f, 2.0f}, 0.0f);
+        run(m, 70.0f);
+        int built = 0;
+        for (int bp = 0; bp < game::kPalisadeBlueprints; ++bp) {
+            for (int k = 0; k < game::blueprint(bp).pieceCount; ++k) built += m.pieceBuilt(bp, k) ? 1 : 0;
+        }
+        // Cama en la base y de noche: se acuesta y los zombis no van a por el.
+        m.giveItem(ItemType::Bed, 1);
+        m.selectSlot(slotOf(m, ItemType::Bed));
+        game::PlayerInput in;
+        in.cameraYaw = 0.0f;
+        m.teleport(0, {62.0f, 0.0f, 37.5f}, 0.0f);
+        m.setPlayerInput(in, game::PlayerAim{});
+        const int bed = m.placeBed();
+        m.assignBed(bed, survivor);  // v0.16: la cama se asigna (L sobre ella)
+        // Hasta la noche.
+        while (!m.night()) run(m, 5.0f);
+        run(m, 20.0f);
+        const bool sleeping = m.bot(survivor).sleeping;
+        const bool safe = !m.hostile(1, survivor + 1);
+        printf("  aliado en la base: %d piezas del muro levantadas sin planos ni material (%d por los aliados); cama %d, "
+               "de noche duerme %s, los zombis le ignoran %s\n",
+               built, m.stats().allyPieces, bed, sleeping ? "si" : "no", safe ? "si" : "no");
+        check(built >= 2, "sin planos, los aliados levantan el muro del perimetro de la base");
+        check(bed >= 0 && sleeping && safe, "con camas, los aliados duermen de noche fuera de guardia");
+    }
+
+    // --- Sin limite de piezas, dias mas largos y objetivos --------------------------------------
+    {
+        Match m;
+        fresh(m, quiet(), {20.0f, 0.0f, 40.0f});
+        m.giveMaterials(world::Resource::Wood, 999);
+        m.giveMaterials(world::Resource::Stone, 999);
+        int placed = 0;
+        for (int k = 0; k < 60; ++k) {
+            m.teleport(0, {-60.0f + (k % 10) * 4.0f, 0.0f, 60.0f + (k / 10) * 4.0f}, 0.0f);
+            if (m.buildWall(0.0f) >= 0) ++placed;
+        }
+        printf("  piezas del jugador: %d de 60 (limite %d); dia %.0f s, noche %.0f s\n", placed,
+               m.config().build.maxWalls, static_cast<double>(m.config().zombie.dayLength),
+               static_cast<double>(m.config().zombie.nightLength));
+        check(placed > 40, "en el modo zombi no hay limite de piezas (salvo el tecnico)");
+        check(m.config().zombie.dayLength >= 280.0f && m.config().zombie.nightLength >= 170.0f, "los dias y las noches duran mas");
+
+        const game::ObjectiveType t0 = m.objective(0).type, t1 = m.objective(1).type;
+        m.setObjective(0, game::ObjectiveType::KillZombies, 2);
+        m.setObjective(1, game::ObjectiveType::EatFood, 9);
+        const int doneBefore = m.objectivesDone();
+        const int metal0 = m.materials().get(world::Resource::Metal);
+        const int ammo0 = m.inventory().ammo(game::AmmoType::Shells);
+        for (int k = 0; k < 2; ++k) {
+            const int z = m.spawnZombieAt(game::ZombieType::Walker, {24.0f, 0.0f, 44.0f});
+            if (z >= 0) m.applyDamage(z + 1, 10000.0f, 0);
+        }
+        const bool done = m.objective(0).doneTime >= 0.0f && m.objectivesDone() == doneBefore + 1;
+        const bool rewarded = m.materials().get(world::Resource::Metal) > metal0 || m.inventory().ammo(game::AmmoType::Shells) > ammo0 ||
+                              slotOf(m, ItemType::CannedFood) >= 0 || slotOf(m, ItemType::Medkit) >= 0;
+        run(m, 5.0f);
+        const bool replaced = m.objective(0).doneTime < 0.0f && m.objective(0).type != game::ObjectiveType::Count;
+        printf("  objetivos: %d y %d al empezar; abatir 2 zombis: cumplido %s, recompensa %s, nuevo objetivo %s (%d)\n",
+               static_cast<int>(t0), static_cast<int>(t1), done ? "si" : "no", rewarded ? "si" : "no", replaced ? "si" : "no",
+               static_cast<int>(m.objective(0).type));
+        check(t0 != t1 && t0 != game::ObjectiveType::Count, "hay dos objetivos distintos");
+        check(done && rewarded && replaced, "un objetivo cumplido da su recompensa y llega otro");
+    }
+
+    // --- Guardianes de los lugares: aparecen al acercarse; algunos tumbados se levantan ------------
+    {
+        Match m;
+        MatchConfig c = quiet();
+        c.zombie.siteGuardRange = 10.0f;
+        c.zombie.lurkerChance = 1.0f;
+        fresh(m, c, world::zsites::kWakeSpot);
+        const world::zsites::Site& site = world::zsites::kSites[1];  // almacen
+        m.teleport(0, {site.x, 0.0f, site.z - site.radius - 8.0f}, 3.1416f);
+        run(m, 1.0f);
+        int guards = 0, dormant = 0, dormantIndex = -1;
+        for (int i = 0; i < game::kZombieSlots; ++i) {
+            const game::Bot& b = m.bot(i);
+            if (b.state == game::BotState::Eliminated || b.site != 1) continue;
+            ++guards;
+            if (b.dormant) {
+                ++dormant;
+                dormantIndex = i;
+            }
+        }
+        const u32 from = m.eventCount();
+        bool rose = false;
+        if (dormantIndex >= 0) {
+            m.teleport(0, m.body(dormantIndex + 1).state().position + Vec3{2.5f, 0.0f, 0.0f}, 0.0f);
+            run(m, 1.0f);
+            rose = !m.bot(dormantIndex).dormant && eventsOf(m, from, game::GameEventType::LurkerRise) >= 1;
+        }
+        printf("  almacen: %d guardianes (%d tumbados); uno se levanta al acercarse %s\n", guards, dormant, rose ? "si" : "no");
+        check(guards >= site.guards, "al acercarse a un lugar de interes aparecen sus guardianes");
+        check(dormant > 0 && rose, "algunos estan tumbados entre las ruinas y se levantan al acercarse");
+    }
+
+    // --- Guardar y cargar ------------------------------------------------------------------------
+    {
+        const char* path = "build/match_sim/partida_zombis_prueba.txt";
+        Match a;
+        MatchConfig c = quiet();
+        c.seed = 77;
+        fresh(a, c, world::zsites::kWakeSpot);
+        const int survivor = game::kZombieSlots + 1;
+        const Vec3 camp = a.body(survivor + 1).state().position;
+        a.teleport(0, camp + Vec3{0.0f, 0.0f, 1.6f}, 3.1416f);
+        a.giveItem(ItemType::Pistol, 1, Rarity::Rare);
+        a.giveItem(ItemType::Bandage, 5);
+        a.selectSlot(slotOf(a, ItemType::Pistol));
+        a.giveToSurvivor(survivor);
+        a.selectSlot(slotOf(a, ItemType::Bandage));
+        a.giveToSurvivor(survivor);
+        a.giveItem(ItemType::Shotgun, 1, Rarity::Epic);
+        a.giveItem(ItemType::CannedFood, 4);
+        a.giveAmmo(game::AmmoType::Shells, 33);
+        a.giveMaterials(world::Resource::Metal, 77);
+        a.giveBlueprint(2);
+        a.teleport(0, {-60.0f, 0.0f, 60.0f}, 0.0f);
+        const int wall = a.buildWall(0.0f);
+        a.setNeeds(42.0f, 61.0f);
+        // Un contenedor abierto y un objeto roto.
+        int opened = -1;
+        for (int i = 0; i < static_cast<int>(a.containers().size()); ++i) {
+            if (a.containers()[i].kind == ContainerKind::Fridge) {
+                opened = i;
+                break;
+            }
+        }
+        game::Interactable it;
+        it.kind = game::Interactable::Kind::Container;
+        it.index = opened;
+        a.teleport(0, a.containers()[opened].position + game::forwardFromYaw(a.containers()[opened].yaw) * 1.1f, 0.0f);
+        a.interact(0, it);
+        run(a, 2.0f);
+        const bool saved = a.saveZombies(path, 55);
+        int day = 0;
+        u32 seed = 0;
+        const bool peek = Match::peekZombieSave(path, &day, &seed);
+
+        Match b;
+        MatchConfig cb = quiet();
+        cb.seed = seed;
+        fresh(b, cb, world::zsites::kWakeSpot);
+        int vbucks = 0;
+        const bool loaded = b.loadZombies(path, &vbucks);
+        const Vec3 pa = a.body(0).state().position, pb = b.body(0).state().position;
+        const bool same = distXZ(pa, pb) < 0.1f && fabsf(b.food() - a.food()) < 0.5f && fabsf(b.rest() - a.rest()) < 0.5f &&
+                          slotOf(b, ItemType::Shotgun) >= 0 && b.inventory().count(ItemType::CannedFood) == 4 &&
+                          b.inventory().ammo(game::AmmoType::Shells) == a.inventory().ammo(game::AmmoType::Shells) &&
+                          b.materials().get(world::Resource::Metal) == a.materials().get(world::Resource::Metal) &&
+                          b.blueprintFound(2) && b.bot(survivor).rescued && b.containers()[opened].opened &&
+                          b.structures().totalCount() == a.structures().totalCount() && vbucks == 55 &&
+                          b.pickups().size() > 0 && b.day() == a.day();
+        printf("  guardar: %s (dia %d, semilla %u); cargar: %s, todo igual %s (piezas %d/%d, pared %d)\n", saved ? "si" : "no", day,
+               static_cast<unsigned>(seed), loaded ? "si" : "no", same ? "si" : "no", b.structures().totalCount(),
+               a.structures().totalCount(), wall);
+        check(saved && peek && seed == 77 && loaded && same, "la partida zombi se guarda y se carga tal cual");
+        Match::eraseZombieSave(path);
+        check(!Match::peekZombieSave(path, nullptr, nullptr), "la partida guardada se borra");
+    }
+}
+
+// --- v0.16: equipos, derribos, aliados inteligentes, camas asignadas -----------------------------
+
+void testUpdate016(world::World& world, game::NavGrid& nav) {
+    printf("\n22) v0.16: equipos (derribar y reanimar), mapa del battle royale y aliados inteligentes\n");
+    using game::ItemType;
+    using game::Rarity;
+    game::PlayerInput still;
+    auto fresh = [&](Match& m, const MatchConfig& c, const Vec3& spawn) {
+        m.setHarvestables(&world.harvestables());
+        world.mutableCollision().clearDynamic();
+        m.start(c, world.mutableCollision(), nav, world.pointsOfInterest(), spawn, 0.0f);
+    };
+    auto run = [&](Match& m, float seconds, const game::PlayerCommands& cmd = game::PlayerCommands{}) {
+        for (int i = 0; i < static_cast<int>(seconds * 60.0f); ++i) stepWith(m, still, game::PlayerAim{}, cmd);
+    };
+    auto teamCfg = [](int size, int bots, bool frozen) {
+        MatchConfig c;
+        c.teamSize = size;
+        c.botCount = bots;
+        c.startInBus = false;
+        c.loot = false;
+        c.stormCloses = false;
+        c.cheats.freezeBots = frozen;
+        c.seed = 16;
+        return c;
+    };
+    const Vec3 open{0.0f, 0.0f, 24.0f};
+
+    // --- Mapa: lo del modo zombi no se dibuja en el battle royale ---------------------------------
+    {
+        int zombieBatches = 0, loose = 0, stray = 0;
+        for (const world::StaticBatch& b : world.batches()) {
+            if (!b.zombieOnly) {
+                // Fuera de los objetos (el suelo, la meseta) nada pequeno dentro de La Casona.
+                const world::zsites::Site& s = world::zsites::kSites[0];
+                const float dx = b.center.x - s.x, dz = b.center.z - s.z;
+                if (b.object < 0 && b.radius < 6.0f && dx * dx + dz * dz < s.radius * s.radius) ++stray;
+                continue;
+            }
+            ++zombieBatches;
+            loose += b.object < 0 ? 1 : 0;
+        }
+        printf("  lotes del modo zombi: %d (%d sin objeto: suelos, vigas, sangre); sueltos en La Casona: %d\n", zombieBatches,
+               loose, stray);
+        check(zombieBatches > 0 && loose > 0 && stray == 0, "en el battle royale no queda ningun resto visual de las ruinas");
+    }
+
+    // --- Reparto y fuego amigo ----------------------------------------------------------------------
+    {
+        Match duo, squad;
+        fresh(duo, teamCfg(2, game::kDuoBots, true), open);
+        check(duo.entityCount() == 30 && duo.teamCount() == 15 && duo.teamsLeft() == 15 && duo.sameTeam(0, 1) && !duo.sameTeam(0, 2) &&
+                  !duo.hostile(0, 1) && duo.hostile(0, 2),
+              "duo: 15 parejas; el jugador va con un bot");
+        fresh(squad, teamCfg(4, game::kSquadBots, true), open);
+        check(squad.entityCount() == 40 && squad.teamCount() == 10 && squad.sameTeam(0, 3) && !squad.sameTeam(0, 4),
+              "escuadron: 40 personajes, 10 equipos de 4");
+        squad.teleport(1, open + Vec3{0.0f, 0.0f, -4.0f}, 0.0f);
+        game::PlayerAim aim;
+        aim.eye = squad.chestOf(0);
+        aim.direction = math3d::normalize(squad.chestOf(1) - aim.eye);
+        const game::ShotResult shot = squad.playerShot(aim, 50.0f, 60.0f);
+        check(shot.victim != 1 && squad.body(1).state().health == 100.0f, "sin fuego amigo: las balas atraviesan a los companeros");
+    }
+
+    // --- Derribado: se arrastra, no actua y se desangra --------------------------------------------
+    {
+        Match m;
+        fresh(m, teamCfg(2, 3, true), open);
+        m.setHealth(0, 5.0f, 40.0f);
+        m.applyDamage(0, 100.0f, 2);
+        const float left = m.bleedLeft(0);
+        const bool down = m.downed(0) && m.alive(0) && m.phase() == game::MatchPhase::Playing && m.body(0).state().shield == 0.0f;
+        printf("  derribado: %.0f de vida, le quedan %.1f s\n", static_cast<double>(m.body(0).state().health), static_cast<double>(left));
+        check(down && left > 29.0f && left < 31.0f, "sin vida y con un companero en pie se cae derribado (30 s)");
+        m.giveItem(ItemType::AssaultRifle, 1, Rarity::Rare);
+        m.giveAmmo(game::AmmoType::Medium, 60);
+        m.selectSlot(0);
+        const int shots = m.stats().shotsFired;
+        game::PlayerAim aim;
+        aim.eye = m.eyeOf(0);
+        aim.direction = {0.0f, 0.0f, -1.0f};
+        aim.fire = true;
+        game::PlayerInput go;
+        go.moveY = -1.0f;
+        const Vec3 from = m.body(0).state().position;
+        for (int i = 0; i < 60; ++i) stepWith(m, go, aim);
+        const float crawled = distXZ(m.body(0).state().position, from);
+        printf("  en un segundo se arrastra %.2f m (corriendo: 5.5)\n", static_cast<double>(crawled));
+        check(crawled > 1.0f && crawled < 2.0f, "derribado se arrastra despacio");
+        check(m.stats().shotsFired == shots, "derribado no dispara");
+        run(m, 30.0f);
+        check(!m.alive(0) && !m.downed(0) && m.phase() == game::MatchPhase::Spectating && m.playerTeamAlive(),
+              "si nadie le reanima acaba muriendo (y sigue la partida de su companero)");
+    }
+
+    // --- Reanimar: mantener CUADRADO 10 s -----------------------------------------------------------
+    {
+        Match m;
+        fresh(m, teamCfg(2, 3, true), open);
+        m.teleport(1, open + Vec3{0.0f, 0.0f, -1.5f}, 0.0f);
+        m.setHealth(1, 1.0f, 0.0f);
+        m.applyDamage(1, 50.0f, 2);
+        check(m.downed(1) && m.reviveTarget() == 1, "el companero derribado se puede reanimar");
+        game::PlayerCommands hold;
+        hold.reviveHeld = true;
+        run(m, 5.0f, hold);
+        const float half = m.reviveProgress(1);
+        run(m, 1.0f);
+        const float released = m.reviveProgress(1);
+        run(m, 10.1f, hold);
+        printf("  reanimando: %.0f %% a los 5 s; al soltar, %.0f %%; despues, vida %.0f\n", static_cast<double>(half * 100.0f),
+               static_cast<double>(released * 100.0f), static_cast<double>(m.body(1).state().health));
+        check(half > 0.45f && half < 0.55f && released == 0.0f, "soltar CUADRADO corta la reanimacion");
+        check(!m.downed(1) && m.alive(1) && fabsf(m.body(1).state().health - 30.0f) < 0.01f && m.stats().revives == 1,
+              "al cabo de 10 s el companero se levanta con 30 de vida");
+    }
+
+    // --- Un bot reanima al jugador ------------------------------------------------------------------
+    {
+        Match m;
+        fresh(m, teamCfg(2, 3, false), open);
+        m.teleport(1, open + Vec3{-12.0f, 0.0f, 3.0f}, 0.0f);
+        m.setHealth(0, 1.0f, 0.0f);
+        m.applyDamage(0, 50.0f, 2);
+        float t = 0.0f;
+        while (m.downed(0) && t < 26.0f) {
+            run(m, 0.25f);
+            t += 0.25f;
+        }
+        printf("  el bot companero reanima al jugador en %.1f s\n", static_cast<double>(t));
+        check(!m.downed(0) && m.alive(0) && t > 9.0f && t < 26.0f, "el bot companero va a por el jugador derribado y le levanta");
+    }
+
+    // --- El equipo cae entero; puesto y victoria por equipos --------------------------------------
+    {
+        Match m;
+        fresh(m, teamCfg(4, 11, true), open);
+        for (int id = 1; id <= 3; ++id) m.applyDamage(id, 1000.0f, 5);
+        check(m.downed(1) && m.downed(2) && m.downed(3) && m.teamsLeft() == 3, "tres companeros derribados; el jugador sigue en pie");
+        m.applyDamage(0, 1000.0f, 5);
+        check(!m.alive(0) && !m.alive(1) && !m.alive(2) && !m.alive(3) && m.teamsLeft() == 2 && m.playerPlace() == 3,
+              "sin nadie en pie, el equipo entero cae (puesto del equipo)");
+    }
+    {
+        Match m;
+        fresh(m, teamCfg(2, 3, true), open);
+        m.applyDamage(0, 1000.0f, 2);
+        m.applyDamage(0, 1000.0f, 2);
+        const bool out = !m.alive(0) && m.phase() == game::MatchPhase::Spectating;
+        m.applyDamage(2, 1000.0f, 1);
+        m.applyDamage(3, 1000.0f, 1);
+        check(out && m.phase() == game::MatchPhase::Finished && m.playerWon() && m.winner() == 1 && m.playerPlace() == 1,
+              "si gana el companero, gana el equipo (aunque el jugador haya caido)");
+    }
+
+    // --- Partidas enteras por equipos --------------------------------------------------------------
+    {
+        for (int size : {2, 4}) {
+            MatchConfig c;
+            c.teamSize = size;
+            c.botCount = size == 4 ? game::kSquadBots : game::kDuoBots;
+            c.seed = 77u + size;
+            c.invulnerablePlayer = true;
+            Match m;
+            fresh(m, c, open);
+            bool together = true;
+            float t = 0.0f;
+            while (m.phase() != game::MatchPhase::Finished && t < 900.0f) {
+                run(m, 1.0f);
+                t += 1.0f;
+                if (t == 60.0f && m.alive(1) && !m.downed(1)) {
+                    together = distXZ(m.body(1).state().position, m.body(0).state().position) < 40.0f;
+                }
+            }
+            const game::MatchStats& s = m.stats();
+            printf("  %s: %d personajes, fin a los %.0f s, %d derribos, %d reanimaciones, IA %.3f ms/paso\n",
+                   size == 4 ? "escuadrones" : "duos", m.entityCount(), static_cast<double>(t), s.downs, s.revives,
+                   static_cast<double>(s.aiMicros) / 1000.0 / s.steps);
+            check(m.phase() == game::MatchPhase::Finished && s.downs > 3 && s.revives > 0 && m.teamsLeft() == 1,
+                  size == 4 ? "una partida de escuadrones llega al final, con derribos y reanimaciones"
+                            : "una partida de duos llega al final, con derribos y reanimaciones");
+            check(together, "los companeros del jugador van con el");
+        }
+    }
+
+    // --- Aliados ------------------------------------------------------------------------------------
+    auto quiet = []() {
+        MatchConfig c = MatchConfig::zombies();
+        c.zombie.dayZombies = 0;
+        c.zombie.zombiesPerDay = 0;
+        c.zombie.nightZombies = 0;
+        c.zombie.hordeBase = 0;
+        c.zombie.hordePerDay = 0;
+        c.zombie.siteGuardRange = -1000.0f;
+        c.invulnerablePlayer = true;
+        c.seed = 16;
+        return c;
+    };
+    auto rescue = [&](Match& m, int survivor) {
+        const int a = m.giveItem(ItemType::Pistol, 1, Rarity::Common);
+        (void)a;
+        for (int k = 0; k < m.inventory().slotCount(); ++k) {
+            if (m.inventory().slot(k).type == ItemType::Pistol) m.selectSlot(k);
+        }
+        m.giveToSurvivor(survivor);
+        m.giveItem(ItemType::Bandage, 3);
+        for (int k = 0; k < m.inventory().slotCount(); ++k) {
+            if (m.inventory().slot(k).type == ItemType::Bandage) m.selectSlot(k);
+        }
+        m.giveToSurvivor(survivor);
+    };
+    const int survivor = game::kZombieSlots;
+    const Vec3 field{20.0f, 0.0f, 44.0f};
+    auto hasItem = [](const game::Bot& b, ItemType type) {
+        for (int k = 0; k < b.bag.slotCount(); ++k) {
+            if (b.bag.slot(k).type == type) return true;
+        }
+        return false;
+    };
+
+    {
+        Match m;
+        fresh(m, quiet(), field);
+        const game::CharacterState& s = m.body(survivor + 1).state();
+        check(s.health == 125.0f && s.maxHealth == 125.0f && s.maxShield == 125.0f, "los aliados tienen 125 de vida y hasta 125 de escudo");
+        m.teleport(survivor + 1, field + Vec3{2.0f, 0.0f, 0.0f}, 0.0f);
+        rescue(m, survivor);
+        check(m.bot(survivor).rescued, "aliado rescatado");
+        // Una pistola mejor en el suelo: la cambia; y una mochila y materiales.
+        game::Pickup better;
+        better.kind = game::PickupKind::Item;
+        better.item = ItemType::Pistol;
+        better.rarity = Rarity::Epic;
+        better.count = 1;
+        better.position = field + Vec3{7.0f, 0.0f, 0.0f};
+        m.dropPickup(better);
+        game::Pickup pack;
+        pack.kind = game::PickupKind::Backpack;
+        pack.count = game::Inventory::kBackpackSlots;
+        pack.position = field + Vec3{-7.0f, 0.0f, 2.0f};
+        m.dropPickup(pack);
+        game::Pickup mats;
+        mats.kind = game::PickupKind::Materials;
+        mats.resource = world::Resource::Metal;
+        mats.count = 40;
+        mats.position = field + Vec3{4.0f, 0.0f, 6.0f};
+        m.dropPickup(mats);
+        run(m, 20.0f);
+        const game::Bot& b = m.bot(survivor);
+        printf("  aliado tras 20 s: arma %s, ranuras %d, metal %d\n", game::rarityName(b.weaponRarity), b.bag.slotCount(),
+               b.materials.get(world::Resource::Metal));
+        check(b.armed && b.weaponType == ItemType::Pistol && b.weaponRarity == Rarity::Epic, "el aliado cambia su arma por una mejor que encuentra");
+        check(b.bag.slotCount() == 8, "el aliado usa las mochilas que encuentra");
+        check(b.materials.get(world::Resource::Metal) >= 40, "el aliado recoge materiales");
+    }
+
+    {
+        Match m;
+        const Vec3 bench = world::zsites::kWorkbenches[0];
+        const Vec3 near = bench + Vec3{4.0f, 0.0f, 6.0f};
+        fresh(m, quiet(), near);
+        m.teleport(survivor + 1, near + Vec3{2.0f, 0.0f, 0.0f}, 0.0f);
+        rescue(m, survivor);
+        m.giveBotMaterials(survivor, world::Resource::Wood, 50);
+        m.giveBotMaterials(survivor, world::Resource::Metal, 70);
+        for (int k = 0; k < 60 && m.stats().allyCrafts == 0; ++k) run(m, 0.5f);
+        const game::Bot& b = m.bot(survivor);
+        printf("  aliado junto al centro de crafteo: %d fabricado(s), metal %d\n", m.stats().allyCrafts, b.materials.get(world::Resource::Metal));
+        check(m.stats().allyCrafts == 1 && hasItem(b, ItemType::AssaultRifle) && b.armed && b.weaponType == ItemType::AssaultRifle,
+              "con materiales y un centro de crafteo cerca, el aliado se fabrica un arma mejor");
+    }
+
+    {
+        Match m;
+        fresh(m, quiet(), field);
+        m.teleport(survivor + 1, field + Vec3{3.0f, 0.0f, 0.0f}, 0.0f);
+        rescue(m, survivor);
+        m.setHealth(survivor + 1, 40.0f, 0.0f);
+        const int z = m.spawnZombieAt(game::ZombieType::Walker, field + Vec3{8.0f, 0.0f, 0.0f});
+        m.applyDamage(survivor + 1, 2.0f, z + 1);
+        run(m, 1.0f);
+        const bool fleeing = m.bot(survivor).state == game::BotState::Flee;
+        run(m, 3.0f);
+        printf("  aliado con poca vida: %s; piezas suyas %d\n", game::botStateName(m.bot(survivor).state),
+               m.structures().countOwnedBy(survivor + 1));
+        check(fleeing, "con poca vida el aliado huye en vez de pelear");
+        check(m.structures().countOwnedBy(survivor + 1) > 0, "y se cubre con sus estructuras");
+    }
+
+    {
+        Match m;
+        fresh(m, quiet(), field);
+        m.teleport(survivor + 1, field + Vec3{2.0f, 0.0f, 0.0f}, 0.0f);
+        rescue(m, survivor);
+        m.setHealth(survivor + 1, 125.0f, 125.0f);
+        // Zombis junto a el y el jugador se va lejos: le sigue en vez de quedarse a pelear.
+        for (int k = 0; k < 3; ++k) m.spawnZombieAt(game::ZombieType::Walker, field + Vec3{6.0f, 0.0f, 0.0f});
+        const Vec3 far = field + Vec3{-26.0f, 0.0f, 10.0f};
+        m.teleport(0, far, 0.0f);
+        float best = 1e9f;
+        for (int k = 0; k < 40; ++k) {
+            run(m, 0.25f);
+            best = fminf(best, distXZ(m.body(survivor + 1).state().position, far));
+        }
+        printf("  el jugador se va 28 m con zombis junto al aliado: se le acerca a %.1f m en 10 s\n", static_cast<double>(best));
+        check(best < 15.0f, "el aliado prioriza seguir al jugador antes que pelear");
+    }
+
+    // --- Sube por la rampa detras del jugador -------------------------------------------------------
+    {
+        Match m;
+        MatchConfig c = quiet();
+        fresh(m, c, field);
+        m.teleport(survivor + 1, field + Vec3{3.0f, 0.0f, 3.0f}, 0.0f);
+        rescue(m, survivor);
+        m.teleport(survivor + 2, field + Vec3{-2.0f, 0.0f, 3.0f}, 0.0f);
+        rescue(m, survivor + 1);
+        m.giveMaterials(world::Resource::Wood, 100);
+        const int ramp = m.buildWall(0.0f, game::PieceType::Ramp);
+        game::PlayerInput up;
+        up.moveY = -1.0f;
+        for (int i = 0; i < 160 && m.body(0).state().position.y < 2.6f; ++i) stepWith(m, up, game::PlayerAim{});
+        const float top = m.body(0).state().position.y;
+        run(m, 10.0f);
+        const game::CharacterState& a = m.body(survivor + 1).state();
+        const game::CharacterState& a2 = m.body(survivor + 2).state();
+        printf("  jugador en la rampa a %.2f m; aliados a %.2f y %.2f m de altura y %.1f m de el\n", static_cast<double>(top),
+               static_cast<double>(a.position.y), static_cast<double>(a2.position.y),
+               static_cast<double>(distXZ(a.position, m.body(0).state().position)));
+        check(ramp >= 0 && top > 2.0f && a.position.y > 1.8f && a2.position.y > 1.8f && distXZ(a.position, m.body(0).state().position) < 5.0f,
+              "si el jugador sube por una rampa construida, los aliados suben con el");
+        // Y baja con el.
+        game::PlayerInput down;
+        down.moveY = 1.0f;
+        for (int i = 0; i < 120; ++i) stepWith(m, down, game::PlayerAim{});
+        run(m, 8.0f);
+        check(m.body(survivor + 1).state().position.y < 1.0f, "y si el jugador baja, el aliado baja");
+    }
+
+    // --- Camas asignadas --------------------------------------------------------------------------
+    {
+        Match m;
+        MatchConfig c = quiet();
+        fresh(m, c, {62.0f, 0.0f, 37.5f});
+        m.teleport(survivor + 1, {60.0f, 0.0f, 36.0f}, 0.0f);
+        rescue(m, survivor);
+        m.giveItem(ItemType::Bed, 1);
+        for (int k = 0; k < m.inventory().slotCount(); ++k) {
+            if (m.inventory().slot(k).type == ItemType::Bed) m.selectSlot(k);
+        }
+        game::PlayerInput in;
+        m.setPlayerInput(in, game::PlayerAim{});
+        const int bed = m.placeBed();
+        check(bed >= 0 && m.nearbyBed() == bed && m.bedOwner(bed) < 0, "una cama nueva no es de nadie");
+        // Sin asignar, de noche no se acuesta.
+        m.setDayClock(1, true, 10.0f);
+        run(m, 8.0f);
+        check(!m.bot(survivor).sleeping && m.bot(survivor).bed < 0, "sin asignarle la cama, el aliado no duerme en ella");
+        m.setDayClock(1, false, 30.0f);
+        check(m.assignBed(bed, survivor) && m.bedOwner(bed) == survivor, "se asigna la cama al aliado (L sobre ella)");
+        check(!m.trySleep(bed), "el jugador no puede dormir en la cama de un aliado");
+        // De dia fortifica junto a la cama.
+        m.giveBotMaterials(survivor, world::Resource::Wood, 100);
+        int walls = 0;
+        for (int k = 0; k < 60; ++k) {
+            run(m, 1.0f);
+            walls = 0;
+            for (int w = 0; w < m.structures().capacity(); ++w) {
+                const game::BuiltWall& piece = m.structures().wall(w);
+                if (!piece.active) continue;
+                const Vec3 center = (piece.box.min + piece.box.max) * 0.5f;
+                walls += distXZ(center, m.containers()[bed].position) < 3.2f ? 1 : 0;
+            }
+            if (walls >= 3) break;
+        }
+        printf("  piezas junto a la cama: %d\n", walls);
+        check(walls >= 3, "de dia, el aliado fortifica junto a su cama");
+        // El aliado se va lejos y cae la noche con un zombi encima: va a dormir si o si.
+        m.teleport(0, {30.0f, 0.0f, 44.0f}, 0.0f);
+        run(m, 3.0f);
+        m.teleport(survivor + 1, {32.0f, 0.0f, 44.0f}, 0.0f);
+        const int z = m.spawnZombieAt(game::ZombieType::Walker, {33.0f, 0.0f, 44.0f});
+        m.setDayClock(1, true, 1.0f);
+        float t = 0.0f;
+        while (!m.bot(survivor).sleeping && t < 40.0f) {
+            run(m, 0.5f);
+            t += 0.5f;
+        }
+        const float before = m.body(survivor + 1).state().health + m.body(survivor + 1).state().shield;
+        check(m.bot(survivor).sleeping && t < 35.0f, "de noche, el aliado con cama se acuesta pase lo que pase");
+        printf("  llega a la cama en %.1f s\n", static_cast<double>(t));
+        if (z >= 0) m.teleport(z + 1, m.body(survivor + 1).state().position + Vec3{1.2f, 0.0f, 0.0f}, 0.0f);
+        run(m, 8.0f);
+        m.applyDamage(survivor + 1, 500.0f, -1);
+        const float after = m.body(survivor + 1).state().health + m.body(survivor + 1).state().shield;
+        check(after == before && m.bot(survivor).sleeping, "los zombis no pueden hacer dano a un aliado durmiendo");
+        // Guardar y cargar: escudo, materiales, mochilas y su cama.
+        const char* path = "build/match_sim_aliado.txt";
+        m.setHealth(survivor + 1, 90.0f, 60.0f);
+        check(m.saveZombies(path), "partida con aliado guardada");
+        Match l;
+        fresh(l, c, {62.0f, 0.0f, 37.5f});
+        const bool loaded = l.loadZombies(path);
+        const game::CharacterState& s = l.body(survivor + 1).state();
+        check(loaded && l.bot(survivor).rescued && s.shield == 60.0f && s.health == 90.0f && l.bot(survivor).bed == bed &&
+                  l.bedOwner(bed) == survivor && l.bot(survivor).materials.get(world::Resource::Wood) == m.bot(survivor).materials.get(world::Resource::Wood),
+              "el aliado se guarda con su escudo, sus materiales y su cama");
+        Match::eraseZombieSave(path);
+    }
+    world.mutableCollision().clearDynamic();
+}
+
 int main() {
     world::World world;
     if (!world.build()) {
@@ -3451,6 +4344,8 @@ int main() {
     testRealMatches(world, nav);
     testUpdate013(world, nav);
     testUpdate014(world, nav);
+    testUpdate015(world, nav);
+    testUpdate016(world, nav);
 
     printf("\n%s (%d fallos)\n", g_failures == 0 ? "TODO CORRECTO" : "HAY FALLOS", g_failures);
     world.destroy();

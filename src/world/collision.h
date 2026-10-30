@@ -70,8 +70,9 @@ public:
     void enableAllStatic();
 
     // Cajas dinamicas. addDynamic devuelve un identificador (o -1 si no hay hueco).
-    // Una rampa son varias cajas (escalones): hace falta sitio para unas 20 de ellas.
-    static constexpr int kMaxDynamic = 224;
+    // Una rampa son varias cajas (escalones). v0.15: sitio para las 128 piezas del modo zombi
+    // (las consultas solo recorren hasta la ultima ocupada).
+    static constexpr int kMaxDynamic = 512;
     int addDynamic(const Aabb& box, u8 flags);
     void removeDynamic(int handle);
     void clearDynamic();

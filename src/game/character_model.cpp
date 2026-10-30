@@ -78,6 +78,8 @@ constexpr float kHipY = 0.95f;
 constexpr float kHipX = 0.105f;
 constexpr float kKneeDrop = 0.43f;    // cadera -> rodilla
 constexpr float kCrouchDrop = 0.36f;  // agachado: cuanto baja la cadera
+constexpr float kDownedPitch = 1.38f;  // derribado: tronco casi horizontal, rodillas y manos al suelo
+constexpr float kDownedHipY = 0.50f;
 constexpr float kShoulderY = 1.395f;
 constexpr float kShoulderX = 0.245f;
 constexpr float kElbowDrop = 0.285f;  // hombro -> codo
@@ -940,13 +942,17 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     const Vec3& pos = state.position;
     const bool dance = pose == BodyPose::Dance;
     const bool zombie = pose == BodyPose::Zombie;
-    if (zombie) held = ItemModel::None;
+    const bool sleep = pose == BodyPose::Sleep;
+    // Los zombis van sin nada en las manos, salvo un arma (aliados caidos, v0.15).
+    if (zombie && items && held != ItemModel::None && items->info(held).grip == GripStyle::None) held = ItemModel::None;
+    const bool downed = pose == BodyPose::Downed;
+    if (sleep || downed) held = ItemModel::None;
     const bool skydive = pose == BodyPose::Skydive, glide = pose == BodyPose::Glide;
     // Agachado: con la mezcla suavizada (si la animacion no la lleva, de golpe).
     const float crouch = pose == BodyPose::Crouch ? fmaxf(anim.crouchBlend, anim.crouchBlend > 0.01f ? 0.0f : 1.0f)
-                                                  : (skydive || glide || dance ? 0.0f : anim.crouchBlend);
+                                                  : (skydive || glide || dance || downed ? 0.0f : anim.crouchBlend);
     const float t = anim.idleTime;
-    if (!eliminated && !skydive && !glide) {
+    if (!eliminated && !skydive && !glide && !sleep) {
         // Sombra circular bajo los pies: encoge al subir, para leer la altura del salto.
         // Se apoya en la altura real de los pies al tocar suelo (cajas, altillo).
         const float groundY = state.grounded() ? pos.y : world::groundHeightAt(pos.x, pos.z);
@@ -969,6 +975,10 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         const float fall = k * k;
         root = root * Mat4::translation({0.0f, 0.15f * fall, 0.0f}) *
                Mat4::rotationX(math3d::kPi * 0.5f * fall * anim.deathSide) * Mat4::rotationY(0.25f * fall * anim.deathSide);
+    } else if (sleep) {
+        // Durmiendo: tumbado boca arriba, de los pies (-Z) a la cabeza (+Z), con la
+        // respiracion subiendo y bajando el pecho.
+        root = root * Mat4::translation({0.0f, 0.12f + 0.01f * sinf(t * 1.6f), -0.85f}) * Mat4::rotationX(0.5f * math3d::kPi);
     } else if (skydive) {
         // Caida libre: boca abajo (la cabeza hacia delante), girando sobre la cadera.
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-1.35f) *
@@ -976,6 +986,11 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     } else if (glide) {
         root = root * Mat4::translation({0.0f, kHipY, 0.0f}) * Mat4::rotationX(-0.18f) *
                Mat4::translation({0.0f, -kHipY, 0.0f});
+    } else if (downed) {
+        // A cuatro patas: la cadera a la altura de las rodillas y el tronco casi horizontal.
+        const float crawl = 0.015f * sinf(anim.walkPhase * 2.0f);
+        root = root * Mat4::translation({0.0f, kDownedHipY - kHipY + crawl, 0.0f}) * Mat4::translation({0.0f, kHipY, 0.0f}) *
+               Mat4::rotationX(-kDownedPitch) * Mat4::translation({0.0f, -kHipY, 0.0f});
     } else if (dance) {
         // Baile: rebote al ritmo y vaiven de la cadera.
         const float beat = sinf(t * 6.0f);
@@ -1012,7 +1027,7 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
         gfx::drawMesh(lod.parts[id]);
     };
     part(kBody, bodyTwist != 0.0f ? root * Mat4::rotationY(bodyTwist) : root);
-    const bool still = eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f);
+    const bool still = sleep || (eliminated && (anim.deathSeconds <= 0.0f || anim.deathSeconds > 0.45f));
     // Piernas: rotationX(+a) lleva el extremo hacia delante (-Z); la rodilla se dobla hacia atras.
     for (int s = 0; s < 2; ++s) {
         const float side = s == 0 ? -1.0f : 1.0f;
@@ -1030,6 +1045,11 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             hip = 0.35f * sinf(t * 6.0f + (s == 0 ? 0.0f : math3d::kPi));
             knee = 0.25f + 0.25f * fabsf(sinf(t * 6.0f + s));
             legSpread = 0.12f;
+        } else if (downed) {
+            // Muslos hacia el suelo y espinillas hacia atras; al gatear, alternando.
+            hip = kDownedPitch + side * 0.2f * sinf(anim.walkPhase) * anim.runBlend;
+            knee = 1.5f;
+            legSpread = 0.06f;
         } else if (zombie && !eliminated) {
             // Cojea: la pierna izquierda apenas se dobla y da pasos cortos.
             if (s == 0) {
@@ -1053,7 +1073,7 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
     // guardamanos de la postura del arma. Si no (nada, pico, consumible, granada, poses
     // especiales): angulos de la animacion, y el objeto en la palma derecha.
     const GripStyle grip = items && held != ItemModel::None ? items->info(held).grip : GripStyle::None;
-    const bool twoHanded = !eliminated && !skydive && !glide && !dance &&
+    const bool twoHanded = !eliminated && !skydive && !glide && !dance && !sleep && !downed &&
                            (grip == GripStyle::Rifle || grip == GripStyle::Pistol || grip == GripStyle::Shoulder);
     if (twoHanded) {
         const WeaponPose wp = weaponPose(grip, anim, torsoPitch);
@@ -1109,6 +1129,12 @@ void CharacterModel::draw(const CharacterState& state, const CharacterAnim& anim
             elbow = 0.25f;
             inward = 0.0f;
             spread = 0.3f;
+        } else if (downed) {
+            // Brazos estirados hacia el suelo (el contrario a la pierna, como al gatear).
+            shoulder = kDownedPitch - side * 0.25f * sinf(anim.walkPhase) * anim.runBlend;
+            elbow = 0.08f;
+            inward = 0.0f;
+            spread = 0.14f;
         } else if (zombie && !eliminated) {
             // Brazos al frente, buscando a tientas; el zarpazo baja desde arriba (swing 1 -> 0).
             shoulder = 1.30f + 0.12f * sinf(t * 2.1f + s * 1.7f) + (s == 1 ? 1.3f * anim.swing : 0.5f * anim.swing);

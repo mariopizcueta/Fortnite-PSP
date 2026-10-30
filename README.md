@@ -8,13 +8,26 @@ Releases trae la carpeta `PSP/GAME/FortnitePSP/` lista; se copia a la raíz de l
 (español o inglés) y luego el nombre de jugador.
 
 **Actualizar sin perder los datos:** el perfil (`perfil.txt`: nombre, estadísticas, logros,
-pavos y compras) y los ajustes (`ajustes.txt`) están en `ms0:/PSP/GAME/FortnitePSP/`, junto al
-EBOOT, y el zip no los trae. Basta con copiar **solo el `EBOOT.PBP`** nuevo encima del viejo
+pavos y compras), los ajustes (`ajustes.txt`) y la partida zombi guardada
+(`partida_zombis.txt`, v0.15) están en `ms0:/PSP/GAME/FortnitePSP/`, junto al EBOOT, y el zip
+no los trae. Basta con copiar **solo el `EBOOT.PBP`** nuevo encima del viejo
 en esa carpeta; no hay que borrar ni sustituir la carpeta entera (en el Mac, "Reemplazar" una
 carpeta borra lo que tenía dentro). Por si acaso, antes se pueden copiar esos dos `.txt` al
 ordenador.
 
-**Estado: v0.14.0: 30 bots por defecto (con menos, partida de práctica sin pavos ni logros),
+**Estado: v0.16.0: Battle Royale en dúo y escuadrón (40 personajes), con derribados que se
+arrastran a cuatro patas y compañeros que te reaniman; aliados inteligentes en la
+Supervivencia zombi (125 de vida y escudo, recogen botín, fabrican, huyen y te siguen por las
+rampas), camas asignadas con L, el disparo de la escopeta se oye siempre y el mapa del Battle
+Royale sin restos de las ruinas.** Detalle en
+[docs/ACTUALIZACION_0_16.md](docs/ACTUALIZACION_0_16.md) y [docs/EQUIPOS.md](docs/EQUIPOS.md).
+Antes, v0.15.0: la Supervivencia zombi a fondo: lugares de interés en ruinas (la Casona,
+el Almacén del Polvorín, casas, puestos de avanzada y la gasolinera) con neveras y
+despensas, hambre y sueño (cama y saco de dormir), partida guardada, inventario de los
+aliados, aliados que construyen la base, que duermen y que, si caen, vuelven como zombis
+armados, mochilas, objetivos variados, días más largos, sin límite de piezas y mucho más
+miedo.** Detalle en [docs/ACTUALIZACION_0_15.md](docs/ACTUALIZACION_0_15.md). Antes,
+v0.14.0: 30 bots por defecto (con menos, partida de práctica sin pavos ni logros),
 bots que acampan airdrops, se encierran en cajas, ganan altura con rampas y juegan el final
 con cabeza, texturas y personajes más detallados, cielo y animaciones nuevas, agua que se
 cruza andando y el modo Supervivencia zombi.** Detalle en
@@ -56,6 +69,45 @@ Novedades del parche:
 de host. No son capturas de una PSP.*
 
 ## Qué incluye
+
+**v0.16.0** (todo en [docs/ACTUALIZACION_0_16.md](docs/ACTUALIZACION_0_16.md)):
+- **Dúo y escuadrón** en el Battle Royale ([docs/EQUIPOS.md](docs/EQUIPOS.md)): 15 parejas o 10
+  equipos de 4, derribados, reanimar con CUADRADO mantenido y barras de los compañeros.
+- **Aliados inteligentes** ([docs/ZOMBIS.md](docs/ZOMBIS.md)): 125 de vida y escudo, botín,
+  crafteo, huida con cobertura y prioridad absoluta a seguirte, también por las rampas.
+- **Camas asignadas** con L: de noche duermen pase lo que pase, sin recibir daño, y de día
+  levantan un refugio junto a la cama.
+- **Sonido:** el disparo del jugador tiene prioridad sobre los efectos (la escopeta de
+  corredera no se oía al acertar).
+- **Mapa:** ya no quedan restos de las ruinas en el Battle Royale.
+
+**v0.15.0** (todo en [docs/ACTUALIZACION_0_15.md](docs/ACTUALIZACION_0_15.md) y
+[docs/ZOMBIS.md](docs/ZOMBIS.md)), solo en la Supervivencia zombi:
+- **Lugares de interés:** 10 ruinas nuevas; cuanto más grandes, más botín y comida y más
+  zombis las guardan (algunos, tumbados como cadáveres hasta que te acercas).
+- **Hambre y sueño:** comida en neveras, despensas y cofres; se duerme en el **saco de
+  dormir** (con el que se empieza) o en una **cama** fabricada; con sueño te equivocas y a
+  cero pierdes vida; no se puede dormir con monstruos cerca.
+- **Partida guardada:** desde la pausa y sola al amanecer; en el lobby, "Continuar: día N".
+- **Aliados:** CUADRADO junto a uno gestiona su inventario; levantan el muro de la base
+  aunque no tengas planos; duermen en sus camas fuera de guardia; si caen, se levantan como
+  zombis armados.
+- **Mochilas** (+3 ranuras) de los brutos y los aliados caídos; **cajas de munición** con
+  todos los tipos; **sin límite de piezas**; **días de 300 s** y noches de 180 s.
+- **Objetivos** variados con recompensa y pavos.
+- **Más miedo:** ojos rojos en la oscuridad, latido, gritos lejanos, susurros, alucinaciones
+  y sobresaltos.
+
+![HUD: objetivos, hambre y sueño](docs/capturas/app_v15_hud.png)
+![La Casona](docs/capturas/app_v15_casona.png)
+![El Almacén del Polvorín](docs/capturas/app_v15_almacen.png)
+![Puesto de avanzada](docs/capturas/app_v15_puesto.png)
+![Gasolinera](docs/capturas/app_v15_gasolinera.png)
+![Durmiendo en el saco](docs/capturas/app_v15_durmiendo.png)
+![Inventario de un aliado](docs/capturas/app_v15_aliado.png)
+![Mochila: 8 ranuras](docs/capturas/app_v15_mochila.png)
+![Ojos en la noche](docs/capturas/app_v15_ojos.png)
+![Continuar la partida](docs/capturas/app_v15_continuar.png)
 
 **v0.14.0** (todo en [docs/ACTUALIZACION_0_14.md](docs/ACTUALIZACION_0_14.md)):
 - **30 bots por defecto.** Con menos, la partida es **de práctica**: ni pavos ni logros.
@@ -316,6 +368,7 @@ make && make release
 | `make physics-test` | Pruebas de movimiento, salto, cámara y colisiones en el Mac        |
 | `make match-sim`    | Partidas simuladas en el Mac: colisiones, disparos, IA, construcción y sucesos |
 | `make clean`        | Borra objetos, `.elf`, `.prx`, `PARAM.SFO` y `EBOOT.PBP`           |
+| `make web`          | Versión para PC en el navegador (teclado y ratón): `web/dist/index.html`. Necesita Emscripten; ver [`web/README.md`](web/README.md) |
 | `make distclean`    | `clean` + borra `build/`                                           |
 
 ### Instalar
@@ -351,7 +404,7 @@ En cada arranque se escribe `fortnitepsp_log.txt` en la misma carpeta que el EBO
 |-------------------|------------------------|-----------------------------------------------------|
 | Inicio de sesión  | **X**                  | Iniciar sesión (conexión simulada)                  |
 | Lobby (JUGAR)     | **TRIÁNGULO**          | Jugar                                               |
-| Lobby (JUGAR)     | **CUADRADO**           | Modo de juego (Battle Royale / Monodisparo / Supervivencia zombi) y bots (panel: ↑↓ fila, ←→ valor; CUADRADO, X u O cierran). Con menos de 30 bots, práctica |
+| Lobby (JUGAR)     | **CUADRADO**           | Modo de juego (Battle Royale / Monodisparo / Supervivencia zombi), equipos (Solo / Dúo / Escuadrón, solo Battle Royale) y bots (panel: ↑↓ fila, ←→ valor; CUADRADO, X u O cierran). En solitario con menos de 30 bots, práctica |
 | Lobby (JUGAR)     | **SELECT**             | Controles                                           |
 | Lobby (JUGAR)     | **CÍRCULO**            | Salir (pide confirmación: X sale, O cancela)        |
 | Lobby             | **Stick**              | Girar el personaje                                  |
@@ -403,12 +456,32 @@ muestra los de por defecto. Con el inventario lleno, CUADRADO abre un selector: 
 | Junto a un centro de crafteo | **CUADRADO** | Menú de crafteo: ↑↓ elegir, X fabricar, O cerrar |
 | Junto a una pieza fantasma de un plano | **CUADRADO** | Construirla (10 de material, reforzada) |
 | Un plano en el suelo | **CUADRADO** | Recogerlo (aparecen sus piezas en la base) |
+| Comida / cama / saco de dormir en la mano (v0.15) | **R** | Comer / colocar la cama / dormir aquí |
+| Junto a una cama, nevera o despensa (v0.15) | **CUADRADO** | Dormir / registrarla |
+| Durmiendo (v0.15) | **CÍRCULO** o **X** | Despertar |
+| Junto a un aliado (v0.15) | **CUADRADO** | Su inventario (X dar / quitar) |
+| Junto a una cama, con aliados (v0.16) | **L** | Asignarla a un aliado: ↑↓ elegir, X asignar, O cerrar |
+| Pausa del modo zombi (v0.15) | **X** | Guardar partida / guardar y salir |
+
+**Dúo y escuadrón** (v0.16):
+
+| Dónde | Botón | Acción |
+|-------|-------|--------|
+| Junto a un compañero derribado | **CUADRADO mantenido** | Reanimarle (10 s) |
+| Derribado | **Stick** | Arrastrarse (no se puede hacer nada más) |
 
 Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 [docs/COMBATE_CONSTRUCCION.md](docs/COMBATE_CONSTRUCCION.md) y
 [docs/JUGADOR.md](docs/JUGADOR.md).
 
 ## Limitaciones conocidas
+
+- **v0.16.0 sin probar en ejecución real:** los FPS con 40 personajes en escuadrón (hasta ahora
+  el máximo eran 31) y si los tiempos de derribo y reanimación se sienten bien.
+- **v0.15.0 sin probar en ejecución real:** los FPS con los lugares nuevos y los guardianes,
+  si la noche (más oscura) se ve bien en la PSP-2000, que se lean los textos nuevos del HUD
+  y que el guardado (`partida_zombis.txt`) funcione en la Memory Stick. El límite de piezas
+  del modo zombi es el técnico (128 a la vez).
 
 - **v0.14.0 sin probar en ejecución real:** el rendimiento con 30 bots por defecto y los
   personajes más detallados, el modo zombi (22 zombis y la noche) y si la noche se ve
@@ -455,6 +528,9 @@ Detalle en [docs/INVENTARIO.md](docs/INVENTARIO.md),
 
 ```
 Makefile                     Build basado en build.mak de PSPSDK
+docs/ACTUALIZACION_0_16.md   v0.16: duo y escuadron, aliados inteligentes, camas asignadas
+docs/EQUIPOS.md              Duo y escuadron: derribados, reanimar e IA de equipo (v0.16)
+docs/ACTUALIZACION_0_15.md   v0.15: Supervivencia zombi a fondo
 docs/ACTUALIZACION_0_14.md   v0.14: 30 bots, bots tacticos, graficos, agua y modo zombi
 docs/ZOMBIS.md               Supervivencia zombi (v0.14)
 docs/ACTUALIZACION_0_13.md   v0.13: mapa que se rompe, inventario, pavos, IA, admin, Monodisparo
@@ -525,6 +601,12 @@ Recursos/ Referencias/       Recursos directos / material de referencia
 ## Estado de las pruebas
 
 - **Compilación:** sin errores ni warnings con `-Wall -Wextra` (PSP y host).
+- **v0.16.0: `make app-sim` 0 fallos en 211 comprobaciones, `make match-sim` 0 fallos en
+  296, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 12 (app-sim) y 22
+  (match-sim); ver [docs/ACTUALIZACION_0_16.md](docs/ACTUALIZACION_0_16.md).
+- **v0.15.0: `make app-sim` 0 fallos en 189 comprobaciones, `make match-sim` 0 fallos en
+  257, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 6c (app-sim) y 21
+  (match-sim); ver [docs/ACTUALIZACION_0_15.md](docs/ACTUALIZACION_0_15.md).
 - **v0.14.0: `make app-sim` 0 fallos en 178 comprobaciones, `make match-sim` 0 fallos en
   231, `make physics-test` 0 fallos.** Lo nuevo está en las secciones 11 (app-sim) y 20
   (match-sim); ver [docs/ACTUALIZACION_0_14.md](docs/ACTUALIZACION_0_14.md).

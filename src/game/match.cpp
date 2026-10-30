@@ -25,6 +25,8 @@ const char* botStateName(BotState state) {
         case BotState::Flee: return i18n::tr(i18n::T::BotFlee);
         case BotState::Camp: return i18n::tr(i18n::T::BotCamp);
         case BotState::Idle: return i18n::tr(i18n::T::BotIdle);
+        case BotState::Downed: return i18n::tr(i18n::T::BotDowned);
+        case BotState::Revive: return i18n::tr(i18n::T::BotRevive);
         case BotState::Eliminated: return i18n::tr(i18n::T::BotEliminated);
     }
     return "?";
@@ -35,6 +37,7 @@ const char* useErrorName(UseError error) {
         case UseError::None: return "";
         case UseError::FullHealth: return i18n::tr(i18n::T::UseFullHealth);
         case UseError::FullShield: return i18n::tr(i18n::T::UseFullShield);
+        case UseError::FullFood: return i18n::tr(i18n::T::UseFullFood);
     }
     return "?";
 }
@@ -56,6 +59,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_config = config;
     if (m_config.botCount < 0) m_config.botCount = 0;
     if (m_config.botCount > kMaxBots) m_config.botCount = kMaxBots;
+    if (m_config.teamSize < 1 || m_config.mode == GameMode::Zombies) m_config.teamSize = 1;
     m_world = &world;
     m_nav = &nav;
     m_pois = pointsOfInterest;
@@ -73,6 +77,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_pendingJump = m_pendingPlace = m_pendingRemove = m_pendingReload = false;
     m_pendingPickaxe = m_pendingUse = false;
     m_pendingCycle = 0;
+    m_pendingSelect = -1;
     m_pendingSwapPickup = m_pendingSwapSlot = -1;
     m_recoilBloom = 0.0f;
     m_buildMode = false;
@@ -87,8 +92,11 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
         m_inventory.addAmmo(static_cast<AmmoType>(a), m_config.startAmmo[a]);
     }
     m_inventory.select(0);
-    // Sin nada en las manos (como al saltar del autobus en Fortnite): el pico.
-    if (m_inventory.slot(0).type == ItemType::None) m_inventory.setPickaxe(true);
+    // Sin nada en las manos (como al saltar del autobus en Fortnite): el pico. Tampoco se
+    // empieza con el saco de dormir en la mano (modo zombi, v0.15).
+    if (m_inventory.slot(0).type == ItemType::None || itemDef(m_inventory.slot(0).type).kind == ItemKind::Furniture) {
+        m_inventory.setPickaxe(true);
+    }
     m_materials = Materials{};
     for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) {
         m_materials.add(static_cast<world::Resource>(r), m_config.startMaterials[r]);
@@ -111,6 +119,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     m_bots.assign(m_config.botCount, Bot{});
     for (int i = 0; i < m_config.botCount; ++i) snprintf(m_names[i + 1], sizeof(m_names[0]), i18n::tr(i18n::T::BotName), i + 1);
     m_alive = 1 + m_config.botCount;
+    splitIntoTeams();
     // Modo zombi: zombis (aparecen con el tiempo) y supervivientes en sus campamentos.
     if (zombieMode()) startZombies();
     else spawnBots(playerSpawn);
@@ -155,7 +164,7 @@ void Match::start(const MatchConfig& config, world::CollisionWorld& world, NavGr
     spawnLoot();
     if (m_config.loot && (m_config.forceLlama || m_rng.chance(m_config.llamaChance))) spawnLlama();
     if (m_config.startInBus) startBus();
-    if (m_alive <= 1 && !zombieMode()) {
+    if (teamsLeft() <= 1 && !zombieMode()) {
         m_phase = MatchPhase::Finished;
         m_winner = 0;
         m_playerPlace = 1;
@@ -210,14 +219,15 @@ const char* Match::name(int id) const { return (id >= 0 && id < entityCount()) ?
 
 Vec3 Match::eyeOf(int id) const { return body(id).state().position + Vec3{0.0f, kEyeHeight, 0.0f}; }
 Vec3 Match::chestOf(int id) const {
-    return body(id).state().position + Vec3{0.0f, id == 0 && m_playerCrouched ? kCrouchChestHeight : kChestHeight, 0.0f};
+    const float height = m_downed[id] ? kDownedChestHeight : (id == 0 && m_playerCrouched ? kCrouchChestHeight : kChestHeight);
+    return body(id).state().position + Vec3{0.0f, height, 0.0f};
 }
 
 world::Aabb Match::hitBox(int id) const {
     const Vec3 p = body(id).state().position;
     // Los brutos del modo zombi son mas grandes (v0.14).
     const float scale = entityScale(id);
-    const float h = (id == 0 && m_playerCrouched ? kCrouchHitHeight : kHitHeight) * scale;
+    const float h = (m_downed[id] ? kDownedHitHeight : (id == 0 && m_playerCrouched ? kCrouchHitHeight : kHitHeight)) * scale;
     const float w = kHitHalfWidth * scale;
     return {{p.x - w, p.y, p.z - w}, {p.x + w, p.y + h, p.z + w}};
 }
@@ -284,6 +294,7 @@ void Match::setPlayerInput(const PlayerInput& input, const PlayerAim& aim,
     if (commands.togglePickaxe) m_pendingPickaxe = !m_pendingPickaxe;
     if (commands.useItem) m_pendingUse = true;
     m_pendingCycle += commands.cycleSlot;
+    if (commands.selectSlot >= 0) m_pendingSelect = commands.selectSlot;
 }
 
 void Match::step(float dt) {
@@ -303,6 +314,7 @@ void Match::step(float dt) {
     autoPickupAmmo(0);
     if (zombieMode()) updateZombieMode(dt);
     for (int i = 0; i < static_cast<int>(m_bots.size()); ++i) updateBot(i, dt);
+    if (teamMode()) updateDowned(dt);
     updateProjectiles(dt);
     updateTraps(dt);
     separateCharacters();
@@ -315,14 +327,17 @@ void Match::step(float dt) {
 }
 
 void Match::updatePlayer(float dt) {
+    m_playerReviving = -1;
     const bool place = m_pendingPlace, remove = m_pendingRemove, reload = m_pendingReload;
     const bool trap = m_pendingTrap;
     m_pendingTrap = false;
     const bool togglePickaxe = m_pendingPickaxe;
     const int cycle = m_pendingCycle;
+    const int select = m_pendingSelect;
     const int swapIndex = m_pendingSwapPickup, swapTo = m_pendingSwapSlot;
     m_pendingPlace = m_pendingRemove = m_pendingReload = m_pendingPickaxe = false;
     m_pendingCycle = 0;
+    m_pendingSelect = -1;
     m_pendingSwapPickup = m_pendingSwapSlot = -1;
     m_sinceUseError += dt;
     if (m_swingCooldown > 0.0f) m_swingCooldown -= dt;
@@ -352,7 +367,7 @@ void Match::updatePlayer(float dt) {
     PlayerInput in = m_input;
     in.jumpPressed = m_pendingJump;
     m_pendingJump = false;
-    const bool control = m_phase == MatchPhase::Playing || m_phase == MatchPhase::Finished;
+    const bool control = (m_phase == MatchPhase::Playing || m_phase == MatchPhase::Finished) && !m_sleeping;
     if (!control) in = PlayerInput{};
 
     // En el autobus o cayendo: X salta / abre el ala delta y el stick dirige la caida.
@@ -373,13 +388,49 @@ void Match::updatePlayer(float dt) {
         return;
     }
 
+    // Derribado (equipos, v0.16): solo se arrastra. No dispara, no construye y no usa nada.
+    if (m_downed[0]) {
+        m_buildMode = false;
+        m_playerAiming = false;
+        m_assistTarget = -1;
+        m_pendingUse = false;
+        in.jumpPressed = in.jumpHeld = in.aiming = false;
+        MoveIntent crawl = playerIntent(in);
+        crawl.speedScale *= m_config.downCrawlSpeed;
+        crawl.jumpPressed = crawl.jumpHeld = false;
+        const u64 t0 = core::nowMicros();
+        m_player.step(crawl, dt, *m_world);
+        m_stats.physicsMicros += core::nowMicros() - t0;
+        return;
+    }
+    // Reanimando a un companero (CUADRADO mantenido): quieto y sin hacer nada mas.
+    if (control && m_commands.reviveHeld) {
+        const int mate = reviveTarget();
+        if (mate >= 0 && markRevive(0, mate)) {
+            m_playerReviving = mate;
+            cancelUse();
+            if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
+            m_playerAiming = false;
+            m_assistTarget = -1;
+            m_pendingUse = false;
+            m_buildMode = false;
+            const u64 t0 = core::nowMicros();
+            m_player.step(MoveIntent{}, dt, *m_world);
+            m_stats.physicsMicros += core::nowMicros() - t0;
+            return;
+        }
+    }
     // Cambiar lo que se lleva en la mano interrumpe la recarga y el consumible en uso.
-    if (control && (cycle != 0 || togglePickaxe)) {
+    if (control && (cycle != 0 || togglePickaxe || select >= 0)) {
         Weapon* before = m_inventory.activeWeapon();
         const int slotBefore = m_inventory.selected();
         const bool pickaxeBefore = m_inventory.pickaxe();
         if (togglePickaxe) m_inventory.setPickaxe(!m_inventory.pickaxe());
         if (cycle != 0) m_inventory.cycle(cycle);
+        // Una ranura vacia no se elige (como al recorrerlas con la cruceta).
+        if (select >= 0 && select < m_inventory.slotCount() && m_inventory.slot(select).type != ItemType::None) {
+            m_inventory.select(select);
+        }
         if (slotBefore != m_inventory.selected() || pickaxeBefore != m_inventory.pickaxe()) {
             if (before) before->cancelReload();
             cancelUse();
@@ -402,6 +453,7 @@ void Match::updatePlayer(float dt) {
     if (in.jumpPressed) m_playerCrouched = false;
     MoveIntent intent = playerIntent(in);
     if (m_playerCrouched) intent.speedScale *= m_config.crouchSpeed;
+    if (m_stumbleTimer > 0.0f) intent.speedScale *= 0.45f;  // modo zombi: tropieza de cansancio
     // Trucos de movimiento (menu de administrador).
     const Cheats& cheats = m_config.cheats;
     if (cheats.superSpeed) {
@@ -503,6 +555,12 @@ void Match::updatePlayerItems(float dt, bool reload) {
         if (use) throwGrenade();
         return;
     }
+    // Cama y saco de dormir (v0.15): R coloca la cama delante o duerme en el saco.
+    if (itemDef(m_inventory.activeType()).kind == ItemKind::Furniture) {
+        if (use && m_inventory.activeType() == ItemType::Bed) placeBed();
+        else if (use) trySleep(-1);
+        return;
+    }
     // Consumible: R lo empieza a usar; termina tras su tiempo de uso si no se cambia de
     // ranura ni se construye (moverse y recibir dano no lo interrumpen, como en Fortnite).
     if (use && m_useSlot < 0) startUse();
@@ -522,6 +580,11 @@ void Match::updatePlayerItems(float dt, bool reload) {
     if (def.shield > 0.0f && s.shield < def.shieldCap) {
         s.shield = s.shield + def.shield > def.shieldCap ? def.shieldCap : s.shield + def.shield;
     }
+    if (def.food > 0.0f) {
+        m_food = fminf(100.0f, m_food + def.food);
+        m_hungerStage = m_food <= 0.0f ? 2 : (m_food < 25.0f ? 1 : 0);
+        objectiveEvent(ObjectiveType::EatFood);
+    }
     m_inventory.consumeOne(m_useSlot);
     m_useSlot = -1;
     pushEvent(GameEventType::ItemUsed, 0, static_cast<int>(type), chestOf(0));
@@ -534,8 +597,13 @@ bool Match::startUse() {
     if (def.kind != ItemKind::Consumable) return false;
     const CharacterState& s = m_player.state();
     UseError error = UseError::None;
-    if (def.health > 0.0f && s.health >= def.healthCap) error = UseError::FullHealth;
-    if (def.shield > 0.0f && s.shield >= def.shieldCap) error = UseError::FullShield;
+    if (def.food > 0.0f) {
+        // Comida: solo importa el hambre (la racion cura un poco de paso).
+        if (m_food >= 99.0f) error = UseError::FullFood;
+    } else {
+        if (def.health > 0.0f && s.health >= def.healthCap) error = UseError::FullHealth;
+        if (def.shield > 0.0f && s.shield >= def.shieldCap) error = UseError::FullShield;
+    }
     if (error != UseError::None) {
         m_useError = error;
         m_sinceUseError = 0.0f;
@@ -555,7 +623,7 @@ void Match::cancelUse() {
 }
 
 bool Match::moveSlot(int from, int to) {
-    if (from < 0 || to < 0 || from >= Inventory::kSlots || to >= Inventory::kSlots || from == to || !alive(0)) return false;
+    if (from < 0 || to < 0 || from >= m_inventory.slotCount() || to >= m_inventory.slotCount() || from == to || !alive(0)) return false;
     if (m_inventory.slot(from).type == ItemType::None && m_inventory.slot(to).type == ItemType::None) return false;
     cancelUse();
     if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
@@ -567,7 +635,7 @@ bool Match::moveSlot(int from, int to) {
 }
 
 bool Match::selectSlot(int slot) {
-    if (slot < 0 || slot >= Inventory::kSlots || !alive(0)) return false;
+    if (slot < 0 || slot >= m_inventory.slotCount() || !alive(0)) return false;
     if (slot == m_inventory.selected() && !m_inventory.pickaxe()) return true;
     cancelUse();
     if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
@@ -577,7 +645,7 @@ bool Match::selectSlot(int slot) {
 }
 
 bool Match::dropInventorySlot(int slot) {
-    if (slot < 0 || slot >= Inventory::kSlots || !alive(0) || m_air[0] != AirState::Ground) return false;
+    if (slot < 0 || slot >= m_inventory.slotCount() || !alive(0) || m_air[0] != AirState::Ground) return false;
     if (m_inventory.slot(slot).type == ItemType::None) return false;
     if (m_useSlot == slot) cancelUse();
     if (Weapon* w = m_inventory.activeWeapon()) w->cancelReload();
@@ -604,7 +672,7 @@ void Match::cheatEliminateBots() {
 
 void Match::cheatRefill() {
     for (int a = 0; a < static_cast<int>(AmmoType::Count); ++a) m_inventory.setAmmo(static_cast<AmmoType>(a), Inventory::kMaxAmmo);
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < m_inventory.slotCount(); ++i) {
         InventorySlot& slot = m_inventory.mutableSlot(i);
         if (isWeapon(slot.type)) slot.weapon.fillMagazine();
     }
@@ -638,11 +706,13 @@ float Match::playerSpread(const WeaponConfig& w) const {
         spread *= 1.0f + (w.crouchSpreadScale - 1.0f) * bonus;
     }
     const Weapon* weapon = m_inventory.activeWeapon();
+    // Modo zombi (v0.15): con sueno, el pulso tiembla (y mas cuanto mas cansado).
+    const float tiredSpread = tired() ? 5.0f * (1.0f - m_rest / fmaxf(m_config.zombie.tiredLevel, 1.0f)) + 1.0f : 0.0f;
     if (w.pellets == 1 && aiming && s.horizontalSpeed() < 0.5f && s.grounded() && weapon && weapon->sinceShot() > 0.35f &&
-        m_recoilBloom < 0.05f) {
+        m_recoilBloom < 0.05f && tiredSpread <= 0.0f) {
         return 0.0f;
     }
-    return spread + m_recoilBloom;
+    return spread + m_recoilBloom + tiredSpread;
 }
 
 float Match::playerSpreadNow() const {
@@ -792,6 +862,7 @@ void Match::harvest(int index, const Vec3& point) {
     const world::Harvestable& h = (*m_harvestables)[index];
     const int added = m_materials.add(h.resource, h.perHit);
     m_sincePlayerHit = 0.0f;
+    if (added > 0) objectiveEvent(ObjectiveType::Harvest, added);
     pushEvent(GameEventType::Harvest, 0, static_cast<int>(h.resource), point);
     m_events[(m_eventCount - 1) % kMaxEvents].amount = added;
     damageObject(index, m_config.pickaxeObjectDamage, point, 0);
@@ -966,6 +1037,7 @@ ShotResult Match::resolveShot(int shooter, const Vec3& origin, const Vec3& end, 
         if (shooter == 0) {
             m_sincePlayerHit = 0.0f;
             if (headshot) ++m_playerHeadshots;
+            if (headshot && isZombie(victim)) objectiveEvent(ObjectiveType::Headshots);
             addDamageNumber(result.end, damage, false, headshot, shielded);
         }
         applyDamage(victim, damage, shooter);
@@ -1077,6 +1149,7 @@ int Match::buildWall(float yaw, PieceType type) {
     if (wall >= 0) {
         if (!m_config.cheats.infiniteMaterials) m_materials.spend(m_structures.wall(wall).material, m_config.build.wallCost);
         ++m_stats.wallsBuilt;
+        objectiveEvent(ObjectiveType::BuildPieces);
         const world::Aabb& b = m_structures.wall(wall).box;
         pushEvent(GameEventType::WallBuilt, 0, -1, (b.min + b.max) * 0.5f);
     }
@@ -1129,8 +1202,10 @@ void Match::commandBotTravel(int botIndex, const Vec3& destination) {
 
 void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShield) {
     if (!alive(victim) || amount <= 0.0f) return;
-    // Sin fuego amigo (modo zombi): explosiones y trampas no hieren a los aliados.
+    // Sin fuego amigo (modo zombi y equipos): explosiones y trampas no hieren a los aliados.
     if (attacker >= 0 && attacker != victim && !hostile(attacker, victim)) return;
+    // Un aliado durmiendo en su cama no recibe dano de nada (v0.16).
+    if (isSurvivor(victim) && m_bots[victim - 1].sleeping) return;
     if (victim == 0 && (m_config.invulnerablePlayer || m_config.cheats.godMode)) return;
     CharacterState& s = mutableBody(victim).state();
     // El escudo absorbe primero; lo que sobra pasa a la vida.
@@ -1150,8 +1225,10 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
         b.coverFrom = attacker;
         b.sinceHurt = 0.0f;
         b.threat = attacker;
-        if (m_config.botsFlee && s.health > 0.0f && botWeak(b)) {
+        if ((m_config.botsFlee || b.kind == BotKind::Survivor) && s.health > 0.0f && botWeak(b)) {
             if (b.decisionTimer > 0.05f) b.decisionTimer = 0.05f;
+        } else if (b.state == BotState::Downed || b.state == BotState::Revive) {
+            // Derribado (se arrastra) o levantando a un companero: sigue con ello.
         } else if (b.state != BotState::Attack || !b.targetVisible) {
             b.state = BotState::Attack;
             b.target = attacker;
@@ -1166,11 +1243,15 @@ void Match::applyDamage(int victim, float amount, int attacker, bool ignoreShiel
     }
     if (s.health <= 0.0f) {
         s.health = 0.0f;
-        eliminate(victim, attacker);
+        // Equipos: con un companero en pie no se cae del todo (si ya estaba derribado, si).
+        if (teamMode() && !m_downed[victim] && teamStanding(victim)) goDown(victim, attacker);
+        else eliminate(victim, attacker >= 0 || !m_downed[victim] ? attacker : m_downedBy[victim]);
     }
 }
 
 void Match::eliminate(int victim, int killer) {
+    mutableBody(victim).state().health = 0.0f;
+    m_downed[victim] = false;
     pushEvent(GameEventType::Eliminated, victim, killer, body(victim).state().position);
     m_events[(m_eventCount - 1) % kMaxEvents].amount = m_damageSource + 1;
     if (victim > 0) {
@@ -1179,7 +1260,21 @@ void Match::eliminate(int victim, int killer) {
         // zombis sueltan a veces chatarra, municion o vendas.
         if (b.kind == BotKind::Zombie) {
             zombieDrops(victim - 1);
-            if (killer == 0) ++m_zombieKills;
+            if (killer == 0) {
+                ++m_zombieKills;
+                objectiveEvent(ObjectiveType::KillZombies);
+                if (b.zombieType == ZombieType::Runner) objectiveEvent(ObjectiveType::KillRunners);
+                if (b.zombieType == ZombieType::Brute) objectiveEvent(ObjectiveType::KillBrute);
+            }
+            b.dormant = false;
+        } else if (b.kind == BotKind::Survivor && zombieMode() && b.rescued) {
+            // Aliado caido (v0.15): no suelta nada; al rato se levanta como zombi armado.
+            b.riseTimer = m_config.zombie.fallenRiseSeconds;
+            b.sleeping = false;
+            b.allyPiece = 0;
+            if (b.bed >= 0 && b.bed < static_cast<int>(m_containers.size())) m_containers[b.bed].claimedBy = -1;
+            b.bed = -1;
+            pushEvent(GameEventType::AllyDown, victim, killer, b.body.state().position);
         } else if (m_config.loot && !b.lootDropped) {
             b.lootDropped = true;
             dropBotWeapon(victim - 1);
@@ -1188,7 +1283,7 @@ void Match::eliminate(int victim, int killer) {
         b.eliminatedAt = m_time;
         b.aiming = false;
         b.body.state().velocity = {0.0f, 0.0f, 0.0f};
-    } else {
+    } else if (!teamMode()) {
         m_playerPlace = m_alive;  // puesto = vivos antes de caer
     }
     --m_alive;
@@ -1204,17 +1299,28 @@ void Match::eliminate(int victim, int killer) {
         if (victim == 0) {
             m_phase = MatchPhase::Finished;
             m_winner = -1;
+            m_sleeping = 0;
         }
         return;
     }
     if (victim == 0 && m_phase == MatchPhase::Playing) m_phase = MatchPhase::Spectating;
-    if (m_alive <= 1) {
+    if (teamMode()) {
+        // Sin nadie en pie en el equipo, los derribados caen con el (como en Fortnite). El
+        // puesto es el del equipo: se decide al caer el ultimo.
+        if (!teamStanding(victim)) {
+            for (int id = 0; id < entityCount(); ++id) {
+                if (m_downed[id] && sameTeam(id, victim) && alive(id)) eliminate(id, m_downedBy[id]);
+            }
+        }
+        if (sameTeam(victim, 0) && !playerTeamAlive() && !alive(0) && m_playerPlace == 0) m_playerPlace = teamsLeft() + 1;
+    }
+    if (m_phase != MatchPhase::Finished && teamsLeft() <= 1) {
         m_phase = MatchPhase::Finished;
         m_winner = -1;
-        for (int id = 0; id < entityCount(); ++id) {
+        for (int id = entityCount() - 1; id >= 0; --id) {
             if (alive(id)) m_winner = id;
         }
-        if (m_winner == 0) m_playerPlace = 1;
+        if (m_winner >= 0 && sameTeam(m_winner, 0)) m_playerPlace = 1;
     }
 }
 

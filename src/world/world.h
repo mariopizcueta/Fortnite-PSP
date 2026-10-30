@@ -28,8 +28,9 @@ public:
     // Dibuja los lotes visibles (frustum + distancia maxima). Requiere gfx::begin3D().
     // `destroyed[i]` != 0: el objeto i (harvestables()) esta destruido y no se dibuja.
     RenderStats draw(const math3d::Frustum& frustum, const math3d::Vec3& eye,
-                     float maxDistance, const u8* destroyed = nullptr) const;
+                     float maxDistance, const u8* destroyed = nullptr, bool zombieMap = false) const;
     // Muro de la tormenta (translucido): despues de todo lo opaco.
+    const std::vector<StaticBatch>& batches() const { return m_static; }
     RenderStats drawStormWall(const math3d::Frustum& frustum, const math3d::Vec3& eye,
                               float maxDistance) const;
     // Muro de la tormenta que se cierra: cilindro de radio `radius` alrededor de `center`.

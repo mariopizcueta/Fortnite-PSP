@@ -21,13 +21,14 @@ void Mixer::setMusic(ImaStream* stream) {
 void Mixer::setMusicVolume(float volume) { m_musicVolume = clampInt(static_cast<int>(volume * 256.0f), 0, 256); }
 void Mixer::setMasterVolume(float volume) { m_masterVolume = clampInt(static_cast<int>(volume * 256.0f), 0, 256); }
 
-void Mixer::play(Sfx id, float volume, float pan) {
+void Mixer::play(Sfx id, float volume, float pan, SfxPriority priority) {
     if (volume <= 0.003f) return;
     Command c;
     c.op = 0;
     c.sfx = static_cast<u8>(id);
     c.volume = static_cast<u8>(clampInt(static_cast<int>(volume * 255.0f), 0, 255));
     c.pan = static_cast<s8>(clampInt(static_cast<int>(pan * 127.0f), -127, 127));
+    c.priority = static_cast<u8>(priority);
     push(c);
 }
 
@@ -37,6 +38,7 @@ void Mixer::stop(Sfx id) {
     c.sfx = static_cast<u8>(id);
     c.volume = 0;
     c.pan = 0;
+    c.priority = 0;
     push(c);
 }
 
@@ -46,6 +48,7 @@ void Mixer::stopAll() {
     c.sfx = 0;
     c.volume = 0;
     c.pan = 0;
+    c.priority = 0;
     push(c);
 }
 
@@ -74,15 +77,18 @@ void Mixer::startVoice(const Command& c) {
         }
         return;
     }
-    // Voz libre o, si no hay, la mas antigua.
-    Voice* target = &m_voices[0];
+    // Voz libre o, si no hay, la mas antigua de las de menor prioridad (nunca una de prioridad
+    // mayor: si todas lo son, este sonido no suena).
+    Voice* target = nullptr;
     for (Voice& v : m_voices) {
         if (!v.samples) {
             target = &v;
             break;
         }
-        if (v.age < target->age) target = &v;
+        if (v.priority > c.priority) continue;
+        if (!target || v.priority < target->priority || (v.priority == target->priority && v.age < target->age)) target = &v;
     }
+    if (!target) return;
     target->samples = clip.samples;
     target->count = clip.count;
     target->position = 0;
@@ -93,6 +99,7 @@ void Mixer::startVoice(const Command& c) {
     target->volumeLeft = volume * (pan > 0 ? 127 - pan : 127) / 127;
     target->volumeRight = volume * (pan < 0 ? 127 + pan : 127) / 127;
     target->age = ++m_voiceCounter;
+    target->priority = c.priority;
 }
 
 void Mixer::mix(s16* out, int frames) {

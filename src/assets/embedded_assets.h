@@ -4,9 +4,17 @@
 
 #include <stddef.h>
 
+#ifdef FORTNITEPSP_WEB
+// Version web: WebAssembly no tiene .incbin; web/build.sh genera los datos con #embed y
+// aqui solo hay punteros al principio y al final de cada recurso.
+#define FORTNITEPSP_ASSET(name)                          \
+    extern "C" const unsigned char* const asset_##name; \
+    extern "C" const unsigned char* const asset_##name##_end;
+#else
 #define FORTNITEPSP_ASSET(name)                    \
     extern "C" const unsigned char asset_##name[]; \
     extern "C" const unsigned char asset_##name##_end[];
+#endif
 
 FORTNITEPSP_ASSET(loadscreen_png)
 FORTNITEPSP_ASSET(login_png)
@@ -67,6 +75,13 @@ FORTNITEPSP_ASSET(sfx_horda)
 FORTNITEPSP_ASSET(sfx_chapoteo)
 FORTNITEPSP_ASSET(sfx_fabricar)
 FORTNITEPSP_ASSET(sfx_amanecer)
+FORTNITEPSP_ASSET(sfx_latido)
+FORTNITEPSP_ASSET(sfx_grito)
+FORTNITEPSP_ASSET(sfx_susurro)
+FORTNITEPSP_ASSET(sfx_sobresalto)
+FORTNITEPSP_ASSET(sfx_comer)
+FORTNITEPSP_ASSET(sfx_mochila)
+FORTNITEPSP_ASSET(sfx_roncar)
 FORTNITEPSP_ASSET(music_menu)
 
 namespace assets {
@@ -148,6 +163,13 @@ FORTNITEPSP_BLOB(sfxHorda, sfx_horda)
 FORTNITEPSP_BLOB(sfxChapoteo, sfx_chapoteo)
 FORTNITEPSP_BLOB(sfxFabricar, sfx_fabricar)
 FORTNITEPSP_BLOB(sfxAmanecer, sfx_amanecer)
+FORTNITEPSP_BLOB(sfxLatido, sfx_latido)
+FORTNITEPSP_BLOB(sfxGrito, sfx_grito)
+FORTNITEPSP_BLOB(sfxSusurro, sfx_susurro)
+FORTNITEPSP_BLOB(sfxSobresalto, sfx_sobresalto)
+FORTNITEPSP_BLOB(sfxComer, sfx_comer)
+FORTNITEPSP_BLOB(sfxMochila, sfx_mochila)
+FORTNITEPSP_BLOB(sfxRoncar, sfx_roncar)
 FORTNITEPSP_BLOB(musicMenu, music_menu)
 
 #undef FORTNITEPSP_BLOB

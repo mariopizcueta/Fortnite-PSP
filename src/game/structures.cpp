@@ -88,7 +88,7 @@ int StructureSystem::countOwnedBy(int owner) const {
 }
 
 bool StructureSystem::limitReached(int owner) const {
-    if (owner == 0) return countOwnedBy(0) >= m_config.maxWalls;
+    if (owner == 0) return countOwnedBy(0) >= m_config.maxWalls || m_count >= kMaxWallCapacity;
     return countOwnedBy(-1) >= m_config.maxBotWalls || countOwnedBy(owner) >= m_config.maxWallsPerBot ||
            m_count >= kMaxWallCapacity;
 }
@@ -309,6 +309,12 @@ bool StructureSystem::remove(int index) {
     --m_count;
     changed(w.box);
     return true;
+}
+
+void StructureSystem::setHealth(int index, float health) {
+    if (index < 0 || index >= kMaxWallCapacity || !m_walls[index].active) return;
+    BuiltWall& w = m_walls[index];
+    w.health = health < w.maxHealth ? (health > 1.0f ? health : 1.0f) : w.maxHealth;
 }
 
 bool StructureSystem::damage(int index, float amount) {

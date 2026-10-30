@@ -148,6 +148,75 @@ void buildBlueprint(SceneBuilder& b) {
     b.box(flat(rgba(80, 140, 220)), flat(rgba(120, 170, 240)), {-0.2f, 0.0f, -0.14f}, {0.18f, 0.012f, 0.14f});
 }
 
+// --- v0.15: modo zombi ---------------------------------------------------------------------------
+// Frente hacia -Z (como los cofres: forwardFromYaw(yaw) es su frente).
+
+void buildFridge(SceneBuilder& b, bool open) {
+    // Nevera vieja de color crema, oxidada abajo; abierta, la puerta girada y el interior oscuro.
+    const Material body = flat(rgba(200, 196, 178));
+    const Material rust = flat(rgba(120, 76, 50));
+    const Material dark = flat(rgba(30, 30, 28));
+    b.box(body, body, {-0.36f, 0.0f, -0.34f}, {0.36f, 1.7f, 0.34f});
+    b.box(rust, rust, {-0.37f, 0.0f, -0.35f}, {0.37f, 0.12f, 0.35f});
+    if (open) {
+        b.box(dark, dark, {-0.30f, 0.15f, -0.36f}, {0.30f, 1.62f, -0.33f});
+        b.box(flat(rgba(150, 150, 140)), body, {-0.30f, 0.8f, -0.36f}, {0.30f, 0.82f, -0.10f});  // balda
+        b.setTransform(Mat4::translation({0.36f, 0.0f, -0.36f}) * Mat4::rotationY(1.9f) * Mat4::translation({-0.36f, 0.0f, 0.36f}));
+    }
+    b.box(body, body, {-0.36f, 0.05f, -0.40f}, {0.36f, 1.66f, -0.34f});  // puerta
+    b.box(flat(rgba(150, 150, 146)), body, {0.24f, 0.9f, -0.44f}, {0.28f, 1.4f, -0.40f});  // tirador
+    b.box(rust, rust, {-0.2f, 0.3f, -0.41f}, {0.05f, 0.5f, -0.40f});
+    b.resetTransform();
+}
+
+void buildPantry(SceneBuilder& b, bool open) {
+    // Caja de viveres de madera con una cruz verde; abierta, la tapa levantada y latas dentro.
+    const Material wood = textured(world::kTexRottenWood, rgba(220, 210, 190), 0.8f);
+    const Material green = flat(rgba(70, 120, 60));
+    b.box(wood, wood, {-0.45f, 0.0f, -0.32f}, {0.45f, 0.55f, 0.32f});
+    b.box(green, green, {-0.06f, 0.15f, -0.335f}, {0.06f, 0.45f, -0.32f});
+    b.box(green, green, {-0.16f, 0.24f, -0.335f}, {0.16f, 0.36f, -0.32f});
+    if (open) {
+        b.box(flat(rgba(30, 26, 22)), flat(rgba(30, 26, 22)), {-0.40f, 0.50f, -0.27f}, {0.40f, 0.551f, 0.27f});
+        b.setTransform(Mat4::translation({0.0f, 0.55f, 0.32f}) * Mat4::rotationX(-1.9f) * Mat4::translation({0.0f, -0.55f, -0.32f}));
+    }
+    b.box(wood, wood, {-0.47f, 0.55f, -0.34f}, {0.47f, 0.62f, 0.34f});
+    b.resetTransform();
+}
+
+void buildBed(SceneBuilder& b) {
+    // Cama de tablones con colchon, manta y almohada (a lo largo de Z, cabecera en +Z).
+    const Material wood = textured(world::kTexRottenWood, rgba(200, 170, 140), 0.8f);
+    const Material sheet = flat(rgba(196, 188, 170));
+    const Material blanket = flat(rgba(110, 50, 44));
+    b.box(wood, wood, {-0.48f, 0.15f, -1.0f}, {0.48f, 0.32f, 1.0f});
+    for (float sx : {-0.42f, 0.42f})
+        for (float sz : {-0.94f, 0.94f}) b.box(wood, wood, {sx - 0.05f, 0.0f, sz - 0.05f}, {sx + 0.05f, 0.18f, sz + 0.05f});
+    b.box(wood, wood, {-0.48f, 0.0f, 0.95f}, {0.48f, 0.8f, 1.05f});  // cabecero
+    b.box(sheet, sheet, {-0.44f, 0.32f, -0.96f}, {0.44f, 0.44f, 0.94f});
+    b.box(blanket, blanket, {-0.46f, 0.36f, -0.96f}, {0.46f, 0.47f, 0.25f});
+    b.box(flat(rgba(236, 234, 226)), sheet, {-0.30f, 0.44f, 0.55f}, {0.30f, 0.54f, 0.88f});
+}
+
+void buildBackpack(SceneBuilder& b) {
+    // Mochila de cuero con bolsillo y correas.
+    const Material leather = flat(rgba(140, 96, 52));
+    const Material dark = flat(rgba(90, 60, 32));
+    b.box(leather, leather, {-0.20f, 0.0f, -0.12f}, {0.20f, 0.46f, 0.12f});
+    b.box(dark, dark, {-0.15f, 0.06f, -0.16f}, {0.15f, 0.26f, -0.12f});
+    b.box(dark, dark, {-0.21f, 0.40f, -0.13f}, {0.21f, 0.48f, 0.13f});
+    for (float x : {-0.12f, 0.08f}) b.box(dark, dark, {x, 0.05f, 0.12f}, {x + 0.04f, 0.45f, 0.15f});
+}
+
+void buildSleepingBag(SceneBuilder& b) {
+    // Saco de dormir extendido (a lo largo de Z) con la parte de la cabeza doblada.
+    const Material blue = flat(rgba(54, 96, 140));
+    const Material inner = flat(rgba(200, 190, 120));
+    b.box(blue, blue, {-0.42f, 0.0f, -1.0f}, {0.42f, 0.14f, 0.8f});
+    b.box(inner, inner, {-0.40f, 0.0f, 0.6f}, {0.40f, 0.12f, 1.0f});
+    b.box(blue, blue, {-0.43f, 0.14f, 0.45f}, {0.43f, 0.2f, 0.62f});
+}
+
 void buildBeam(SceneBuilder& b, u32 color) {
     // Dos planos cruzados: se ven igual desde cualquier lado.
     const Material m = flat(color);
@@ -293,6 +362,20 @@ bool PropVisuals::build() {
     finish(kBlueprint);
     buildTrapSpikes(b);
     finish(kTrapSpikes);
+    buildFridge(b, false);
+    finish(kFridge);
+    buildFridge(b, true);
+    finish(kFridgeOpen);
+    buildPantry(b, false);
+    finish(kPantry);
+    buildPantry(b, true);
+    finish(kPantryOpen);
+    buildBed(b);
+    finish(kBed);
+    buildBackpack(b);
+    finish(kBackpack);
+    buildSleepingBag(b);
+    finish(kSleepingBag);
     b.box(flat(rgba(90, 200, 255, 120)), flat(rgba(90, 200, 255, 120)), {-1.0f, 0.0f, -1.0f}, {1.0f, 0.1f, 1.0f}, true);
     finish(kTrapGhostValid);
     b.box(flat(rgba(255, 70, 60, 120)), flat(rgba(255, 70, 60, 120)), {-1.0f, 0.0f, -1.0f}, {1.0f, 0.1f, 1.0f}, true);
@@ -331,7 +414,9 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
     const float containerRange = fminf(maxDistance, kContainerDrawDistance);
     for (const game::Container& c : match.containers()) {
         // Abierto: se ve un instante con la tapa levantada y desaparece (como en Fortnite).
-        if (c.opened && match.elapsed() - c.openedAt > kOpenedVisibleSeconds) continue;
+        // Las neveras y despensas se quedan (abiertas y vacias).
+        const bool stays = c.kind == game::ContainerKind::Fridge || c.kind == game::ContainerKind::Pantry;
+        if (!stays && c.opened && match.elapsed() - c.openedAt > kOpenedVisibleSeconds) continue;
         if (math3d::length(c.position - eye) > containerRange + 6.0f) continue;
         if (!frustum.sphereVisible(c.position + Vec3{0.0f, 1.5f, 0.0f}, c.kind == game::ContainerKind::Airdrop ? 6.0f : 1.0f)) continue;
         const Mat4 model = Mat4::translation(c.position) * Mat4::rotationY(c.yaw);
@@ -350,6 +435,9 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
             }
             case game::ContainerKind::Workbench:
                 break;  // el banco es un objeto del mapa
+            case game::ContainerKind::Fridge: draw(c.opened ? kFridgeOpen : kFridge, model, &textures); break;
+            case game::ContainerKind::Pantry: draw(c.opened ? kPantryOpen : kPantry, model, &textures); break;
+            case game::ContainerKind::Bed: draw(kBed, model, &textures); break;
         }
     }
     const float lootRange = fminf(maxDistance, kLootDrawDistance);
@@ -368,6 +456,8 @@ void PropVisuals::drawLoot(const game::Match& match, const math3d::Frustum& frus
             draw(static_cast<Mesh>(kMatWood + static_cast<int>(p.resource)), spin, &textures);
         } else if (p.kind == game::PickupKind::Blueprint) {
             draw(kBlueprint, spin, &textures);
+        } else if (p.kind == game::PickupKind::Backpack) {
+            draw(kBackpack, spin, &textures);
         } else {
             // Armas y consumibles: su modelo, girando sobre su centro.
             const game::ItemModel model = game::itemModelFor(p.item, p.rarity);
@@ -466,11 +556,14 @@ void PropVisuals::drawBeams(const game::Match& match, const math3d::Frustum& fru
     const std::vector<game::Pickup>& pickups = match.pickups();
     for (size_t i = 0; i < pickups.size(); ++i) {
         const game::Pickup& p = pickups[i];
-        if (!p.active || (p.kind != game::PickupKind::Item && p.kind != game::PickupKind::Blueprint)) continue;
+        if (!p.active || (p.kind != game::PickupKind::Item && p.kind != game::PickupKind::Blueprint &&
+                          p.kind != game::PickupKind::Backpack)) {
+            continue;
+        }
         if (math3d::length(p.position - eye) > kLootDrawDistance) continue;
         if (!frustum.sphereVisible(p.position + Vec3{0.0f, 0.8f, 0.0f}, 1.0f)) continue;
         // Los planos, con el haz azul (raro).
-        const int beam = p.kind == game::PickupKind::Blueprint ? 2 : static_cast<int>(p.rarity);
+        const int beam = p.kind == game::PickupKind::Blueprint ? 2 : p.kind == game::PickupKind::Backpack ? 3 : static_cast<int>(p.rarity);
         draw(static_cast<Mesh>(kBeam0 + beam),
              Mat4::translation(p.position) * Mat4::rotationY(time * 0.5f), nullptr);
     }
@@ -480,6 +573,11 @@ void PropVisuals::drawBeams(const game::Match& match, const math3d::Frustum& fru
 
 void PropVisuals::drawBus(const Vec3& position, const world::TextureLibrary& textures) const {
     draw(kBus, Mat4::translation(position), &textures);
+    gfx::setModelMatrix(Mat4::identity());
+}
+
+void PropVisuals::drawSleepingBag(const Vec3& feet, float yaw) const {
+    draw(kSleepingBag, Mat4::translation(feet + Vec3{0.0f, 0.01f, 0.0f}) * Mat4::rotationY(yaw), nullptr);
     gfx::setModelMatrix(Mat4::identity());
 }
 

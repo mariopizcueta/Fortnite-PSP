@@ -33,6 +33,9 @@ struct StaticBatch {
     float radius = 0.0f;
     int triangles = 0;
     short object = -1;  // objeto destruible al que pertenece (World::harvestables()), o -1
+    // Solo se ve en el modo zombi: todo lo de sus lugares, tambien lo que no es un objeto
+    // (suelos de baldosas, vigas caidas, sangre, chapas colgando).
+    bool zombieOnly = false;
 };
 
 class SceneBuilder {

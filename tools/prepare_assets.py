@@ -214,6 +214,43 @@ def weapon_slot(icon_path, rarity, size=32):
     return slot
 
 
+def drawn_slot(kind, rarity, size=32):
+    """Ranura de un objeto del modo zombi (v0.15) sin imagen en Recursos: degradado de la
+    rareza y un dibujo sencillo hecho aqui (lata, racion, cama, saco de dormir)."""
+    top, bottom = RARITY_COLORS[rarity]
+    slot = Image.new("RGBA", (size, size))
+    d = ImageDraw.Draw(slot)
+    for y in range(size):
+        t = y / (size - 1)
+        d.line((0, y, size, y), fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)) + (255,))
+    dark = (40, 34, 30, 255)
+    if kind == "lata":
+        d.rectangle((9, 7, 23, 26), fill=(176, 180, 186, 255), outline=dark)
+        d.rectangle((9, 11, 23, 22), fill=(196, 64, 48, 255), outline=dark)
+        d.ellipse((12, 13, 20, 20), fill=(240, 210, 120, 255))
+        d.line((9, 7, 23, 7), fill=(230, 232, 236, 255), width=2)
+    elif kind == "racion":
+        d.rectangle((6, 9, 26, 24), fill=(92, 104, 56, 255), outline=dark)
+        d.rectangle((6, 14, 26, 18), fill=(70, 80, 42, 255))
+        d.rectangle((13, 9, 19, 24), fill=(214, 196, 120, 255))
+        d.text((10, 11), "R", fill=dark)
+    elif kind == "cama":
+        d.rectangle((4, 15, 28, 22), fill=(120, 82, 50, 255), outline=dark)
+        d.rectangle((4, 9, 8, 26), fill=(100, 66, 40, 255), outline=dark)
+        d.rectangle((24, 13, 28, 26), fill=(100, 66, 40, 255), outline=dark)
+        d.rectangle((8, 12, 24, 16), fill=(214, 206, 190, 255), outline=dark)
+        d.rectangle((9, 10, 14, 13), fill=(240, 240, 236, 255), outline=dark)
+    elif kind == "saco":
+        d.rounded_rectangle((5, 10, 27, 23), radius=6, fill=(54, 96, 140, 255), outline=dark)
+        d.rounded_rectangle((5, 10, 12, 23), radius=5, fill=(40, 76, 112, 255), outline=dark)
+        d.line((12, 16, 26, 16), fill=(200, 200, 70, 255), width=1)
+    elif kind == "mochila":
+        d.rounded_rectangle((8, 7, 24, 27), radius=4, fill=(140, 96, 52, 255), outline=dark)
+        d.rectangle((11, 16, 21, 25), fill=(120, 80, 42, 255), outline=dark)
+        d.arc((11, 2, 21, 12), 180, 360, fill=dark, width=2)
+    return slot
+
+
 def victory_banner():
     banner = alpha_crop(Image.open(RES / "HUD" / "Victory_Royale_Old_-_Fortnite.webp").convert("RGBA"))
     return banner.resize((round(banner.width * 1.5), round(banner.height * 1.5)), Image.NEAREST)
@@ -305,6 +342,12 @@ def ui_atlas():
         "SlotVendas": slot_art(RES / "HUD" / "Vendas.webp", margin=0.0),
         "SlotBotiquin": slot_art(RES / "HUD" / "botiquin.jpg", margin=0.0),
         "SlotPocionEscudo": slot_art(RES / "HUD" / "escudo grande.jpg", margin=0.0),
+        # v0.15 (modo zombi): comida, cama, saco de dormir y mochila (dibujados aqui).
+        "SlotLata": drawn_slot("lata", 0),
+        "SlotRacion": drawn_slot("racion", 1),
+        "SlotCama": drawn_slot("cama", 2),
+        "SlotSaco": drawn_slot("saco", 1),
+        "SlotMochila": drawn_slot("mochila", 2),
         # Materiales (Recursos/HUD/Wood_icon.png, stone_orig.png, Metal_icon.png).
         "MatMadera": icon("Wood_icon.png", 18),
         "MatLadrillo": icon("stone_orig.png", 18),
