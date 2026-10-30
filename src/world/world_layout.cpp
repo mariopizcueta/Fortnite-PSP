@@ -126,6 +126,10 @@ constexpr Yield kFenceYield{Resource::Metal, 4, 150.0f, 45};      // vallas, far
 // Objetos del modo zombi (base, campamentos, centros de crafteo): nunca derruidos.
 constexpr Yield kCampWoodYield{Resource::Wood, 6, 200.0f, 0};
 constexpr Yield kCampMetalYield{Resource::Metal, 6, 260.0f, 0};
+// v0.15: ruinas de los lugares de interes del modo zombi (ya estan derruidas a mano).
+constexpr Yield kRuinStoneYield{Resource::Stone, 6, 260.0f, 0};
+constexpr Yield kRuinWoodYield{Resource::Wood, 6, 200.0f, 0};
+constexpr Yield kRuinMetalYield{Resource::Metal, 6, 280.0f, 0};
 
 // Objeto del mapa que se puede picar y destruir: todo lo que se dibuje y se anada a la
 // colision entre beginObject() y endObject() forma un solo objeto (sus lotes de dibujo
@@ -682,6 +686,7 @@ bool nearZombieSite(float x, float z, float radius) {
     auto near = [&](const Vec3& p) { return (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < radius * radius; };
     for (const Vec3& p : zsites::kCamps) if (near(p)) return true;
     for (const Vec3& p : zsites::kWorkbenches) if (near(p)) return true;
+    if (zsites::siteAt(x, z, radius) >= 0) return true;  // lugares de interes (v0.15)
     return zsites::insideBase(x, z, radius);
 }
 
@@ -802,8 +807,349 @@ void workbench(Builders& b, float x, float z) {
     endObject(b, kCampMetalYield);
 }
 
+
+// --- Lugares de interes del modo zombi (v0.15) --------------------------------------------
+// Casas en ruinas, la casona, el almacen del polvorin, puestos de avanzada y la gasolinera
+// (world/zombie_sites.h). Las paredes tienen el borde roto, boquetes y techos hundidos; las
+// neveras, despensas, cofres y cajas de municion las pone la partida en sus huecos. Las
+// puertas estan centradas en nodos de la rejilla de navegacion (x, z = 2 + 4k) para que los
+// zombis puedan entrar.
+
+const Material kBlood = flat(rgba(74, 10, 10));
+const Material kBloodDark = flat(rgba(44, 6, 6));
+const Material kRubble = textured(kTexBlockWall, rgba(150, 146, 138), 2.0f);
+const Material kFloorTiles = textured(kTexCrackedConcrete, rgba(150, 140, 128), 2.0f);
+const Material kHazard = flat(rgba(214, 170, 40));
+
+// Altura de una columna de 0.5 m de una pared en ruinas: casi siempre entera; a veces rota.
+float ruinTop(float h, int column, u32 seed) {
+    const float r = hash01(column, static_cast<int>(seed), 911);
+    if (r < 0.62f) return h;
+    if (r < 0.80f) return h * 0.78f;
+    if (r < 0.92f) return h * 0.55f;
+    return h * 0.32f;
+}
+
+// Pared en ruinas de a0 a a1 (a lo largo de X si alongX, si no de Z) en la linea c, con
+// grosor t: columnas de 0.5 m con el borde roto, unidas cuando tienen la misma altura.
+// Los huecos son puertas (con dintel si su altura es menor que la de la columna) o boquetes
+// (altura >= h: hasta arriba). Cada 4 m, un objeto que se puede picar.
+void ruinWall(Builders& b, const Material& outer, const Material& inner, bool alongX, float a0, float a1, float c,
+              float t, float h, u32 seed, std::initializer_list<Opening> holes, const Yield& yield) {
+    const Material* fx[6] = {&outer, &inner, &outer, &outer, &outer, nullptr};
+    const Material* fz[6] = {&outer, &outer, &outer, &inner, &outer, nullptr};
+    auto box = [&](float s0, float s1, float y0, float y1) {
+        if (s1 - s0 < 0.01f || y1 - y0 < 0.01f) return;
+        const Vec3 mn = alongX ? Vec3{s0, y0, c - t * 0.5f} : Vec3{c - t * 0.5f, y0, s0};
+        const Vec3 mx = alongX ? Vec3{s1, y1, c + t * 0.5f} : Vec3{c + t * 0.5f, y1, s1};
+        faceBox(b.visual, alongX ? fx : fz, mn, mx);
+        b.collision.add({mn, mx}, kSolid);
+    };
+    const int columns = static_cast<int>(ceilf((a1 - a0) / 0.5f - 0.01f));
+    int column = 0;
+    panels(a0, a1, [&](float pa, float pc) {
+        beginObject(b);
+        float runStart = pa, runTop = -1.0f, runBottom = 0.0f;
+        auto flush = [&](float end) {
+            if (runTop > runBottom) box(runStart, end, runBottom, runTop);
+        };
+        for (float s = pa; s < pc - 0.01f; s += 0.5f, ++column) {
+            const float e = fminf(s + 0.5f, pc), mid = (s + e) * 0.5f;
+            float top = ruinTop(h, column, seed), bottom = 0.0f;
+            for (const Opening& o : holes) {
+                if (mid > o.a0 && mid < o.a1) {
+                    bottom = o.height;
+                    if (o.height >= h) top = 0.0f;
+                }
+            }
+            if (top <= bottom) top = bottom = 0.0f;
+            if (fabsf(top - runTop) > 0.01f || fabsf(bottom - runBottom) > 0.01f) {
+                flush(s);
+                runStart = s;
+                runTop = top;
+                runBottom = bottom;
+            }
+        }
+        flush(pc);
+        endObject(b, yield);
+    });
+    (void)columns;
+}
+
+// Escombros: un monton de bloques bajos (se pisan por encima los mas bajos).
+void rubble(Builders& b, float x, float z, float size, u32 seed) {
+    beginObject(b);
+    b.collision.add({{x - size * 0.5f, 0.0f, z - size * 0.4f}, {x + size * 0.5f, 0.42f, z + size * 0.4f}}, kBlocksMovement);
+    for (int i = 0; i < 5; ++i) {
+        const float ox = (hash01(i, static_cast<int>(seed), 71) - 0.5f) * size * 0.8f;
+        const float oz = (hash01(i, static_cast<int>(seed), 72) - 0.5f) * size * 0.6f;
+        const float w = 0.25f + 0.35f * hash01(i, static_cast<int>(seed), 73);
+        const float hh = 0.15f + 0.3f * hash01(i, static_cast<int>(seed), 74);
+        b.visual.box(kRubble, kRubble, {x + ox - w, 0, z + oz - w * 0.7f}, {x + ox + w, hh, z + oz + w * 0.7f});
+    }
+    endObject(b, kRuinStoneYield);
+}
+
+// Manchas de sangre en el suelo (solo visuales, un poco por encima para no parpadear).
+void bloodPool(Builders& b, float x, float z, float r) {
+    b.visual.quad(kBlood, {x - r, 0.025f, z + r * 0.7f}, {x + r, 0.025f, z + r * 0.5f}, {x + r * 0.8f, 0.025f, z - r * 0.6f},
+                  {x - r * 0.7f, 0.025f, z - r});
+    b.visual.quad(kBloodDark, {x + r * 0.6f, 0.03f, z + r * 1.3f}, {x + r * 1.2f, 0.03f, z + r * 1.1f},
+                  {x + r * 1.1f, 0.03f, z + r * 0.7f}, {x + r * 0.5f, 0.03f, z + r * 0.8f});
+}
+
+// Huellas de manos ensangrentadas en una pared (a lo largo de X en z, mirando a +Z si front).
+void bloodSmear(Builders& b, float x, float y, float z, bool alongX, float side) {
+    const float d = 0.14f * side;
+    if (alongX) {
+        b.visual.quad(kBlood, {x - 0.3f, y, z + d}, {x + 0.25f, y - 0.5f, z + d}, {x + 0.35f, y - 0.35f, z + d},
+                      {x - 0.15f, y + 0.25f, z + d});
+    } else {
+        b.visual.quad(kBlood, {x + d, y, z + 0.3f}, {x + d, y - 0.5f, z - 0.25f}, {x + d, y - 0.35f, z - 0.35f},
+                      {x + d, y + 0.25f, z + 0.15f});
+    }
+}
+
+// Losa de techo (visual y colision) de x0..x1, z0..z1 a la altura y.
+void roofSlab(Builders& b, const Material& m, float x0, float x1, float z0, float z1, float y, const Yield& yield) {
+    beginObject(b);
+    solid(b, m, m, {x0, y, z0}, {x1, y + 0.2f, z1});
+    endObject(b, yield);
+}
+
+// Viga caida (solo visual): de un extremo en el suelo al otro apoyado en una pared.
+void fallenBeam(Builders& b, const Vec3& from, const Vec3& to) {
+    const Vec3 d = to - from;
+    const Vec3 side = math3d::normalize(math3d::cross(d, {0.0f, 1.0f, 0.0f})) * 0.12f;
+    const Vec3 up{0.0f, 0.18f, 0.0f};
+    b.visual.quad(kRotten, from - side, to - side, to + side, from + side);
+    b.visual.quad(kRotten, from - side + up, from + side + up, to + side + up, to - side + up);
+    b.visual.quad(kRotten, from + side, to + side, to + side + up, from + side + up);
+    b.visual.quad(kRotten, from - side + up, to - side + up, to - side, from - side);
+}
+
+// Mesa con la pata rota y una silla volcada.
+void table(Builders& b, float x, float z) {
+    beginObject(b);
+    b.collision.add({{x - 0.7f, 0.0f, z - 0.45f}, {x + 0.7f, 0.8f, z + 0.45f}}, kSolid);
+    b.visual.box(kRotten, kRotten, {x - 0.7f, 0.72f, z - 0.45f}, {x + 0.7f, 0.8f, z + 0.45f});
+    for (float sx : {-0.6f, 0.6f})
+        for (float sz : {-0.35f, 0.35f}) {
+            const float top = sx > 0.0f && sz > 0.0f ? 0.4f : 0.72f;
+            b.visual.box(kRotten, kRotten, {x + sx - 0.05f, 0, z + sz - 0.05f}, {x + sx + 0.05f, top, z + sz + 0.05f});
+        }
+    b.visual.box(kRotten, kRotten, {x + 0.9f, 0.0f, z - 0.2f}, {x + 1.3f, 0.4f, z + 0.2f});  // silla volcada
+    b.visual.box(kRotten, kRotten, {x + 1.25f, 0.0f, z - 0.2f}, {x + 1.32f, 0.08f, z + 0.6f});
+    endObject(b, kRuinWoodYield);
+}
+
+// Encimera de cocina (junto a la nevera).
+void counter(Builders& b, float x0, float z0, float x1, float z1) {
+    beginObject(b);
+    solid(b, kRotten, flat(rgba(120, 112, 100)), {x0, 0, z0}, {x1, 0.9f, z1});
+    endObject(b, kRuinWoodYield);
+}
+
+// Casa en ruinas de x0..x1, z0..z1: paredes rotas de 2.8 m, puerta, un boquete, la mitad del
+// techo hundido, escombros, una mesa y sangre. `door`: 0 = sur, 1 = norte, 2 = este, 3 = oeste
+// (centro de la puerta en doorAt). `wood`: de tablones (si no, de bloques).
+void ruinedHouse(Builders& b, float x0, float x1, float z0, float z1, int door, float doorAt, bool wood, u32 seed) {
+    const float h = 2.8f, t = 0.25f;
+    const Material outer = wood ? kRotten : kBlockWall;
+    const Material inner = wood ? kRotten : textured(kTexCrackedConcrete, rgba(150, 140, 130), 2.0f);
+    const Yield& yield = wood ? kRuinWoodYield : kRuinStoneYield;
+    const Opening doorway{doorAt - 0.9f, doorAt + 0.9f, 2.3f};
+    const float xm = (x0 + x1) * 0.5f, zm = (z0 + z1) * 0.5f;
+    // Boquete en la pared opuesta a la puerta (hasta arriba).
+    const Opening breachX{xm + 0.6f, xm + 1.8f, 9.0f}, breachZ{zm - 1.6f, zm - 0.4f, 9.0f};
+    const Opening none{0.0f, 0.0f, 0.0f};
+    ruinWall(b, outer, inner, true, x0, x1, z1, t, h, seed, {door == 0 ? doorway : none, door == 1 ? breachX : none}, yield);
+    ruinWall(b, outer, inner, true, x0, x1, z0, t, h, seed + 1, {door == 1 ? doorway : none, door == 0 ? breachX : none}, yield);
+    ruinWall(b, outer, inner, false, z0 + t * 0.5f, z1 - t * 0.5f, x1, t, h, seed + 2,
+             {door == 2 ? doorway : none, door == 3 ? breachZ : none}, yield);
+    ruinWall(b, outer, inner, false, z0 + t * 0.5f, z1 - t * 0.5f, x0, t, h, seed + 3,
+             {door == 3 ? doorway : none, door == 2 ? breachZ : none}, yield);
+    // Suelo de baldosas (solo visual) y medio techo: la otra mitad, hundida (viga caida).
+    b.visual.quad(kFloorTiles, {x0, 0.02f, z1}, {x1, 0.02f, z1}, {x1, 0.02f, z0}, {x0, 0.02f, z0});
+    roofSlab(b, wood ? kRotten : kRustSheet, x0 - 0.2f, xm, z0 - 0.2f, z1 + 0.2f, h, yield);
+    fallenBeam(b, {xm + 1.2f, 0.0f, zm + 1.0f}, {x1 - 0.2f, h * 0.7f, zm - 1.2f});
+    rubble(b, xm + 1.6f, zm + 0.6f, 1.6f, seed);
+    bloodPool(b, xm - 0.6f, zm + 0.4f, 0.55f);
+    bloodSmear(b, xm - 1.0f, 1.4f, z0, true, 1.0f);
+}
+
+// La Casona (x 39..53, z 47..59): casa grande de bloques, cocina al noroeste, salon y dos
+// puertas; el tejado del oeste, hundido.
+void bigHouse(Builders& b) {
+    const float x0 = 39.0f, x1 = 53.0f, z0 = 47.0f, z1 = 59.0f, h = 3.4f, t = 0.3f;
+    const Material inner = textured(kTexCrackedConcrete, rgba(140, 128, 118), 2.0f);
+    ruinWall(b, kBlockWall, inner, true, x0, x1, z1, t, h, 31, {{45.0f, 47.0f, 2.5f}, {50.6f, 51.8f, 9.0f}}, kRuinStoneYield);
+    ruinWall(b, kBlockWall, inner, true, x0, x1, z0, t, h, 32, {{48.0f, 49.0f, 9.0f}}, kRuinStoneYield);
+    ruinWall(b, kBlockWall, inner, false, z0 + 0.15f, z1 - 0.15f, x1, t, h, 33, {{57.0f, 58.0f, 9.0f}}, kRuinStoneYield);
+    ruinWall(b, kBlockWall, inner, false, z0 + 0.15f, z1 - 0.15f, x0, t, h, 34, {{53.1f, 54.9f, 2.4f}}, kRuinStoneYield);
+    // Tabiques: la cocina (x 39..47, z 47..53) con paso a x 42 y a z 50.
+    ruinWall(b, inner, inner, true, x0 + 0.15f, 47.0f, 53.0f, 0.2f, h, 35, {{41.1f, 42.9f, 2.4f}}, kRuinStoneYield);
+    ruinWall(b, inner, inner, false, z0 + 0.15f, 53.0f, 47.0f, 0.2f, h, 36, {{49.1f, 50.9f, 2.4f}}, kRuinStoneYield);
+    b.visual.quad(kFloorTiles, {x0, 0.02f, z1}, {x1, 0.02f, z1}, {x1, 0.02f, z0}, {x0, 0.02f, z0});
+    // Tejado: el del este en pie; el del oeste, hundido en un monton de escombros y vigas.
+    roofSlab(b, kRustSheet, 47.0f, x1 + 0.3f, z0 - 0.3f, z1 + 0.3f, h, kRuinMetalYield);
+    roofSlab(b, kRustSheet, x0 - 0.3f, 47.0f, z0 - 0.3f, 50.5f, h, kRuinMetalYield);
+    fallenBeam(b, {41.0f, 0.0f, 57.5f}, {x0 + 0.2f, h * 0.8f, 55.0f});
+    fallenBeam(b, {44.5f, 0.0f, 55.0f}, {47.0f, h * 0.9f, 57.8f});
+    rubble(b, 43.0f, 56.6f, 2.2f, 37);
+    rubble(b, 40.4f, 52.0f, 1.2f, 38);
+    // Cocina: encimera entre las neveras y la despensa.
+    counter(b, 42.2f, 47.3f, 43.4f, 47.95f);
+    // Salon: mesa, sofa destrozado, chimenea.
+    table(b, 49.0f, 55.0f);
+    beginObject(b);
+    solid(b, flat(rgba(70, 40, 36)), flat(rgba(84, 50, 44)), {48.0f, 0, 51.6f}, {51.0f, 0.75f, 52.6f});
+    b.visual.box(flat(rgba(70, 40, 36)), flat(rgba(84, 50, 44)), {48.0f, 0.75f, 52.3f}, {51.0f, 1.2f, 52.6f});
+    endObject(b, kRuinWoodYield);
+    beginObject(b);
+    solid(b, kRubble, kRubble, {52.0f, 0, 55.2f}, {52.85f, 4.4f, 56.6f});
+    b.visual.box(kAsh, kAsh, {51.9f, 0.0f, 55.5f}, {52.0f, 0.9f, 56.3f});
+    endObject(b, kRuinStoneYield);
+    bloodPool(b, 45.0f, 51.0f, 0.7f);
+    bloodPool(b, 50.0f, 57.0f, 0.5f);
+    bloodSmear(b, 44.0f, 1.6f, 53.0f, true, 1.0f);
+    bloodSmear(b, 47.0f, 1.3f, 49.0f, false, 1.0f);
+}
+
+// Almacen del Polvorin (x -2..18, z -74..-58): nave de chapa oxidada de 5 m con el techo
+// partido por el medio, portalon al sur, puerta al este, estanterias, barriles de polvora y
+// cajas.
+void storehouse(Builders& b) {
+    const float x0 = -2.0f, x1 = 18.0f, z0 = -74.0f, z1 = -58.0f, h = 5.0f, t = 0.3f;
+    const Material inner = textured(kTexRustSiding, rgba(120, 96, 80), 2.0f);
+    ruinWall(b, kRustSheet, inner, true, x0, x1, z1, t, h, 41, {{4.0f, 8.0f, 3.6f}}, kRuinMetalYield);
+    ruinWall(b, kRustSheet, inner, true, x0, x1, z0, t, h, 42, {{13.0f, 14.2f, 9.0f}}, kRuinMetalYield);
+    ruinWall(b, kRustSheet, inner, false, z0 + 0.15f, z1 - 0.15f, x1, t, h, 43, {{-67.0f, -65.0f, 2.6f}}, kRuinMetalYield);
+    ruinWall(b, kRustSheet, inner, false, z0 + 0.15f, z1 - 0.15f, x0, t, h, 44, {{-63.4f, -62.4f, 9.0f}}, kRuinMetalYield);
+    b.visual.quad(kFloorTiles, {x0, 0.02f, z1}, {x1, 0.02f, z1}, {x1, 0.02f, z0}, {x0, 0.02f, z0});
+    // Franjas de peligro sobre el portalon.
+    b.visual.box(kHazard, kHazard, {3.6f, 3.6f, z1 + 0.15f}, {8.4f, 4.0f, z1 + 0.25f});
+    for (float x = 3.8f; x < 8.4f; x += 0.8f) {
+        b.visual.box(flat(rgba(20, 20, 20)), kHazard, {x, 3.6f, z1 + 0.25f}, {x + 0.35f, 4.0f, z1 + 0.27f});
+    }
+    // Techo: los dos lados en pie; el centro (x 6..12), hundido, con una chapa colgando.
+    roofSlab(b, kRustSheet, x0 - 0.3f, 6.0f, z0 - 0.3f, z1 + 0.3f, h, kRuinMetalYield);
+    roofSlab(b, kRustSheet, 12.0f, x1 + 0.3f, z0 - 0.3f, z1 + 0.3f, h, kRuinMetalYield);
+    b.visual.quad(kRustSheet, {6.0f, h, -72.0f}, {6.0f, h, -64.0f}, {8.5f, 0.6f, -64.6f}, {8.5f, 0.6f, -71.4f});
+    // Estanterias (entre las filas de nodos z -66 y -62) y barriles de polvora.
+    rack(b, 2.0f, -64.6f, 8.0f, -63.4f);
+    rack(b, 11.0f, -64.6f, 16.0f, -63.4f);
+    barrel(b, 0.2f, -61.0f);
+    barrel(b, 0.2f, -60.0f);
+    barrel(b, 1.2f, -61.4f);
+    barrel(b, 16.8f, -61.2f);
+    barrel(b, 16.8f, -60.2f);
+    crate(b, 15.5f, -72.5f);
+    crate(b, 9.6f, -60.0f);
+    crate(b, 9.6f, -60.0f, 1.2f);
+    rubble(b, 9.0f, -68.0f, 2.0f, 45);
+    bloodPool(b, 6.0f, -66.0f, 0.8f);
+    bloodSmear(b, 10.0f, 1.8f, z0, true, 1.0f);
+}
+
+// Puesto de avanzada abandonado (centro c): sacos terreros, torre de vigilancia caida a
+// medias, una tienda rota, bidones y una hoguera apagada. Municion y despensa o cofre en
+// (c.x - 2.5, c.z + 2) y (c.x + 2.5, c.z - 2) (los pone la partida).
+void outpost(Builders& b, float cx, float cz, u32 seed) {
+    sandbags(b, cx - 4.0f, cz - 5.5f, cx + 4.0f, cz - 4.9f);
+    sandbags(b, cx - 4.0f, cz + 4.9f, cx - 1.2f, cz + 5.5f);
+    sandbags(b, cx + 1.8f, cz + 4.9f, cx + 4.0f, cz + 5.5f);
+    sandbags(b, cx - 5.5f, cz - 3.0f, cx - 4.9f, cz + 1.0f);
+    tent(b, cx + 0.5f, cz + 3.2f, true);
+    campfire(b, cx - 0.4f, cz - 0.6f);
+    barrel(b, cx - 3.6f, cz - 3.2f);
+    barrel(b, cx - 3.0f, cz - 3.9f);
+    // Torre: cuatro postes y una plataforma inclinada (una pata rota).
+    beginObject(b);
+    const float tx = cx + 3.6f, tz = cz + 3.4f;
+    for (float sx : {-0.8f, 0.8f})
+        for (float sz : {-0.8f, 0.8f}) {
+            const float top = sx > 0.0f && sz < 0.0f ? 1.6f : 3.4f;
+            solid(b, kRotten, kRotten, {tx + sx - 0.1f, 0, tz + sz - 0.1f}, {tx + sx + 0.1f, top, tz + sz + 0.1f});
+        }
+    b.visual.quad(kRotten, {tx - 1.0f, 3.4f, tz + 1.0f}, {tx + 1.0f, 2.2f, tz + 1.0f}, {tx + 1.0f, 1.7f, tz - 1.0f},
+                  {tx - 1.0f, 3.2f, tz - 1.0f});
+    b.visual.quad(kRotten, {tx - 1.0f, 3.2f, tz - 1.0f}, {tx + 1.0f, 1.7f, tz - 1.0f}, {tx + 1.0f, 2.2f, tz + 1.0f},
+                  {tx - 1.0f, 3.4f, tz + 1.0f});
+    endObject(b, kRuinWoodYield);
+    // Radio rota sobre una caja (antena).
+    beginObject(b);
+    solid(b, kWood, kWood, {cx - 0.5f, 0, cz + 0.6f}, {cx + 0.3f, 0.7f, cz + 1.2f});
+    b.visual.box(flat(rgba(60, 70, 60)), flat(rgba(40, 46, 40)), {cx - 0.4f, 0.7f, cz + 0.7f}, {cx + 0.2f, 1.05f, cz + 1.1f});
+    b.visual.box(kSteel, kSteel, {cx + 0.1f, 1.05f, cz + 0.8f}, {cx + 0.13f, 2.0f, cz + 0.83f});
+    endObject(b, kCampMetalYield);
+    bloodPool(b, cx + 1.2f, cz - 2.6f, 0.6f);
+    (void)seed;
+}
+
+// Gasolinera (tienda x 48..56, z -20..-15; marquesina sobre los surtidores, junto al camino).
+void gasStation(Builders& b) {
+    ruinedHouse(b, 48.0f, 56.0f, -20.0f, -15.0f, 0, 50.0f, false, 51);
+    // Marquesina: cuatro pilares y la losa a 4.5 m (con colision: se puede subir encima).
+    for (float px : {44.3f, 57.7f})
+        for (float pz : {-12.6f, -9.4f}) {
+            beginObject(b);
+            solid(b, kTrim, kTrim, {px - 0.15f, 0, pz - 0.15f}, {px + 0.15f, 4.5f, pz + 0.15f});
+            endObject(b, kRuinMetalYield);
+        }
+    beginObject(b);
+    solid(b, flat(rgba(170, 60, 50)), flat(rgba(200, 200, 194)), {43.8f, 4.5f, -13.2f}, {58.2f, 5.1f, -8.8f});
+    endObject(b, kRuinMetalYield);
+    // Surtidores (uno volcado) y un coche quemado en el camino.
+    beginObject(b);
+    solid(b, flat(rgba(180, 50, 40)), kDarkTrim, {48.7f, 0, -11.3f}, {49.3f, 1.4f, -10.7f});
+    endObject(b, kRuinMetalYield);
+    beginObject(b);
+    solid(b, flat(rgba(180, 50, 40)), kDarkTrim, {54.3f, 0, -11.4f}, {55.7f, 0.6f, -10.8f});
+    endObject(b, kRuinMetalYield);
+    beginObject(b);
+    solid(b, flat(rgba(40, 34, 30)), flat(rgba(30, 26, 24)), {58.0f, 0.3f, -6.9f}, {62.0f, 1.3f, -5.1f});
+    b.visual.box(flat(rgba(30, 26, 24)), flat(rgba(30, 26, 24)), {58.8f, 1.3f, -6.7f}, {61.0f, 1.9f, -5.3f});
+    for (float wx : {58.6f, 61.4f})
+        for (float wz : {-7.0f, -5.2f}) b.visual.box(kDarkTrim, kDarkTrim, {wx - 0.3f, 0, wz - 0.1f}, {wx + 0.3f, 0.5f, wz + 0.1f});
+    endObject(b, kRuinMetalYield);
+    bloodPool(b, 52.0f, -12.0f, 0.6f);
+}
+
+void pointsOfInterest(Builders& b, std::vector<StaticBatch>& out) {
+    bigHouse(b);
+    b.visual.flushGroup(out);
+    storehouse(b);
+    b.visual.flushGroup(out);
+    // Casas: puerta centrada en un nodo de la rejilla.
+    ruinedHouse(b, 12.0f, 20.0f, 29.0f, 37.0f, 0, 14.0f, false, 61);   // Casa del guarda
+    counter(b, 12.4f, 31.0f, 13.1f, 32.4f);
+    table(b, 17.0f, 31.6f);
+    b.visual.flushGroup(out);
+    ruinedHouse(b, -20.0f, -12.0f, 74.0f, 82.0f, 1, -14.0f, true, 71);  // Casa del lago
+    table(b, -17.4f, 79.4f);
+    b.visual.flushGroup(out);
+    ruinedHouse(b, 68.0f, 76.0f, 12.0f, 20.0f, 0, 70.0f, true, 81);    // Granja
+    crate(b, 74.6f, 18.6f);
+    b.visual.flushGroup(out);
+    ruinedHouse(b, -60.0f, -52.0f, 20.0f, 28.0f, 2, 22.0f, true, 91);  // Cabana del bosque
+    table(b, -57.2f, 25.6f);
+    b.visual.flushGroup(out);
+    outpost(b, 34.0f, -80.0f, 101);
+    b.visual.flushGroup(out);
+    outpost(b, 78.0f, 56.0f, 111);
+    b.visual.flushGroup(out);
+    outpost(b, -66.0f, -56.0f, 121);
+    b.visual.flushGroup(out);
+    gasStation(b);
+    b.visual.flushGroup(out);
+}
+
 void zombieSites(Builders& b, std::vector<StaticBatch>& out) {
+    b.visual.flushGroup(out);
+    const size_t firstBatch = out.size();
     b.zombieOnly = true;
+    pointsOfInterest(b, out);
     // Base abandonada (x 56..68, z 28..40). Libres: las lineas del perimetro (las paredes de
     // los planos) y la celda de la rampa de la torre (x 64..68, z 32..36).
     cot(b, 58.4f, 29.6f, true);
@@ -834,6 +1180,9 @@ void zombieSites(Builders& b, std::vector<StaticBatch>& out) {
         b.visual.flushGroup(out);
     }
     b.zombieOnly = false;
+    // v0.16: los lotes que no son objetos (no tienen vida ni se "destruyen" al empezar) tambien
+    // son de este modo: en el battle royale quedaban a la vista suelos, vigas y sangre.
+    for (size_t i = firstBatch; i < out.size(); ++i) out[i].zombieOnly = true;
 }
 
 }  // namespace

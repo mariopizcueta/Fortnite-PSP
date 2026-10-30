@@ -24,6 +24,7 @@ enum class ItemModel : u8 {
     Pistol, Revolver, BoltSniper, SemiAutoSniper, RocketLauncher, GrenadeLauncher,
     Grenade, Bandage, Medkit, SmallShield, ShieldPotion, SpikeTrap,
     Rocket, LauncherGrenade,  // proyectiles en vuelo
+    CannedFood, Ration, BedKit, SleepingBag,  // v0.15: modo zombi
     Count
 };
 

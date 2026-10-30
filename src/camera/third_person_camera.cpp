@@ -57,6 +57,13 @@ void ThirdPersonCamera::update(const CameraInput& control, const Vec3& playerPos
         // Giro manual: a la derecha el yaw decrece (crece hacia el oeste).
         m_targetYaw -= control.turn * kYawSpeed * dt;
         m_targetLook += control.look * kLookSpeed * dt;
+        // Raton: sin suavizado (el giro llega ya entero y con retraso se notaria flotante).
+        if (control.yawDelta != 0.0f || control.lookDelta != 0.0f) {
+            m_targetYaw -= control.yawDelta;
+            m_yaw -= control.yawDelta;
+            m_targetLook = math3d::clampf(m_targetLook + control.lookDelta, kMinLook, kMaxLook);
+            m_look = math3d::clampf(m_look + control.lookDelta, kMinLook, kMaxLook);
+        }
         // Seguimiento: al andar, la camara se va colocando detras del jugador y la mira
         // vuelve a la altura normal (suavizado exponencial, independiente de los FPS).
         if (control.follow > 0.0f) {

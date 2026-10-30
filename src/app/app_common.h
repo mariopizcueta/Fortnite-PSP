@@ -29,6 +29,7 @@ constexpr u32 kCrosshairLocked = rgba(255, 70, 60, 240);
 constexpr u32 kHealthGreen = rgba(96, 196, 80);
 constexpr u32 kShieldBlue = rgba(70, 150, 235);
 constexpr u32 kBuildBlue = rgba(30, 90, 190, 170);
+constexpr u32 kMateColor = rgba(90, 220, 255);  // companeros y aliados (v0.16)
 constexpr u32 kBuildReticle = rgba(120, 200, 255);
 // Azules de la interfaz de Fortnite (Referencias/Lobby.png, loginscreen.png).
 constexpr u32 kNavy = rgba(16, 26, 58);

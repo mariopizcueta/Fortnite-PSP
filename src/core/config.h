@@ -7,8 +7,8 @@
 namespace config {
 
 constexpr const char* kGameTitle = "FortnitePSP";
-constexpr const char* kVersion = "0.14.0";
-constexpr const char* kPhase = "v0.14 - 30 bots, IA tactica, graficos, agua y supervivencia zombi";
+constexpr const char* kVersion = "0.16.0";
+constexpr const char* kPhase = "v0.16 - duo y escuadron, derribos, aliados inteligentes y camas asignadas";
 
 // Reloj de CPU/bus en MHz (maximo estandar de la PSP).
 constexpr int kCpuClockMhz = 333;
@@ -18,6 +18,16 @@ constexpr int kBusClockMhz = 166;
 // No usa HOME: el boton HOME lo gestiona el sistema operativo.
 constexpr u32 kExitCombo = PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_START;
 constexpr float kExitHoldSeconds = 1.0f;
+
+// Controles de PC (version web, web/): el raton gira la camara siempre, L apunta sin
+// fijar objetivo y se anda mientras se apunta. En la PSP, false: todo como siempre.
+#ifdef FORTNITEPSP_WEB
+constexpr bool kMouseAim = true;
+#else
+constexpr bool kMouseAim = false;
+#endif
+// Radianes de giro por pixel de raton con la sensibilidad por defecto.
+constexpr float kMouseRadiansPerPixel = 0.0022f;
 
 // Zona muerta radial del stick analogico (valor normalizado 0..1). Los sticks de la
 // PSP suelen quedar descentrados hasta ~0.15 en reposo.

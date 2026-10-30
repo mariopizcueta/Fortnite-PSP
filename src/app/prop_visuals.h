@@ -39,6 +39,8 @@ public:
     void drawBus(const math3d::Vec3& position, const world::TextureLibrary& textures) const;
     // Ala delta sobre un personaje (pies en `feet`, mirando a `yaw`).
     void drawGlider(const math3d::Vec3& feet, float yaw) const;
+    // Saco de dormir extendido en el suelo (el jugador duerme en el, v0.15).
+    void drawSleepingBag(const math3d::Vec3& feet, float yaw) const;
 
     int triangles() const { return m_triangles; }
 
@@ -52,6 +54,8 @@ private:
         kBlast0, kBlast1, kBlast2,  // explosion: tres niveles de transparencia
         kTrapPlate, kTrapSpikes, kTrapGhostValid, kTrapGhostInvalid,
         kBlueprint,  // v0.14: plano enrollado (modo zombi)
+        // v0.15: nevera y despensa (cerradas / abiertas), cama, mochila y saco extendido.
+        kFridge, kFridgeOpen, kPantry, kPantryOpen, kBed, kBackpack, kSleepingBag,
         kMeshCount
     };
 

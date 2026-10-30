@@ -7,6 +7,7 @@
 #   make physics-test -> pruebas de movimiento del jugador en el Mac
 #   make match-sim  -> partidas simuladas con bots en el Mac (colisiones, disparos, IA)
 #   make app-sim    -> la aplicacion completa simulada en el Mac (menus, partidas, audio)
+#   make web        -> version web para PC (teclado y raton) en web/dist/index.html (Emscripten)
 #   make clean      -> borra los productos de compilacion
 
 # --- Localizacion del toolchain -----------------------------------------------
@@ -60,6 +61,9 @@ OBJS = src/main.o \
        src/game/match_projectiles.o \
        src/game/match_traps.o \
        src/game/match_zombies.o \
+       src/game/match_allies.o \
+       src/game/match_teams.o \
+       src/game/zombie_save.o \
        src/game/zombies.o \
        src/game/nav_grid.o \
        src/game/player.o \
@@ -164,6 +168,10 @@ distclean: clean
 app-sim:
 	sh tools/app_sim/build_and_run.sh
 
-.PHONY: release assets preview physics-test match-sim app-sim distclean
+# Version web para PC (no PSP): el mismo juego con WebGL, teclado y raton (web/README.md).
+web:
+	sh web/build.sh
+
+.PHONY: release assets preview physics-test match-sim app-sim web distclean
 
 -include $(DEPS)

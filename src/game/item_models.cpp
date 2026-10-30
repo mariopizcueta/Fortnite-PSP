@@ -456,6 +456,26 @@ void buildConsumable(Builder& b, ItemModel model) {
             b.tubeY(0.0f, 0.04f, 0.0f, 0.09f, 0.024f, 6, rgba(110, 190, 250));
             b.tubeY(0.0f, 0.09f, 0.0f, 0.11f, 0.03f, 6, rgba(214, 214, 214));
             break;
+        case ItemModel::CannedFood:  // lata con etiqueta roja (v0.15)
+            b.tubeY(0.0f, -0.06f, 0.0f, 0.06f, 0.045f, 8, rgba(176, 180, 186));
+            b.tubeY(0.0f, -0.04f, 0.0f, 0.04f, 0.047f, 8, rgba(190, 60, 46));
+            break;
+        case ItemModel::Ration:  // racion militar: bolsa verde oliva con franja clara
+            b.box(0.0f, 0.0f, 0.0f, 0.22f, 0.14f, 0.05f, rgba(92, 104, 56));
+            b.box(0.0f, 0.0f, -0.027f, 0.06f, 0.14f, 0.004f, rgba(214, 196, 120));
+            break;
+        case ItemModel::BedKit:  // cama plegada: tablones atados y una manta
+            b.box(0.0f, -0.03f, 0.0f, 0.36f, 0.10f, 0.20f, rgba(120, 82, 50));
+            b.box(0.0f, 0.04f, 0.0f, 0.32f, 0.05f, 0.18f, rgba(200, 192, 176));
+            b.box(0.0f, 0.0f, 0.0f, 0.38f, 0.02f, 0.03f, kDark);
+            break;
+        case ItemModel::SleepingBag:  // saco de dormir enrollado
+            b.setLocal(Mat4::rotationZ(0.5f * math3d::kPi));
+            b.tubeZ(0.0f, 0.0f, -0.16f, 0.16f, 0.08f, 8, rgba(54, 96, 140));
+            b.tubeZ(0.0f, 0.0f, -0.06f, -0.03f, 0.083f, 8, rgba(40, 40, 36), false);
+            b.tubeZ(0.0f, 0.0f, 0.03f, 0.06f, 0.083f, 8, rgba(40, 40, 36), false);
+            b.endLocal();
+            break;
         default:  // pocion de escudo (Referencias/Armas/Shield_Potion)
             b.tubeY(0.0f, -0.10f, 0.0f, 0.08f, 0.085f, 8, rgba(60, 130, 230));
             b.tubeY(0.0f, 0.08f, 0.0f, 0.12f, 0.04f, 6, rgba(110, 180, 250));
@@ -513,6 +533,10 @@ ItemModel itemModelFor(ItemType type, Rarity rarity) {
         case ItemType::GrenadeLauncher: return ItemModel::GrenadeLauncher;
         case ItemType::Grenade: return ItemModel::Grenade;
         case ItemType::SpikeTrap: return ItemModel::SpikeTrap;
+        case ItemType::CannedFood: return ItemModel::CannedFood;
+        case ItemType::Ration: return ItemModel::Ration;
+        case ItemType::Bed: return ItemModel::BedKit;
+        case ItemType::SleepingBag: return ItemModel::SleepingBag;
         case ItemType::None:
         case ItemType::Count: break;
     }
@@ -579,7 +603,11 @@ bool ItemModels::build() {
                 case ItemModel::Bandage:
                 case ItemModel::Medkit:
                 case ItemModel::SmallShield:
-                case ItemModel::ShieldPotion: buildConsumable(b, model); break;
+                case ItemModel::ShieldPotion:
+                case ItemModel::CannedFood:
+                case ItemModel::Ration:
+                case ItemModel::BedKit:
+                case ItemModel::SleepingBag: buildConsumable(b, model); break;
                 case ItemModel::None:
                 case ItemModel::Count: break;
             }

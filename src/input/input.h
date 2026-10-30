@@ -26,6 +26,12 @@ public:
     float analogX() const { return m_analogX; }
     float analogY() const { return m_analogY; }
 
+    // Raton (version web): pixeles movidos desde el frame anterior y ranura elegida con las
+    // teclas 1-5 (-1 = ninguna). En la PSP siempre 0 y -1.
+    float mouseDX() const { return m_mouseDX; }
+    float mouseDY() const { return m_mouseDY; }
+    int slotKey() const { return m_slotKey; }
+
     // Segundos que lleva mantenida completa una combinacion; 0 si no lo esta.
     float comboHeldSeconds() const { return m_comboHeld; }
     void setTrackedCombo(u32 mask) { m_combo = mask; }
@@ -43,6 +49,9 @@ private:
     u8 m_rawY = 128;
     float m_analogX = 0.0f;
     float m_analogY = 0.0f;
+    float m_mouseDX = 0.0f;
+    float m_mouseDY = 0.0f;
+    int m_slotKey = -1;
     u32 m_combo = 0;
     float m_comboHeld = 0.0f;
     u32 m_samples = 0;

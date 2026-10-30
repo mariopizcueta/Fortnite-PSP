@@ -25,6 +25,11 @@ const ItemDef kDefs[] = {
     {i18n::T::ItemGrenadeLauncher, ItemKind::Weapon, Rarity::Rare, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     {i18n::T::ItemGrenade, ItemKind::Throwable, Rarity::Common, 6, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
     {i18n::T::ItemSpikeTrap, ItemKind::Trap, Rarity::Uncommon, 9, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    // v0.15: comida (el ultimo valor es el hambre que quita) y muebles para dormir.
+    {i18n::T::ItemCannedFood, ItemKind::Consumable, Rarity::Common, 6, 2.5f, 0.0f, 0.0f, 0.0f, 0.0f, 30.0f},
+    {i18n::T::ItemRation, ItemKind::Consumable, Rarity::Uncommon, 3, 4.0f, 10.0f, 100.0f, 0.0f, 0.0f, 65.0f},
+    {i18n::T::ItemBed, ItemKind::Furniture, Rarity::Rare, 3, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {i18n::T::ItemSleepingBag, ItemKind::Furniture, Rarity::Uncommon, 1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
 };
 static_assert(sizeof(kDefs) / sizeof(kDefs[0]) == static_cast<int>(ItemType::Count), "falta un objeto");
 
@@ -146,6 +151,8 @@ const char* ammoName(AmmoType type) {
 
 bool isWeapon(ItemType type) { return itemDef(type).kind == ItemKind::Weapon; }
 
+bool isFood(ItemType type) { return itemDef(type).food > 0.0f; }
+
 WeaponClass weaponClass(ItemType type) {
     const WeaponSpec* s = specFor(type);
     return s ? s->family : WeaponClass::None;
@@ -244,14 +251,22 @@ void Inventory::clear() {
     for (int& a : m_ammo) a = 0;
     m_selected = 0;
     m_pickaxe = false;
+    m_capacity = kSlots;
+}
+
+bool Inventory::addBackpack() {
+    if (m_capacity + kBackpackSlots > kMaxSlots) return false;
+    m_capacity += kBackpackSlots;
+    return true;
 }
 
 int Inventory::add(ItemType type, Rarity rarity, int count, int loaded) {
     const ItemDef& def = itemDef(type);
     if (def.kind == ItemKind::Empty || count <= 0) return count;
     // Primero se apila en las ranuras del mismo tipo.
-    if (def.kind == ItemKind::Consumable) {
-        for (InventorySlot& s : m_slots) {
+    if (def.kind == ItemKind::Consumable || (def.kind == ItemKind::Furniture && def.maxStack > 1)) {
+        for (int i = 0; i < m_capacity; ++i) {
+            InventorySlot& s = m_slots[i];
             if (s.type != type || s.count >= def.maxStack) continue;
             const int take = count < def.maxStack - s.count ? count : def.maxStack - s.count;
             s.count += take;
@@ -259,7 +274,8 @@ int Inventory::add(ItemType type, Rarity rarity, int count, int loaded) {
             if (count == 0) return 0;
         }
     }
-    for (InventorySlot& s : m_slots) {
+    for (int i = 0; i < m_capacity; ++i) {
+        InventorySlot& s = m_slots[i];
         if (s.type != ItemType::None) continue;
         s.type = type;
         s.rarity = def.kind == ItemKind::Weapon ? rarity : def.rarity;
@@ -281,7 +297,8 @@ int Inventory::room(ItemType type) const {
     const ItemDef& def = itemDef(type);
     if (def.kind == ItemKind::Empty) return 0;
     int n = 0;
-    for (const InventorySlot& s : m_slots) {
+    for (int i = 0; i < m_capacity; ++i) {
+        const InventorySlot& s = m_slots[i];
         if (s.type == ItemType::None) n += def.kind == ItemKind::Weapon ? 1 : def.maxStack;
         else if (def.kind != ItemKind::Weapon && s.type == type && s.count < def.maxStack) n += def.maxStack - s.count;
     }
@@ -289,7 +306,7 @@ int Inventory::room(ItemType type) const {
 }
 
 int Inventory::place(int index, ItemType type, Rarity rarity, int count, int loaded, InventorySlot* dropped) {
-    if (index < 0 || index >= kSlots) index = m_selected;
+    if (index < 0 || index >= m_capacity) index = m_selected;
     *dropped = take(index);
     InventorySlot& s = m_slots[index];
     const ItemDef& def = itemDef(type);
@@ -304,7 +321,7 @@ int Inventory::place(int index, ItemType type, Rarity rarity, int count, int loa
 }
 
 void Inventory::swapSlots(int a, int b) {
-    if (a < 0 || b < 0 || a >= kSlots || b >= kSlots || a == b) return;
+    if (a < 0 || b < 0 || a >= m_capacity || b >= m_capacity || a == b) return;
     const InventorySlot tmp = m_slots[a];
     m_slots[a] = m_slots[b];
     m_slots[b] = tmp;
@@ -317,8 +334,8 @@ InventorySlot Inventory::take(int index) {
 }
 
 bool Inventory::full() const {
-    for (const InventorySlot& s : m_slots) {
-        if (s.type == ItemType::None) return false;
+    for (int i = 0; i < m_capacity; ++i) {
+        if (m_slots[i].type == ItemType::None) return false;
     }
     return true;
 }
@@ -331,15 +348,15 @@ int Inventory::addAmmo(AmmoType type, int n) {
 }
 
 void Inventory::select(int index) {
-    if (index < 0 || index >= kSlots) return;
+    if (index < 0 || index >= m_capacity) return;
     m_selected = index;
     m_pickaxe = false;
 }
 
 bool Inventory::cycle(int direction) {
-    const int step = direction < 0 ? kSlots - 1 : 1;
-    for (int k = 1; k <= kSlots; ++k) {
-        const int i = (m_selected + step * k) % kSlots;
+    const int step = direction < 0 ? m_capacity - 1 : 1;
+    for (int k = 1; k <= m_capacity; ++k) {
+        const int i = (m_selected + step * k) % m_capacity;
         if (m_slots[i].type == ItemType::None) continue;
         const bool changed = m_pickaxe || i != m_selected;
         m_selected = i;
@@ -377,7 +394,7 @@ int Inventory::count(ItemType type) const {
 }
 
 void Inventory::consumeOne(int index) {
-    if (index < 0 || index >= kSlots || m_slots[index].count <= 0) return;
+    if (index < 0 || index >= m_capacity || m_slots[index].count <= 0) return;
     if (--m_slots[index].count == 0) m_slots[index] = InventorySlot{};
 }
 

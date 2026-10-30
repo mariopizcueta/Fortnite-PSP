@@ -15,6 +15,13 @@ using math3d::Vec3;
 using namespace tuning;
 using namespace detail;
 
+namespace {
+
+constexpr float kReviveDanger = 7.0f;   // m: con un rival mas cerca, primero se defiende
+constexpr float kReviveSearch = 45.0f;  // m: acude a un companero derribado
+
+}  // namespace
+
 void Match::updateBot(int index, float dt) {
     Bot& b = m_bots[index];
     if (b.state == BotState::Eliminated) return;
@@ -31,6 +38,7 @@ void Match::updateBot(int index, float dt) {
 
     // Autobus y caida: salta en su momento y planea hacia donde quiere aterrizar.
     if (m_air[self] != AirState::Ground) {
+        if (teamMode() && sameTeam(self, 0)) followPlayerJump(index);
         updateAirState(self, m_air[self] == AirState::Bus && m_time >= b.jumpTime);
         if (m_air[self] == AirState::Bus) return;
         const Vec3 pos = b.body.state().position;
@@ -41,7 +49,7 @@ void Match::updateBot(int index, float dt) {
         b.body.step(airIntent(self, wish, false), dt, *m_world);
         m_stats.physicsMicros += core::nowMicros() - t1;
         updateAirState(self, false);
-        if (m_air[self] == AirState::Ground) {
+        if (m_air[self] == AirState::Ground && b.state != BotState::Downed) {
             b.state = BotState::Explore;
             b.decisionTimer = m_rng.range(0.05f, 0.3f);
             b.progressAnchor = b.body.state().position;
@@ -55,6 +63,12 @@ void Match::updateBot(int index, float dt) {
     if (m_config.cheats.freezeBots || m_config.cheats.partyBots) {
         b.aiming = false;
         b.body.step(MoveIntent{}, dt, *m_world);
+        return;
+    }
+
+    // Equipos (v0.16): derribado, solo se arrastra.
+    if (b.state == BotState::Downed) {
+        updateDownedBot(index, dt);
         return;
     }
 
@@ -102,6 +116,7 @@ void Match::updateBot(int index, float dt) {
     const u64 t1 = core::nowMicros();
     b.body.step(intent, dt, *m_world);
     const u64 t2 = core::nowMicros();
+    updateBotRevive(index);
     botShoot(index);
     m_stats.aiMicros += (t1 - t0) + (core::nowMicros() - t2);
     m_stats.physicsMicros += t2 - t1;
@@ -131,7 +146,8 @@ int Match::perceive(int index) const {
             if (math3d::dot(dir, forward) < fovCos) continue;
         }
         if (!lineOfSight(eye, chestOf(id))) continue;
-        const float score = d * (id == b.target ? 0.6f : 1.0f);
+        // Un derribado ya no es peligroso: antes, el que sigue en pie.
+        const float score = d * (id == b.target ? 0.6f : 1.0f) * (m_downed[id] ? 3.0f : 1.0f);
         if (score < bestScore) {
             bestScore = score;
             best = id;
@@ -154,6 +170,17 @@ void Match::chooseDestination(Bot& b) {
     if (botNeedsSafety(b.body.state().position, -1)) {
         safePoint(&b.destination);
         return;
+    }
+    // Equipos (v0.16): lo primero, seguir a su lider (el jugador, en el suyo).
+    if (teamMode()) {
+        const int leader = teamLeader(static_cast<int>(&b - m_bots.data()) + 1);
+        if (leader >= 0 && &body(leader) != &b.body) {
+            const Vec3 at = body(leader).state().position;
+            if (distXZ(at, b.body.state().position) > 9.0f && m_nav->randomPointNear(at, 6.0f, m_rng, &dest)) {
+                b.destination = dest;
+                return;
+            }
+        }
     }
     // Final de la partida (v0.14): mejor esperar a cubierto dentro de la zona siguiente
     // (junto a algo que tape) que correr a campo abierto.
@@ -195,6 +222,7 @@ void Match::chooseDestination(Bot& b) {
         for (int id = 0; id < entityCount(); ++id) {
             if (&body(id) == &b.body || !alive(id) || m_air[id] != AirState::Ground) continue;
             if (id == 0 && m_config.cheats.invisible) continue;
+            if (!hostile(static_cast<int>(&b - m_bots.data()) + 1, id)) continue;
             const float d = distXZ(body(id).state().position, pos);
             if (d < best) {
                 best = d;
@@ -249,6 +277,8 @@ void Match::botUpdateHealing(int index, float dt) {
     Bot& b = m_bots[index];
     CharacterState& s = b.body.state();
     const bool threatened = b.state == BotState::Attack || (b.target >= 0 && b.targetVisible);
+    // Los aliados del modo zombi (125 de vida y de escudo, v0.16): sus topes crecen con ellos.
+    const float capScale = s.maxHealth / 100.0f;
     if (b.healTimer > 0.0f) {
         if (threatened || b.healSlot < 0) {
             b.healTimer = 0.0f;
@@ -259,8 +289,8 @@ void Match::botUpdateHealing(int index, float dt) {
         if (b.healTimer > 0.0f) return;
         const ItemType type = b.bag.slot(b.healSlot).type;
         const ItemDef& def = itemDef(type);
-        if (def.health > 0.0f && s.health < def.healthCap) s.health = fminf(def.healthCap, s.health + def.health);
-        if (def.shield > 0.0f && s.shield < def.shieldCap) s.shield = fminf(def.shieldCap, s.shield + def.shield);
+        if (def.health > 0.0f && s.health < def.healthCap * capScale) s.health = fminf(def.healthCap * capScale, s.health + def.health);
+        if (def.shield > 0.0f && s.shield < def.shieldCap * capScale) s.shield = fminf(def.shieldCap * capScale, s.shield + def.shield);
         b.bag.consumeOne(b.healSlot);
         b.healSlot = -1;
         b.healTimer = 0.0f;
@@ -269,12 +299,12 @@ void Match::botUpdateHealing(int index, float dt) {
     if (threatened || b.state == BotState::Loot || m_air[index + 1] != AirState::Ground) return;
     int best = -1;
     float bestGain = 0.0f;
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const ItemType type = b.bag.slot(i).type;
         if (type == ItemType::None || isWeapon(type)) continue;
         const ItemDef& def = itemDef(type);
-        const float health = def.health > 0.0f ? fminf(def.health, fmaxf(0.0f, def.healthCap - s.health)) : 0.0f;
-        const float shield = def.shield > 0.0f ? fminf(def.shield, fmaxf(0.0f, def.shieldCap - s.shield)) : 0.0f;
+        const float health = def.health > 0.0f ? fminf(def.health, fmaxf(0.0f, def.healthCap * capScale - s.health)) : 0.0f;
+        const float shield = def.shield > 0.0f ? fminf(def.shield, fmaxf(0.0f, def.shieldCap * capScale - s.shield)) : 0.0f;
         // Solo si se aprovecha bien (no una venda para curar 2 puntos); la vida, antes.
         const float gain = health * 1.5f + shield;
         if (gain >= fminf(def.health * 1.5f + def.shield, 20.0f) * 0.6f && gain > bestGain) {
@@ -382,6 +412,20 @@ void Match::decide(int index) {
             seen = -1;
         }
     }
+    // Equipos (v0.16): un companero derribado es lo primero, salvo con un rival encima.
+    if (teamMode()) {
+        const bool danger = seen >= 0 && seenDistance < kReviveDanger;
+        if (b.state == BotState::Revive) {
+            if (danger) b.reviveMate = -1;  // abajo pasa a atacar
+            else seen = -1;
+        } else if (b.state != BotState::Flee && !danger) {
+            const int mate = downedMate(index, kReviveSearch);
+            if (mate >= 0) {
+                startBotRevive(index, mate);
+                seen = -1;
+            }
+        }
+    }
     if (seen >= 0) {
         if (b.state == BotState::Loot) {
             if (b.lootPickup >= 0) m_pickups[b.lootPickup].claimedBy = -1;
@@ -442,6 +486,19 @@ void Match::decide(int index) {
     }
 
     // Tormenta: si hay que entrar en la zona, se deja el botin o la busqueda y se va.
+    // (Equipos: quien se aleja de su lider vuelve con el.)
+    if (teamMode() && b.armed && b.state != BotState::Attack && b.state != BotState::Flee && b.state != BotState::Revive) {
+        const int leader = teamLeader(self);
+        if (leader >= 0 && leader != self) {
+            const Vec3 at = body(leader).state().position;
+            if (distXZ(pos, at) > m_config.teamLeash && (b.state != BotState::Travel || distXZ(b.destination, at) > 12.0f)) {
+                releaseLootClaims(b);
+                b.harvestObject = -1;
+                b.campContainer = -1;
+                b.state = BotState::Explore;
+            }
+        }
+    }
     if ((b.state == BotState::Loot || b.state == BotState::Search || b.state == BotState::Harvest || b.state == BotState::Camp ||
          ((b.state == BotState::Attack || b.state == BotState::Flee) && m_inStorm[self])) &&
         botNeedsSafety(pos, self)) {
@@ -455,23 +512,25 @@ void Match::decide(int index) {
     // Airdrops (v0.14): armado y con vida, a veces se aposta cerca y espera a quien vaya a
     // por el (hay un limite de bots por airdrop).
     if (m_config.botsCampAirdrops && b.armed && b.state != BotState::Attack && b.state != BotState::Loot &&
-        b.state != BotState::Flee && b.state != BotState::Camp && !botNeedsSafety(pos, self) && m_rng.chance(0.35f) &&
-        findCamp(index)) {
+        b.state != BotState::Flee && b.state != BotState::Camp && b.state != BotState::Revive && !botNeedsSafety(pos, self) &&
+        m_rng.chance(0.35f) && findCamp(index)) {
         b.state = BotState::Camp;
         b.stateTime = 0.0f;
     }
     // Botin: sin arma es lo primero; con arma, hasta tener un inventario completo (dos armas
     // y curas) lo busca a menudo (cofres, armas mejores); despues, de vez en cuando. Si no
     // hay botin y le faltan materiales, va a picar.
-    if (b.state != BotState::Attack && b.state != BotState::Loot && b.state != BotState::Flee &&
+    if (b.state != BotState::Attack && b.state != BotState::Loot && b.state != BotState::Flee && b.state != BotState::Revive &&
         b.state != BotState::Harvest && b.state != BotState::Camp && !botNeedsSafety(pos, self)) {
         int weapons = 0;
-        for (int i = 0; i < Inventory::kSlots; ++i) weapons += isWeapon(b.bag.slot(i).type) ? 1 : 0;
+        for (int i = 0; i < b.bag.slotCount(); ++i) weapons += isWeapon(b.bag.slot(i).type) ? 1 : 0;
         const bool incomplete = weapons < 2 || !botHasHeals(b);
         const bool wantsLoot = !b.armed || m_rng.chance(incomplete ? 0.35f : 0.12f);
         int materials = 0;
         for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) materials += b.materials.amount[r];
-        if (wantsLoot && findLoot(index, !b.armed ? 70.0f : (incomplete ? 32.0f : 22.0f))) {
+        // (Sin arma va a donde haga falta; con ella, un companero no se aleja de su lider.)
+        const bool follower = teamMode() && teamLeader(self) != self;
+        if (wantsLoot && findLoot(index, !b.armed ? 70.0f : (follower ? 16.0f : (incomplete ? 32.0f : 22.0f)))) {
             b.state = BotState::Loot;
             b.stateTime = 0.0f;
             b.pathRefresh = 0.0f;
@@ -507,7 +566,19 @@ void Match::decide(int index) {
             if (distXZ(pos, goal) < 1.8f && fabsf(goal.y - pos.y) < 1.6f) {
                 botTakeLoot(index);
             } else if (b.pathRefresh <= 0.0f || b.pathIndex >= b.pathLength) {
-                if (requestPath(b, goal)) b.pathRefresh = 3.0f;
+                if (requestPath(b, goal)) {
+                    b.pathRefresh = 3.0f;
+                } else if (b.stateTime > 3.0f && !NavGrid::clearWalk(*m_world, pos, goal, kBodyRadius)) {
+                    // Sin camino ni paso recto (detras de un remolque, al otro lado de una
+                    // pared): lo deja y no lo vuelve a elegir.
+                    if (b.lootPickup >= 0) {
+                        m_pickups[b.lootPickup].claimedBy = -1;
+                        b.skipPickup = b.lootPickup;
+                    }
+                    if (b.lootContainer >= 0) m_containers[b.lootContainer].claimedBy = -1;
+                    b.lootPickup = b.lootContainer = -1;
+                    b.state = BotState::Explore;
+                }
             }
             break;
         }
@@ -583,7 +654,25 @@ void Match::decide(int index) {
             break;
         }
         case BotState::Idle:
+        case BotState::Downed:
             break;
+        case BotState::Revive: {
+            // Va hasta el companero derribado; junto a el, updateBotRevive le atiende.
+            const int mate = b.reviveMate;
+            if (mate < 0 || !alive(mate) || !m_downed[mate] || b.stateTime > 25.0f) {
+                b.reviveMate = -1;
+                b.state = BotState::Explore;
+                break;
+            }
+            const Vec3 at = body(mate).state().position;
+            b.destination = at;
+            if (distXZ(pos, at) <= m_config.reviveReach - 0.3f) {
+                b.pathLength = 0;
+            } else if (b.pathRefresh <= 0.0f || b.pathIndex >= b.pathLength) {
+                if (requestPath(b, at)) b.pathRefresh = 2.0f;
+            }
+            break;
+        }
         case BotState::Harvest: {
             int total = 0;
             for (int r = 0; r < static_cast<int>(world::Resource::Count); ++r) total += b.materials.amount[r];
@@ -659,7 +748,8 @@ void Match::decide(int index) {
     // a la segunda replanifica desde donde esta; a la tercera cambia de destino.
     const bool wantsToMove = b.pathIndex < b.pathLength &&
                              (b.state == BotState::Travel || b.state == BotState::Attack || b.state == BotState::Loot ||
-                              b.state == BotState::Flee || b.state == BotState::Harvest || b.state == BotState::Camp);
+                              b.state == BotState::Flee || b.state == BotState::Harvest || b.state == BotState::Camp ||
+                              b.state == BotState::Revive);
     b.progressTimer += interval;
     if (b.progressTimer >= kStuckWindow) {
         const float moved = distXZ(pos, b.progressAnchor);
@@ -784,8 +874,23 @@ MoveIntent Match::steer(int index, float dt) {
             }
             speed = 0.85f;
             break;
+        case BotState::Revive:
+            // Junto al companero, agachado y de cara a el (quieto hasta levantarle).
+            if (b.reviveMate >= 0) {
+                const Vec3 at = body(b.reviveMate).state().position;
+                const float d = distXZ(pos, at);
+                if (d <= m_config.reviveReach - 0.3f) {
+                    intent.faceYawOverride = true;
+                    intent.faceYaw = yawTowards(pos, at);
+                } else if (!followPath() && d > 0.01f) {
+                    desired = flatten(at - pos) * (1.0f / d);
+                }
+            }
+            speed = 1.0f;
+            break;
         case BotState::Idle:
         case BotState::Explore:
+        case BotState::Downed:
         case BotState::Eliminated:
             break;
     }
@@ -869,7 +974,8 @@ MoveIntent Match::avoidObstacles(int index, Vec3 desired, float speed, MoveInten
 void Match::botShoot(int index) {
     Bot& b = m_bots[index];
     const int self = index + 1;
-    if (b.state != BotState::Attack || b.reaction > 0.0f) return;
+    // v0.16: los aliados que van con prisa hacia el jugador disparan de camino (fireOnMove).
+    if ((b.state != BotState::Attack && !b.fireOnMove) || b.reaction > 0.0f) return;
     if (!alive(b.target) || m_phase == MatchPhase::Finished) return;
     const CharacterState& s = b.body.state();
     const Vec3 eye = eyeOf(self);
@@ -941,7 +1047,11 @@ bool Match::findLoot(int index, float maxDistance, bool healsOnly) {
     int pickup = -1, container = -1;
     for (size_t i = 0; i < m_containers.size(); ++i) {
         const Container& c = m_containers[i];
-        if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox || c.kind == ContainerKind::Workbench) continue;
+        // Neveras, despensas y camas son cosa del jugador (los aliados no comen ni las abren).
+        if (c.opened || !c.landed || c.kind == ContainerKind::AmmoBox || c.kind == ContainerKind::Workbench ||
+            c.kind == ContainerKind::Fridge || c.kind == ContainerKind::Pantry || c.kind == ContainerKind::Bed) {
+            continue;
+        }
         if (c.claimedBy >= 0 && c.claimedBy != self) continue;
         if (healsOnly && c.kind == ContainerKind::Airdrop) continue;
         // El airdrop y la llama merecen la pena aunque ya vaya armado.
@@ -959,7 +1069,7 @@ bool Match::findLoot(int index, float maxDistance, bool healsOnly) {
     }
     for (size_t i = 0; i < m_pickups.size(); ++i) {
         const Pickup& p = m_pickups[i];
-        if (!p.active || p.kind == PickupKind::Ammo) continue;
+        if (!p.active || p.kind == PickupKind::Ammo || static_cast<int>(i) == b.skipPickup) continue;
         if (p.claimedBy >= 0 && p.claimedBy != self) continue;
         if (healsOnly && (p.kind != PickupKind::Item || isWeapon(p.item) || itemDef(p.item).kind != ItemKind::Consumable)) continue;
         // Sin arma, primero un arma; despues, lo que le sirva (otra arma, una mejor, curas o
@@ -1012,9 +1122,11 @@ void Match::botBuildCover(int index, int attacker, bool urgent) {
     // Como un jugador: al recibir disparos desde lejos, a veces se cubre con una pared hacia
     // el atacante, gastando sus materiales (v0.13; hay un limite de paredes por bot y en
     // total). Huyendo (`urgent`) siempre que pueda, aunque el rival este cerca.
-    if (!m_config.botsBuild || index < 0) return;
+    if (index < 0) return;
     Bot& b = m_bots[index];
     const int self = index + 1;
+    // Los aliados del modo zombi se cubren aunque los bots de ese modo no construyan (v0.16).
+    if (!m_config.botsBuild && b.kind != BotKind::Survivor) return;
     if (m_air[self] != AirState::Ground || !b.body.state().grounded()) return;
     if (urgent ? b.wallCooldown > m_config.botWallCooldown - 1.5f : b.wallCooldown > 0.0f) return;
     world::Resource material = world::Resource::Wood;
@@ -1063,7 +1175,7 @@ void Match::hearShot(int shooter, const Vec3& origin) {
         if (b.kind == BotKind::Survivor) continue;
         if (self == shooter || b.state == BotState::Eliminated || b.state == BotState::Attack ||
             b.state == BotState::Loot || b.state == BotState::Flee || b.state == BotState::Camp || !b.armed ||
-            m_air[self] != AirState::Ground) {
+            b.state == BotState::Downed || b.state == BotState::Revive || m_air[self] != AirState::Ground) {
             continue;
         }
         if (shooter == 0 && m_config.cheats.invisible) continue;  // truco: no se le oye
@@ -1081,11 +1193,12 @@ void Match::hearShot(int shooter, const Vec3& origin) {
 bool Match::botWeak(const Bot& b) const {
     // Al final de la partida (v0.14) se arriesga menos: huye antes.
     const CharacterState& s = b.body.state();
+    if (b.kind == BotKind::Survivor) return s.health + s.shield < m_config.zombie.allyFleeHealth;
     return s.health + s.shield < m_config.botFleeHealth + (lateGame() ? 15.0f : 0.0f);
 }
 
 bool Match::botHasHeals(const Bot& b) const {
-    for (int i = 0; i < Inventory::kSlots; ++i) {
+    for (int i = 0; i < b.bag.slotCount(); ++i) {
         const ItemDef& def = itemDef(b.bag.slot(i).type);
         if (def.kind == ItemKind::Consumable && (def.health > 0.0f || def.shield > 0.0f)) return true;
     }
@@ -1109,13 +1222,16 @@ bool Match::findHarvest(int index) {
     // El objeto del mapa mas cercano que se pueda picar desde el suelo: arboles, rocas, cajas,
     // contenedores, vallas... (no tejados ni los paneles altos de las naves), lejos de la
     // tormenta.
-    if (!m_harvestables || !m_config.botsHarvest) return false;
     Bot& b = m_bots[index];
+    const bool ally = b.kind == BotKind::Survivor;
+    if (!m_harvestables || (!m_config.botsHarvest && !ally)) return false;
     const Vec3 pos = b.body.state().position;
-    float best = m_config.botHarvestRange;
+    float best = ally ? m_config.zombie.allyLootRange : m_config.botHarvestRange;
     int chosen = -1;
     for (size_t i = 0; i < m_harvestables->size(); ++i) {
         if (m_objectDestroyed[i]) continue;
+        // Los aliados no desmontan la base ni los lugares del modo zombi (v0.16).
+        if (ally && (*m_harvestables)[i].zombieOnly) continue;
         const world::Aabb& box = (*m_harvestables)[i].box;
         if (box.min.y > pos.y + 0.6f || box.min.y < pos.y - 1.0f || box.max.y - box.min.y > 5.0f) continue;
         const Vec3 center = (box.min + box.max) * 0.5f;
@@ -1206,6 +1322,8 @@ bool Match::fleePoint(const Bot& b, const Vec3& threat, Vec3* out) {
         if (!lineOfSight(eye, p + Vec3{0.0f, kChestHeight, 0.0f})) score += 25.0f;  // a cubierto
         if (stormDepthAt(p.x, p.z) > -3.0f) score -= 80.0f;
         else if (botNeedsSafety(p, -1)) score -= 30.0f;
+        // Los aliados huyen hacia el jugador, no lejos de el (v0.16).
+        if (b.kind == BotKind::Survivor && alive(0)) score -= 0.6f * distXZ(p, body(0).state().position);
         if (score > bestScore) {
             bestScore = score;
             *out = p;
@@ -1293,7 +1411,7 @@ bool Match::findCamp(int index) {
 
 void Match::startSmallBuild(int index, int kind, float yaw) {
     Bot& b = m_bots[index];
-    if (!m_config.botsSmallBuilds || !m_config.botsBuild) return;
+    if ((!m_config.botsSmallBuilds || !m_config.botsBuild) && b.kind != BotKind::Survivor) return;
     b.buildKind = kind;
     b.buildYaw = yaw;
     b.buildStep = kind == 1 ? 4 : 1;

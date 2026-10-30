@@ -70,10 +70,11 @@ void World::destroy() {
 }
 
 RenderStats World::draw(const math3d::Frustum& frustum, const math3d::Vec3& eye,
-                        float maxDistance, const u8* destroyed) const {
+                        float maxDistance, const u8* destroyed, bool zombieMap) const {
     RenderStats stats;
     gfx::setModelMatrix(math3d::Mat4::identity());
     for (const StaticBatch& b : m_static) {
+        if (b.zombieOnly && !zombieMap) continue;
         if (destroyed && b.object >= 0 && destroyed[b.object]) continue;
         if (math3d::length(b.center - eye) - b.radius > maxDistance) continue;
         if (!frustum.sphereVisible(b.center, b.radius)) continue;

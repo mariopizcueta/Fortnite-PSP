@@ -23,8 +23,15 @@ enum class Sfx : u8 {
     RevolverShot, PumpShotgunShot, MedkitUse, BandageUse, ReloadRifle, ReloadShotgun, ReloadTactical, ReloadSmg,
     ReloadPistol, ReloadRevolver, ReloadSniper, ReloadGrenadeLauncher, ReloadRocket,
     // v0.14: modo zombi y agua.
-    ZombieGroan, ZombieHit, Horde, Splash, Craft, Dawn, Count
+    ZombieGroan, ZombieHit, Horde, Splash, Craft, Dawn,
+    // v0.15: modo zombi (miedo, comer, mochila, dormir).
+    Heartbeat, Scream, Whisper, Jumpscare, Eat, Backpack, Sleep, Count
 };
+
+// Prioridad de un sonido (v0.16). Con las 8 voces ocupadas, uno nuevo solo sustituye a uno
+// de prioridad igual o menor: el disparo del jugador no lo pisa ningun efecto (los perdigones
+// de la escopeta, por ejemplo, daban un impacto cada uno y ocupaban todas las voces).
+enum class SfxPriority : u8 { Effect, BotShot, PlayerShot };
 
 class Mixer {
 public:
@@ -36,7 +43,7 @@ public:
 
     // --- Hilo del juego -------------------------------------------------------------
     // volume 0..1, pan -1 (izquierda) .. +1 (derecha).
-    void play(Sfx id, float volume = 1.0f, float pan = 0.0f);
+    void play(Sfx id, float volume = 1.0f, float pan = 0.0f, SfxPriority priority = SfxPriority::Effect);
     // Corta todas las voces que esten sonando ese efecto (p. ej. beber al cancelar).
     void stop(Sfx id);
     void stopAll();  // corta todos los efectos (no la musica)
@@ -62,6 +69,7 @@ private:
         u8 sfx;
         u8 volume;  // 0..255
         s8 pan;     // -127..127
+        u8 priority;  // SfxPriority
     };
     static constexpr int kFracBits = 12;  // parte fraccionaria de la posicion de las voces
     struct Voice {
@@ -73,6 +81,7 @@ private:
         u32 step = 0;      // 20.12
         int volumeLeft = 0, volumeRight = 0;  // Q8
         u32 age = 0;
+        u8 priority = 0;
     };
 
     void startVoice(const Command& c);

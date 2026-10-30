@@ -13,14 +13,24 @@ namespace game {
 
 // Capacidad maxima. v0.14: las partidas empiezan con 30 bots (el usuario los ha medido en
 // su PSP-2000). Con menos de kRewardBots la partida es de practica: ni pavos ni logros.
-constexpr int kMaxBots = 30;
+// v0.16: en escuadrones hasta 39 bots (40 personajes: 10 equipos de 4); en solitario siguen
+// siendo como mucho 30.
+constexpr int kMaxBots = 39;
+constexpr int kMaxSoloBots = 30;
 constexpr int kDefaultBots = 30;
 constexpr int kRewardBots = 30;
+constexpr int kDuoBots = 29;    // 30 personajes: 15 parejas
+constexpr int kSquadBots = 39;  // 40 personajes: 10 equipos de 4
 
 // Modos de juego (CUADRADO en el lobby). Monodisparo: en el botin solo hay francotiradores,
 // armas con mirilla y granadas (y curativos); ni trampas ni el resto de armas. Zombis
 // (v0.14, docs/ZOMBIS.md): supervivencia en el mapa en ruinas, sin tormenta ni bots.
 enum class GameMode : u8 { BattleRoyale, OneShot, Zombies, Count };
+// Submodos del battle royale (v0.16, docs/EQUIPOS.md): en solitario, por parejas o en
+// escuadrones de 4. Los equipos son bots, tambien los del jugador.
+enum class TeamMode : u8 { Solo, Duo, Squad, Count };
+inline int teamSizeOf(TeamMode mode) { return mode == TeamMode::Squad ? 4 : (mode == TeamMode::Duo ? 2 : 1); }
+inline int teamBotsOf(TeamMode mode) { return mode == TeamMode::Squad ? kSquadBots : kDuoBots; }
 
 // Trucos del menu de administrador (ajustes > admin, con contrasena). Los marcados (app) los
 // aplica la aplicacion al dibujar; el resto, la partida. Salvo los de los bots, todos son
@@ -56,6 +66,17 @@ struct MatchConfig {
     u32 seed = 1;
     GameMode mode = GameMode::BattleRoyale;
     Cheats cheats;
+
+    // Equipos (v0.16): personajes por equipo (1 = cada uno por su cuenta). Quien se queda sin
+    // vida con un companero en pie cae derribado: se arrastra a cuatro patas perdiendo vida
+    // hasta que le reaniman o se acaba (downSeconds, menos cada vez que vuelve a caer).
+    int teamSize = 1;
+    float downSeconds = 30.0f;
+    float downCrawlSpeed = 0.26f;   // fraccion de la carrera
+    float reviveSeconds = 10.0f;    // como en Fortnite
+    float reviveHealth = 30.0f;     // vida con la que se levanta (sin escudo)
+    float reviveReach = 2.2f;
+    float teamLeash = 22.0f;        // m: un bot mas lejos de su lider vuelve con el
 
     // IA: cada bot decide cada aiDecisionInterval s (escalonados entre bots); entre
     // decisiones solo sigue su plan (moverse, apuntar), que es barato.
@@ -232,7 +253,11 @@ struct MatchConfig {
         c.chestCount = 18;
         c.floorLootCount = 46;
         c.ammoBoxCount = 14;
-        c.build.maxWalls = 30;
+        // v0.15: sin limite de piezas (solo el tecnico): lo bonito es construir.
+        c.build.maxWalls = kMaxWallCapacity;
+        c.build.maxBotWalls = kMaxWallCapacity;
+        c.build.maxWallsPerBot = 24;  // v0.16: los aliados se cubren con lo que construyen
+        c.startItems[0] = {ItemType::SleepingBag, 1, Rarity::Uncommon};
         return c;
     }
 

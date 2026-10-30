@@ -14,6 +14,8 @@
 //   Acampar         (v0.14) un airdrop ha caido cerca: espera a cubierto mirandolo y
 //                   dispara a quien vaya a por el (despues lo abre)
 //   Esperar         (v0.14, modo zombi) superviviente aun sin rescatar, en su campamento
+//   Derribado       (v0.16, equipos) sin vida y con companeros en pie: se arrastra hacia ellos
+//   Reanimar        (v0.16, equipos) va a por un companero derribado y le levanta
 //   Eliminado       no actua, no colisiona y no se le puede disparar
 //
 // v0.14: ademas de los luchadores del battle royale, un Bot puede ser un zombi o un
@@ -30,7 +32,7 @@
 
 namespace game {
 
-enum class BotState { Explore, Travel, Search, Attack, Loot, Harvest, Flee, Camp, Idle, Eliminated };
+enum class BotState { Explore, Travel, Search, Attack, Loot, Harvest, Flee, Camp, Idle, Downed, Revive, Eliminated };
 
 // Que es la entidad (v0.14): luchador del battle royale, zombi o superviviente.
 enum class BotKind : u8 { Fighter, Zombie, Survivor };
@@ -67,6 +69,7 @@ struct Bot {
     // Botin: lo que va a recoger (indice de Match::pickups() o de containers()).
     int lootPickup = -1;
     int lootContainer = -1;
+    int skipPickup = -1;         // objeto al que no ha podido llegar (no lo vuelve a elegir)
     bool investigate = false;    // va hacia un disparo que ha oido (destination)
 
     // Caida desde el autobus.
@@ -135,6 +138,28 @@ struct Bot {
     bool rescued = false;       // superviviente: ya se ha unido al jugador
     bool discovered = false;    // superviviente: el jugador ha pasado cerca (minimapa)
     math3d::Vec3 home;          // superviviente: su campamento
+    // v0.15. Zombi que guarda un lugar de interes (-1: ninguno) y tumbado entre las ruinas
+    // hasta que el jugador se acerca (dormant). Superviviente: durmiendo en su cama (`bed`,
+    // contenedor), la pieza de la base que va a construir (plano * 8 + pieza + 1; 0: nada),
+    // y, si ha caido, cuanto falta para que se levante como zombi armado. `turned`: era un
+    // superviviente (zombi armado: suelta su inventario y una mochila).
+    int site = -1;
+    bool dormant = false;
+    bool sleeping = false;
+    int bed = -1;
+    int allyPiece = 0;
+    float riseTimer = 0.0f;
+    bool turned = false;
+    // v0.16, aliados. Dispara mientras va hacia el jugador (fireOnMove); rampa construida por
+    // la que esta subiendo tras el (climbRamp, indice de pieza); centro de crafteo al que va
+    // (craftBench, contenedor) y lo que lleva alli; segundos andando hacia su cama de noche.
+    bool fireOnMove = false;
+    int climbRamp = -1;
+    int craftBench = -1;
+    float craftTimer = 0.0f;
+    float bedWalk = 0.0f;
+    // v0.16, equipos: companero derribado al que va a reanimar (entidad; -1: ninguno).
+    int reviveMate = -1;
 
     // Marcador y aspecto.
     int kills = 0;

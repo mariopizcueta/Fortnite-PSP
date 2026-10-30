@@ -75,12 +75,45 @@ constexpr int kIconTextGap = 3;   // icono -> su texto
 constexpr int kComboGap = 1;      // entre botones de una misma combinacion
 constexpr int kHintGap = 10;      // entre ayudas
 
+// Version web: en lugar del icono del boton de la PSP, una tecla con su nombre (las de
+// web/platform/web_input.cpp). L y R son los botones del raton en las acciones de la
+// partida y Z / X en los menus. Flechas y raton: caracteres 1-6 de la fuente web.
+#ifdef FORTNITEPSP_WEB
+const char* keyLabel(Button button) {
+    const bool action = static_cast<int>(button) >= static_cast<int>(Button::Jump);
+    switch (resolve(button)) {
+        case Button::Cross: return "ESPACIO";
+        case Button::Circle: return "Q";
+        case Button::Square: return "E";
+        case Button::Triangle: return "F";
+        case Button::L: return action ? "\x06" : "Z";  // clic derecho
+        case Button::R: return action ? "\x05" : "X";  // clic izquierdo
+        case Button::Start: return "ESC";
+        case Button::Select: return "TAB";
+        case Button::Up: return action ? "B" : "\x01";
+        case Button::Down: return action ? "C" : "\x02";
+        case Button::Left: return "\x03";
+        case Button::Right: return "\x04";
+        case Button::Dpad: return "\x03\x01\x02\x04";
+        case Button::Stick: return "WASD";
+        default: return nullptr;
+    }
+}
+#else
+const char* keyLabel(Button) { return nullptr; }
+#endif
+
+int buttonWidth(Button button) {
+    const char* key = keyLabel(button);
+    return key ? gfx::text::width(key) + 4 : buttonRect(button).w;
+}
+
 // Recorre la fila llamando a fn(indice, xIcono, xTexto).
 template <typename Fn>
 int layoutHints(int x, const Hint* hints, int count, Fn&& fn) {
     for (int i = 0; i < count; ++i) {
         const int iconX = x;
-        x += buttonRect(hints[i].button).w;
+        x += buttonWidth(hints[i].button);
         const char* label = hints[i].label();
         const bool hasText = label && label[0];
         if (hasText) x += kIconTextGap;
@@ -100,6 +133,16 @@ int hintsWidth(const Hint* hints, int count) {
 void drawHintIcons(const Atlas& atlas, int x, int y, const Hint* hints, int count, u32 tint) {
     if (!atlas.ready()) return;
     layoutHints(x, hints, count, [&](int i, int iconX, int) {
+        if (keyLabel(hints[i].button)) {
+            const u32 alpha = tint >> 24;
+            const float w = static_cast<float>(buttonWidth(hints[i].button));
+            gfx::fillRect(static_cast<float>(iconX), static_cast<float>(y - 2), w, 12.0f, (alpha * 3 / 4) << 24 | 0x1E1414u);
+            frame(static_cast<float>(iconX), static_cast<float>(y - 2), w, 12.0f, 1.0f, alpha << 24 | 0xE6E6E6u);
+            // En la web el texto no se escribe por CPU despues del frame: puede ir ya aqui
+            // (y asi tambien sale en los iconos sueltos, que no llaman a printHints).
+            gfx::text::print(iconX + 2, y, 0xFFFFFFFFu, "%s", keyLabel(hints[i].button));
+            return;
+        }
         const assets::ui::Rect& r = buttonRect(hints[i].button);
         atlas.draw(r, static_cast<float>(iconX), static_cast<float>(y + 4 - r.h / 2), 1.0f, tint);
     });

@@ -42,6 +42,7 @@ const Tip kTips[] = {
     {true, {ui::Button::Pickaxe, T::TipPickaxe}},
     {false, {ui::Button::Cross, T::TipTraps}},
     {false, {ui::Button::Cross, T::TipZombies}},
+    {false, {ui::Button::Cross, T::TipZombieNeeds}},
 };
 constexpr int kTipCount = sizeof(kTips) / sizeof(kTips[0]);
 constexpr int kTipX = 100, kTipY = 238;
@@ -76,8 +77,6 @@ constexpr int kLobbyHintCount = 4, kExitHintCount = 2, kPauseHintCount = 2;
 constexpr int kHintsY = 258;
 
 
-// Opciones de la pausa (la tercera, MOD MENU, solo con el menu de administrador).
-constexpr T kPauseItems[] = {T::PauseContinue, T::PauseLobby, T::PauseModMenu};
 
 void drawButton(float x, float y, float w, float h, u32 fill, bool selected, float time) {
     gfx::fillRect(x, y, w, h, fill);
@@ -264,7 +263,7 @@ void App::recordMatch() {
     // Partida de practica (menos de 30 bots, v0.14): no cuenta para nada (ni pavos ni logros).
     m_matchVbucks = 0;
     if (!m_rewardsActive) {
-        platform::log::write("partida de practica (%d bots): sin pavos ni logros", m_botCount);
+        platform::log::write("partida de practica (%d bots): sin pavos ni logros", m_match.botCount());
         return;
     }
     if (m_match.zombieMode()) {
@@ -277,7 +276,7 @@ void App::recordMatch() {
         saveProfile();
         return;
     }
-    const bool won = m_match.phase() == game::MatchPhase::Finished && m_match.winner() == 0;
+    const bool won = m_match.playerWon();
     const int kills = m_match.playerKills();
     ++m_profile.matches;
     if (won) ++m_profile.wins;
@@ -460,6 +459,7 @@ void App::showLobbyMessage(T text, bool error) {
 
 void App::updateLobbyPlay(const input::Input& in) {
     // Sin navegar con la cruceta: cada accion tiene su boton.
+    if (in.pressed(PSP_CTRL_SQUARE)) refreshZombieSave();
     if (in.pressed(PSP_CTRL_TRIANGLE)) {
         if (!m_worldReady) return;
         playSfx(audio::Sfx::MenuAccept);
@@ -479,8 +479,9 @@ void App::updateLobbyPlay(const input::Input& in) {
 
 // Panel del modo de juego y de los bots (CUADRADO en JUGAR): arriba / abajo elige la fila,
 // izquierda / derecha cambia el valor; CUADRADO, X o CIRCULO lo cierran.
-constexpr float kModeX = 106.0f, kModeY = 64.0f, kModeW = 268.0f, kModeH = 150.0f;
-constexpr float kModeRowY[2] = {96.0f, 160.0f};
+constexpr float kModeX = 106.0f, kModeY = 48.0f, kModeW = 268.0f, kModeH = 186.0f;
+constexpr int kModeRows = 3;  // modo, equipos (solo battle royale) y bots
+constexpr float kModeRowY[kModeRows] = {80.0f, 144.0f, 172.0f};
 const ui::Hint kModeHints[] = {{ui::Button::Up, T::None},   {ui::Button::Down, T::HintSelect},
                                {ui::Button::Left, T::None}, {ui::Button::Right, T::HintChange},
                                {ui::Button::Square, T::HintClose}};
@@ -489,6 +490,9 @@ T modeName(game::GameMode mode) {
     return mode == game::GameMode::OneShot   ? T::ModeOneShot
            : mode == game::GameMode::Zombies ? T::ModeZombies
                                              : T::ModeBattleRoyale;
+}
+T teamName(game::TeamMode team) {
+    return team == game::TeamMode::Squad ? T::TeamSquad : (team == game::TeamMode::Duo ? T::TeamDuo : T::TeamSolo);
 }
 T modeDescription(game::GameMode mode, int line) {
     if (mode == game::GameMode::OneShot) return line == 0 ? T::ModeOneShotDesc1 : T::ModeOneShotDesc2;
@@ -503,7 +507,10 @@ void App::updateModePanel(const input::Input& in) {
         return;
     }
     if (in.pressed(PSP_CTRL_UP) || in.pressed(PSP_CTRL_DOWN)) {
-        m_modeRow = 1 - m_modeRow;
+        // La fila de los equipos solo existe en el battle royale.
+        const int step = in.pressed(PSP_CTRL_DOWN) ? 1 : kModeRows - 1;
+        m_modeRow = (m_modeRow + step) % kModeRows;
+        if (m_modeRow == 1 && m_gameMode != game::GameMode::BattleRoyale) m_modeRow = (m_modeRow + step) % kModeRows;
         playSfx(audio::Sfx::MenuMove, 0.6f);
     }
     const int change = (in.pressed(PSP_CTRL_RIGHT) ? 1 : 0) - (in.pressed(PSP_CTRL_LEFT) ? 1 : 0);
@@ -512,10 +519,20 @@ void App::updateModePanel(const input::Input& in) {
         const int modes = static_cast<int>(game::GameMode::Count);
         m_gameMode = static_cast<game::GameMode>((static_cast<int>(m_gameMode) + modes + change) % modes);
         playSfx(audio::Sfx::MenuMove);
-    } else if (m_gameMode != game::GameMode::Zombies) {  // en el modo zombi no hay bots
+    } else if (m_modeRow == 1) {
+        const int teams = static_cast<int>(game::TeamMode::Count);
+        m_teamMode = static_cast<game::TeamMode>((static_cast<int>(m_teamMode) + teams + change) % teams);
+        playSfx(audio::Sfx::MenuMove);
+    } else if (m_gameMode == game::GameMode::Zombies) {
+        // Modo zombi (v0.15): seguir la partida guardada o empezar otra.
+        if (m_zSavedDay > 0) {
+            m_zContinue = !m_zContinue;
+            playSfx(audio::Sfx::MenuMove);
+        }
+    } else if (teamMode() == game::TeamMode::Solo) {  // en equipos, los que hagan falta para llenarlos
         const int before = m_botCount;
         if (change < 0 && m_botCount > kMinBots) m_botCount -= 5;
-        if (change > 0 && m_botCount < game::kMaxBots) m_botCount += 5;
+        if (change > 0 && m_botCount < game::kMaxSoloBots) m_botCount += 5;
         if (before != m_botCount) playSfx(audio::Sfx::MenuMove);
     }
 }
@@ -525,7 +542,7 @@ void App::renderModePanel() const {
     gfx::fillRect(kModeX, kModeY, kModeW, kModeH, rgba(10, 20, 52, 245));
     ui::frame(kModeX, kModeY, kModeW, kModeH, 2, rgba(90, 160, 255));
     gfx::fillRect(kModeX, kModeY, kModeW, 20, kFortniteBlue);
-    for (int r = 0; r < 2; ++r) {
+    for (int r = 0; r < kModeRows; ++r) {
         const float h = r == 0 ? 54.0f : 22.0f;
         gfx::fillRect(kModeX + 10, kModeRowY[r] - 4, kModeW - 20, h, r == m_modeRow ? rgba(36, 92, 196, 230) : rgba(20, 34, 80, 200));
         if (r == m_modeRow) ui::frame(kModeX + 9, kModeRowY[r] - 5, kModeW - 18, h + 2, 1, kWhite);
@@ -540,14 +557,32 @@ void App::overlayModePanel() const {
     printCenteredAt(240, static_cast<int>(kModeRowY[0]), kYellow, line);
     printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 14, kLightGrey, tr(modeDescription(m_gameMode, 0)));
     printCenteredAt(240, static_cast<int>(kModeRowY[0]) + 25, kLightGrey, tr(modeDescription(m_gameMode, 1)));
+    // Submodos del battle royale (v0.16).
+    if (m_gameMode == game::GameMode::BattleRoyale) {
+        snprintf(line, sizeof(line), tr(T::ModeTeam), tr(teamName(m_teamMode)));
+        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, kWhite, line);
+    } else {
+        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, kDimGrey, tr(T::ModeTeamOff));
+    }
     if (m_gameMode == game::GameMode::Zombies) {
-        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, kDimGrey, tr(T::ModeBotsZombies));
+        // Partida guardada (v0.15): seguirla o empezar otra (izquierda / derecha).
+        if (m_zSavedDay > 0) {
+            if (m_zContinue) snprintf(line, sizeof(line), tr(T::ModeZContinue), m_zSavedDay);
+            else snprintf(line, sizeof(line), "%s", tr(T::ModeZNew));
+            printCenteredAt(240, static_cast<int>(kModeRowY[2]) + 3, m_zContinue ? kYellow : kWhite, line);
+        } else {
+            printCenteredAt(240, static_cast<int>(kModeRowY[2]) + 3, kDimGrey, tr(T::ModeZNoSave));
+        }
+    } else if (teamMode() != game::TeamMode::Solo) {
+        const int size = game::teamSizeOf(teamMode());
+        snprintf(line, sizeof(line), tr(T::ModeTeamBots), matchBots(), (matchBots() + 1) / size, size);
+        printCenteredAt(240, static_cast<int>(kModeRowY[2]) + 3, kWhite, line);
     } else {
         // Con menos de 30 bots, partida de practica: sin pavos ni logros (v0.14).
         snprintf(line, sizeof(line), tr(T::ModeBots), m_botCount);
         const bool practice = m_botCount < game::kRewardBots;
-        printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 3, practice ? kErrorRed : kWhite, line);
-        if (practice) printCenteredAt(240, static_cast<int>(kModeRowY[1]) + 22, kErrorRed, tr(T::BotsWarning));
+        printCenteredAt(240, static_cast<int>(kModeRowY[2]) + 3, practice ? kErrorRed : kWhite, line);
+        if (practice) printCenteredAt(240, static_cast<int>(kModeRowY[2]) + 21, kErrorRed, tr(T::BotsWarning));
     }
     ui::printHints(centeredHintsX(kModeHints, 5), static_cast<int>(kModeY + kModeH) - 16, kLightGrey, kModeHints, 5);
 }
@@ -960,8 +995,9 @@ void App::overlayLobby() const {
         printCenteredAt(cx, static_cast<int>(kModeBox.y) + 7, kYellow, tr(modeName(m_gameMode)));
         char bots[32];
         if (m_gameMode == game::GameMode::Zombies) snprintf(bots, sizeof(bots), "%s", tr(T::BotsZombies));
+        else if (teamMode() != game::TeamMode::Solo) snprintf(bots, sizeof(bots), "%s - %d BOTS", tr(teamName(teamMode())), matchBots());
         else snprintf(bots, sizeof(bots), tr(T::BotsSelector), m_botCount);
-        const bool practice = m_gameMode != game::GameMode::Zombies && m_botCount < game::kRewardBots;
+        const bool practice = m_gameMode != game::GameMode::Zombies && teamMode() == game::TeamMode::Solo && m_botCount < game::kRewardBots;
         printCenteredAt(cx, static_cast<int>(kModeBox.y) + 21, practice ? kErrorRed : kWhite, bots);
         if (practice) printCenteredAt(240, 222, kErrorRed, tr(T::PracticeShort));
         if (!m_worldReady) printCenteredAt(cx + 6, 232, kErrorRed, tr(T::NoMapError));
@@ -1201,11 +1237,31 @@ void App::overlayLoading() const {
     const Tip& tip = kTips[m_tip];
     if (tip.hasButton) ui::printHints(kTipX, kTipY, kLightGrey, &tip.hint, 1);
     else gfx::text::printShadow(kTipX, kTipY, kLightGrey, "%s", tip.hint.label());
-    if (m_gameMode == game::GameMode::Zombies) gfx::text::printShadow(100, 262, kDimGrey, "%s", tr(T::LoadingZombies));
-    else gfx::text::printShadow(100, 262, kDimGrey, tr(T::LoadingMap), m_botCount);
+    if (m_gameMode == game::GameMode::Zombies && m_zContinue && m_zSavedDay > 0) {
+        char line[64];
+        snprintf(line, sizeof(line), tr(T::LoadingZContinue), m_zSavedDay);
+        gfx::text::printShadow(100, 262, kDimGrey, "%s", line);
+    } else if (m_gameMode == game::GameMode::Zombies) {
+        gfx::text::printShadow(100, 262, kDimGrey, "%s", tr(T::LoadingZombies));
+    }
+    else gfx::text::printShadow(100, 262, kDimGrey, tr(T::LoadingMap), matchBots());
 }
 
 // --- Pausa ------------------------------------------------------------------------------
+
+int App::pauseItems(T* out) const {
+    // Seguir y volver al lobby (abandonar); en el modo zombi, ademas, guardar y guardar y
+    // salir (v0.15); con el menu de administrador, el MOD MENU.
+    int n = 0;
+    out[n++] = T::PauseContinue;
+    if (m_match.zombieMode() && m_match.alive(0)) {
+        out[n++] = T::PauseSave;
+        out[n++] = T::PauseSaveExit;
+    }
+    out[n++] = T::PauseLobby;
+    if (m_settings.admin) out[n++] = T::PauseModMenu;
+    return n;
+}
 
 void App::updatePause(const input::Input& in) {
     // Mod menu abierto desde la pausa: los trucos se aplican a la partida al momento.
@@ -1213,23 +1269,37 @@ void App::updatePause(const input::Input& in) {
         updateModMenu(in);
         return;
     }
-    const int items = m_settings.admin ? 3 : 2;
+    T options[5];
+    const int items = pauseItems(options);
     if (m_pauseItem >= items) m_pauseItem = 0;
     const int step = (in.pressed(PSP_CTRL_DOWN) ? 1 : 0) - (in.pressed(PSP_CTRL_UP) ? 1 : 0);
     if (step != 0) {
         m_pauseItem = (m_pauseItem + items + step) % items;
         playSfx(audio::Sfx::MenuMove);
     }
+    const T chosen = options[m_pauseItem];
     const bool resume = in.pressed(PSP_CTRL_START) || in.pressed(PSP_CTRL_CIRCLE) ||
-                        (in.pressed(PSP_CTRL_CROSS) && m_pauseItem == 0);
+                        (in.pressed(PSP_CTRL_CROSS) && chosen == T::PauseContinue);
     if (resume) {
         m_paused = false;
         playSfx(audio::Sfx::MenuMove);
-    } else if (in.pressed(PSP_CTRL_CROSS) && m_pauseItem == 2) {
+    } else if (!in.pressed(PSP_CTRL_CROSS)) {
+        return;
+    } else if (chosen == T::PauseModMenu) {
         openModMenu();
-    } else if (in.pressed(PSP_CTRL_CROSS)) {
+    } else if (chosen == T::PauseSave) {
+        saveZombieGame(true);
+        m_paused = false;
+    } else if (chosen == T::PauseSaveExit) {
+        // Se guarda y se sale sin que cuente como partida terminada (se sigue otro dia).
+        if (saveZombieGame(true)) {
+            playSfx(audio::Sfx::MenuAccept);
+            m_matchRecorded = true;
+            goToLobby();
+        }
+    } else {
         playSfx(audio::Sfx::MenuAccept);
-        recordMatch();  // abandonar tambien cuenta
+        recordMatch();  // abandonar tambien cuenta (y, en el modo zombi, borra la partida guardada)
         goToLobby();
     }
 }
@@ -1239,17 +1309,20 @@ void App::renderPause() const {
         renderModMenu();
         return;
     }
-    const int items = m_settings.admin ? 3 : 2;
-    const float h = 50.0f + 34.0f * items;
+    T options[5];
+    const int items = pauseItems(options);
+    // Con cinco opciones (modo zombi y administrador) los botones se juntan un poco.
+    const float pitch = items > 4 ? 28.0f : 34.0f, top = items > 3 ? 40.0f : 74.0f;
+    const float h = 50.0f + pitch * items;
     gfx::fillRect(0, 0, gfx::kScreenWidth, gfx::kScreenHeight, rgba(0, 0, 0, 150));
-    gfx::fillRect(140, 74, 200, h, kNavy);
-    gfx::fillRect(140, 74, 200, 22, kFortniteBlue);
+    gfx::fillRect(140, top, 200, h, kNavy);
+    gfx::fillRect(140, top, 200, 22, kFortniteBlue);
     for (int i = 0; i < items; ++i) {
         const bool selected = m_pauseItem == i;
-        const u32 idle = i == 2 ? rgba(70, 20, 110) : rgba(20, 44, 100);
-        drawButton(156, 110 + i * 34, 168, 24, selected ? kYellow : idle, selected, m_blinkTime);
+        const u32 idle = options[i] == T::PauseModMenu ? rgba(70, 20, 110) : rgba(20, 44, 100);
+        drawButton(156, top + 36 + i * pitch, 168, 24, selected ? kYellow : idle, selected, m_blinkTime);
     }
-    ui::drawHintIcons(m_atlas, centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(74 + h) - 16, kPauseHints,
+    ui::drawHintIcons(m_atlas, centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(top + h) - 16, kPauseHints,
                       kPauseHintCount);
 }
 
@@ -1258,13 +1331,15 @@ void App::overlayPause() const {
         overlayModMenu();
         return;
     }
-    const int items = m_settings.admin ? 3 : 2;
-    const float h = 50.0f + 34.0f * items;
-    printCentered(81, kWhite, tr(T::Pause));
+    T options[5];
+    const int items = pauseItems(options);
+    const float pitch = items > 4 ? 28.0f : 34.0f, top = items > 3 ? 40.0f : 74.0f;
+    const float h = 50.0f + pitch * items;
+    printCentered(static_cast<int>(top) + 7, kWhite, tr(T::Pause));
     for (int i = 0; i < items; ++i) {
-        printCentered(118 + i * 34, m_pauseItem == i ? kNavy : kWhite, tr(kPauseItems[i]));
+        printCentered(static_cast<int>(top + 44 + i * pitch), m_pauseItem == i ? kNavy : kWhite, tr(options[i]));
     }
-    ui::printHints(centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(74 + h) - 16, kLightGrey, kPauseHints,
+    ui::printHints(centeredHintsX(kPauseHints, kPauseHintCount), static_cast<int>(top + h) - 16, kLightGrey, kPauseHints,
                    kPauseHintCount);
 }
 
@@ -1280,8 +1355,9 @@ void App::updateResults(const input::Input& in, float dt) {
             m_resultsDelay = kDefeatDelay;
         }
         if (m_resultsDismissed) return;
-        const bool won = phase == game::MatchPhase::Finished && m_match.winner() == 0;
-        if (!won && m_match.alive(0)) return;
+        const bool won = m_match.playerWon();
+        // En equipo, mientras quede un companero se le sigue mirando (y se puede ganar).
+        if (!won && (m_match.alive(0) || m_match.playerTeamAlive())) return;
         m_resultsDelay += dt;
         if (m_resultsDelay < (won ? kVictoryDelay : kDefeatDelay)) return;
         m_results = won ? Results::Victory : Results::Defeat;
@@ -1378,7 +1454,8 @@ void App::overlayResults() const {
     formatTime(m_match.elapsed(), time, sizeof(time));
     printCenteredAt(344, 154, kWhite, time);
     char line[64];
-    snprintf(line, sizeof(line), tr(T::ResultOfPlayers), m_match.entityCount());
+    if (m_match.teamMode()) snprintf(line, sizeof(line), tr(T::ResultOfTeams), m_match.teamCount());
+    else snprintf(line, sizeof(line), tr(T::ResultOfPlayers), m_match.entityCount());
     printCenteredAt(136, 176, kDimGrey, line);
 
     if (victory) {

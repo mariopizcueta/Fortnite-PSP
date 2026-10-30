@@ -13,6 +13,7 @@
 #include "game/structures.h"
 #include "game/weapon.h"
 #include "world/collision.h"
+#include "world/zombie_sites.h"
 
 #include <vector>
 
@@ -43,9 +44,11 @@ struct PlayerCommands {
     bool cycleMaterial = false;  // CUADRADO en construccion: madera -> piedra -> metal
     bool reload = false;     // CUADRADO pulsado en modo combate: abrir / recoger o recargar
     int cycleSlot = 0;       // cruceta izquierda (-1) / derecha (+1): otra ranura
+    int selectSlot = -1;     // ranura concreta (teclas 1-5 en PC; -1 = ninguna)
     bool togglePickaxe = false;  // TRIANGULO: sacar / guardar el pico
     bool toggleCrouch = false;   // cruceta abajo: agacharse / levantarse
     bool useItem = false;    // R pulsado con un consumible en la mano
+    bool reviveHeld = false; // CUADRADO mantenido junto a un companero derribado (v0.16)
     bool placeTrap = false;  // R en construccion con la trampa elegida (cuarta pieza)
     // Inventario lleno: cambiar el objeto del suelo `swapPickup` por la ranura `swapSlot`
     // (el jugador la elige en el selector del HUD). -1: nada.
@@ -54,7 +57,7 @@ struct PlayerCommands {
 };
 
 // Por que no se ha podido usar un consumible.
-enum class UseError : u8 { None, FullHealth, FullShield };
+enum class UseError : u8 { None, FullHealth, FullShield, FullFood };
 const char* useErrorName(UseError error);
 
 // Sucesos de la partida para sonido y animaciones. La partida los apila en una cola
@@ -108,7 +111,36 @@ enum class GameEventType : u8 {
     BlueprintDone,    // other = plano (todas sus piezas en pie)
     // v0.14: tacticas de los bots.
     BotCamping,       // entity = bot que se aposta junto a un airdrop
+    // v0.15: modo zombi.
+    SiteDiscovered,   // other = lugar de interes (world::zsites::kSites)
+    SurvivorMenu,     // entity = aliado (la aplicacion abre la gestion de su inventario)
+    AllyDown,         // entity = aliado caido (se levantara como zombi armado)
+    AllyTurned,       // entity = el aliado que se ha levantado como zombi armado
+    AllyBuilt,        // entity = aliado, other = plano, amount = pieza (o reparada: -1)
+    AllySleeps,       // entity = aliado que se acuesta en su cama
+    BackpackFound,    // amount = ranuras que tiene ahora el inventario
+    BedPlaced,        // other = contenedor de la cama
+    SleepStarted,     // other = cama (-1: saco de dormir)
+    SleepEnded,       // amount = SleepEnd
+    SleepBlocked,     // hay monstruos cerca (no se puede dormir)
+    Hungry,           // amount = 1 con hambre, 2 muerto de hambre (pierde vida)
+    Tired,            // amount = 1 cansado (se equivoca), 2 agotado (pierde vida)
+    Fumble,           // amount = Fumble (el cansancio le juega una mala pasada)
+    LurkerRise,       // entity = zombi que se levanta de entre las ruinas
+    ObjectiveDone,    // other = hueco del objetivo, amount = pavos
+    ObjectiveNew,     // other = hueco del objetivo
+    Restocked,        // al amanecer: amount = contenedores que se han rellenado
+    // v0.16.
+    Downed,           // entity = derribado, other = quien le ha derribado (equipos)
+    Revived,          // entity = reanimado, other = quien le ha reanimado
+    AllyCrafted,      // entity = aliado, other = receta
+    BedAssigned,      // entity = aliado (-1: cama libre), other = contenedor de la cama
 };
+
+// Por que se despierta el jugador (GameEventType::SleepEnded).
+enum class SleepEnd : u8 { Rested, Canceled, Zombie, Hurt, Dawn };
+// Errores por falta de sueno (GameEventType::Fumble).
+enum class Fumble : u8 { Stumble, Misfire, DropAmmo };
 
 // Fase de la caida desde el autobus de cada personaje.
 enum class AirState : u8 { Bus, Freefall, Glide, Ground };
@@ -119,7 +151,8 @@ const char* airStateName(AirState state);
 // Objeto en el suelo: un arma o consumible (con su rareza), municion o materiales de
 // construccion (los sueltan los bots al caer y la llama; se recogen solos al pasar).
 // Plano (v0.14, modo zombi): `count` = indice del plano; se recoge con CUADRADO.
-enum class PickupKind : u8 { Item, Ammo, Materials, Blueprint };
+// Mochila (v0.15): +3 ranuras de inventario; la sueltan los brutos y los aliados caidos.
+enum class PickupKind : u8 { Item, Ammo, Materials, Blueprint, Backpack };
 struct Pickup {
     bool active = false;
     PickupKind kind = PickupKind::Item;
@@ -136,7 +169,9 @@ struct Pickup {
 // Llama: como mucho una por partida (MatchConfig::llamaChance, 5 %); se abre con CUADRADO o
 // se rompe a disparos o con el pico y suelta materiales, municion y objetos. Centro de
 // crafteo (v0.14, modo zombi): no se abre ni se gasta; CUADRADO abre el menu de crafteo.
-enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop, Llama, Workbench };
+// v0.15 (modo zombi): nevera y despensa (comida), y cama colocada por el jugador (no se
+// abre: CUADRADO duerme en ella; `claimedBy` = aliado que duerme en ella).
+enum class ContainerKind : u8 { Chest, AmmoBox, Airdrop, Llama, Workbench, Fridge, Pantry, Bed };
 struct Container {
     ContainerKind kind = ContainerKind::Chest;
     math3d::Vec3 position;
@@ -147,6 +182,7 @@ struct Container {
     int claimedBy = -1;
     float health = 0.0f;  // llama: vida antes de romperse (las demas no se rompen)
     bool discovered = false;  // centro de crafteo: el jugador ha pasado cerca (minimapa)
+    int site = -1;            // v0.15: lugar de interes al que pertenece
 };
 
 // --- Trampas (parche, fase 8; docs/TRAMPAS.md) ---------------------------------------------
@@ -206,6 +242,7 @@ struct Explosion {
 // v0.14 (modo zombi): un superviviente (indice del bot) y una pieza fantasma de un plano
 // (indice = plano * kMaxBlueprintPieces + pieza).
 struct Interactable {
+    // v0.15: Survivor tambien es un aliado ya rescatado (CUADRADO: su inventario).
     enum class Kind : u8 { None, Pickup, Container, Survivor, BlueprintPiece } kind = Kind::None;
     int index = -1;
 };
@@ -284,6 +321,11 @@ struct MatchStats {
     int botHolds = 0;            // ...que mantienen la posicion al final de la partida
     int zombieHits = 0;          // golpes de zombis (a personajes y a piezas)
     int zombiesSpawned = 0;
+    int guardsSpawned = 0;       // v0.15: guardianes de los lugares de interes
+    int allyPieces = 0;          // ...piezas levantadas o reparadas por los aliados
+    int downs = 0;               // v0.16: derribos (equipos)
+    int revives = 0;             // ...y reanimaciones
+    int allyCrafts = 0;          // ...objetos fabricados por los aliados
     u64 aiMicros = 0;            // tiempo acumulado de IA (decidir + dirigir)
     u64 physicsMicros = 0;       // tiempo acumulado de fisica de personajes
     int steps = 0;
@@ -313,6 +355,25 @@ public:
     int entityCount() const { return 1 + static_cast<int>(m_bots.size()); }
     int winner() const { return m_winner; }
     int playerPlace() const { return m_playerPlace; }
+    // Equipos (v0.16, docs/EQUIPOS.md).
+    bool teamMode() const { return m_config.teamSize > 1; }
+    int team(int id) const { return m_team[id]; }
+    bool sameTeam(int a, int b) const { return m_team[a] == m_team[b]; }
+    int teamCount() const;       // equipos al empezar
+    int teamsLeft() const;       // equipos con alguien vivo
+    bool playerWon() const { return m_phase == MatchPhase::Finished && m_winner >= 0 && sameTeam(m_winner, 0); }
+    // Queda alguien del equipo del jugador (aunque el haya caido): la partida sigue para el.
+    bool playerTeamAlive() const;
+    bool downed(int id) const { return m_downed[id]; }
+    // Progreso 0..1 de quien le esta reanimando (0: nadie), y quien.
+    float reviveProgress(int id) const { return m_reviveTime[id] / m_config.reviveSeconds; }
+    int reviver(int id) const { return m_reviver[id]; }
+    // Companero derribado al alcance del jugador (nadie mas le reanima) o -1, y a quien esta
+    // reanimando ahora (-1: a nadie).
+    int reviveTarget() const;
+    int playerReviving() const { return m_playerReviving; }
+    // Segundos de vida que le quedan a un derribado si nadie le reanima.
+    float bleedLeft(int id) const { return m_bleedRate[id] > 0.0f ? body(id).state().health / m_bleedRate[id] : 0.0f; }
     int playerKills() const { return m_playerKills; }
     float elapsed() const { return m_time; }
     // Zona segura actual (tormenta que se cierra) y la siguiente.
@@ -458,6 +519,60 @@ public:
     void giveBlueprint(int i);
     // Tamano del personaje (los brutos son mas grandes; caja de impacto y dibujo).
     float entityScale(int id) const;
+
+    // --- Modo zombi v0.15 ------------------------------------------------------------------
+    // Hambre y descanso del jugador (0..100; 100 = saciado / descansado).
+    float food() const { return m_food; }
+    float rest() const { return m_rest; }
+    void setNeeds(float food, float rest) { m_food = food; m_rest = rest; }  // pruebas
+    bool tired() const { return zombieMode() && m_rest < m_config.zombie.tiredLevel; }
+    // Durmiendo: 0 no, 1 en una cama, 2 en el saco de dormir. Mientras se duerme el tiempo pasa
+    // sleepTimeScale veces mas deprisa (sleepScale()) y el jugador no se mueve.
+    int sleeping() const { return m_sleeping; }
+    float sleepScale() const { return m_sleeping ? m_config.zombie.sleepTimeScale : 1.0f; }
+    // Dormir en la cama `bed` (contenedor) o, con -1, en el saco de dormir. false (y suceso
+    // SleepBlocked) si hay monstruos cerca o si el descanso ya esta lleno.
+    bool trySleep(int bed);
+    void wakeUp(SleepEnd why = SleepEnd::Canceled);
+    // R con una cama en la mano: la coloca delante. Devuelve el contenedor o -1.
+    int placeBed();
+    int bedCount() const;
+    // Aliados: gestionar su inventario (CUADRADO junto a uno rescatado). Darle la ranura
+    // `slot` del jugador o quitarle la suya (`botSlot`).
+    bool allyGive(int botIndex, int slot);
+    bool allyTake(int botIndex, int botSlot);
+    // Camas (v0.16): cama al alcance del jugador (contenedor) o -1; asignarla a un aliado
+    // (indice de bot; -1: libre). De noche, ese aliado duerme en ella pase lo que pase.
+    int nearbyBed() const;
+    bool assignBed(int bed, int botIndex);
+    // Bot aliado que tiene asignada la cama, o -1.
+    int bedOwner(int bed) const;
+    // Pieza `k` de lo que el aliado levanta junto a la cama `bed` (false: ahi no cabe).
+    bool fortPiece(int bed, int k, WallPlacement* out) const;
+    // Lugares de interes descubiertos (al entrar en ellos).
+    bool siteDiscovered(int i) const { return i >= 0 && i < world::zsites::kSiteCount && m_siteFound[i]; }
+    // Objetivos activos y cumplidos.
+    const Objective& objective(int i) const { return m_objectives[i]; }
+    int objectivesDone() const { return m_objectivesDone; }
+    int rescuedTotal() const { return m_rescuedTotal; }
+    // Pruebas: fija un objetivo concreto en un hueco.
+    void setObjective(int slot, ObjectiveType type, int target);
+    // Pruebas: pone el reloj del modo zombi (dia, de noche o no, segundos dentro).
+    void setDayClock(int day, bool night, float clock) {
+        m_day = day;
+        m_night = night;
+        m_zClock = clock;
+    }
+    // Pruebas: aparece un zombi de este tipo cerca de un punto (indice de bot o -1).
+    int spawnZombieAt(ZombieType type, const math3d::Vec3& near);
+    // Partida guardada (texto, game/zombie_save.cpp). save: false si no se puede escribir
+    // (`vbucks`: pavos ganados en ella, para seguir sumando). load, tras start() con
+    // MatchConfig::zombies() y la semilla del fichero: false si el fichero no vale.
+    bool saveZombies(const char* path, int vbucks = 0) const;
+    bool loadZombies(const char* path, int* vbucks = nullptr);
+    // Dia y semilla de una partida guardada (false si no hay o no vale) y borrarla.
+    static bool peekZombieSave(const char* path, int* day, u32* seed);
+    static bool eraseZombieSave(const char* path);
 
     // Trucos del menu de administrador (se pueden cambiar a mitad de partida desde la pausa).
     void setCheats(const Cheats& cheats) { m_config.cheats = cheats; }
@@ -625,6 +740,22 @@ private:
     void startFlee(int index, int threat);
     bool fleePoint(const Bot& bot, const math3d::Vec3& threat, math3d::Vec3* out);
     bool botHasHeals(const Bot& bot) const;
+    // Equipos (v0.16, match_teams.cpp): derribar, desangrarse y reanimar, y que los bots
+    // vayan juntos y se levanten unos a otros.
+    bool teamStanding(int id) const;     // algun companero suyo en pie (ni el ni los derribados)
+    void goDown(int victim, int attacker);
+    void updateDowned(float dt);
+    bool markRevive(int rescuer, int mate);
+    void revive(int id, int rescuer);
+    void updateDownedBot(int index, float dt);
+    int downedMate(int index, float range) const;
+    void startBotRevive(int index, int mate);
+    void updateBotRevive(int index);
+    int teamLeader(int id) const;
+    void splitIntoTeams();
+    void teamLanding();
+    void followPlayerJump(int index);
+    void releaseLootClaims(Bot& b);
     // v0.14: tacticas de los bots (match_bots.cpp): acampar airdrops, estructuras pequenas
     // (caja de paredes, rampa) y final de partida.
     bool lateGame() const;
@@ -639,11 +770,44 @@ private:
     void decideZombie(int index);
     void updateSurvivor(int index, float dt);
     void decideSurvivor(int index);
-    bool spawnZombie(ZombieType type, const math3d::Vec3* near);
+    // Slot del zombi (indice de bot) o -1. `near`: alrededor de ese punto (horda, guardianes).
+    int spawnZombie(ZombieType type, const math3d::Vec3* near, float nearRadius = 7.0f);
     ZombieType rollZombieType();
     void spawnHorde();
     void zombieDrops(int index);
     void applyMapState();
+    // v0.15 (match_zombies.cpp / zombie_save.cpp).
+    void updateNeeds(float dt);
+    void updateSleep(float dt);
+    void updateSites();
+    void spawnSiteGuards(int site);
+    bool updateAllyDuty(int index);
+    bool allyBuildStep(int index);
+    // v0.16: la IA de los aliados (match_allies.cpp).
+    bool allyBedtime(const Bot& b) const;
+    void allyGoToBed(int index);
+    void allyLieDown(int index);
+    void allyFollow(int index);
+    bool allyStartClimb(int index);
+    void allyClimbStep(int index);
+    bool allyGoTo(Bot& b, const math3d::Vec3& spot);
+    bool allyTasks(int index);
+    bool allyLootTask(int index);
+    bool allyCraftTask(int index);
+    bool allyHarvestTask(int index);
+    bool allyFortify(int index);
+    bool allyPlacePiece(int index, WallPlacement placement, float healthScale, bool mustPay, bool ownFirst, int* wall);
+    int allyRecipe(const Bot& b) const;
+    void allyCraft(int index, int recipeIndex);
+    void turnFallen(int index);
+    void updateFallen(int index, float dt, float targetDistance);
+    void restockContainers();
+    void newObjective(int slot);
+    void objectiveEvent(ObjectiveType type, int amount = 1);
+    void updateObjectives(float dt);
+    void grantReward(RewardType reward);
+    int pieceKeyNear(const math3d::Vec3& p) const;
+    bool zombiesNear(const math3d::Vec3& p, float range) const;
     MoveIntent avoidObstacles(int index, math3d::Vec3 desired, float speed, MoveIntent intent);
     void onStructuresChanged();
     void pushEvent(GameEventType type, int entity, int other, const math3d::Vec3& position);
@@ -693,6 +857,7 @@ private:
     bool m_pendingPickaxe = false;
     bool m_pendingUse = false;
     int m_pendingCycle = 0;
+    int m_pendingSelect = -1;
     int m_pendingSwapPickup = -1, m_pendingSwapSlot = -1;
     float m_recoilBloom = 0.0f;  // grados de dispersion por el retroceso de los ultimos disparos
     bool m_buildMode = false;
@@ -751,6 +916,17 @@ private:
     Trap m_traps[kMaxTraps];
     int m_trapStock = 0;
     bool m_pendingTrap = false;
+    // Equipos (v0.16): equipo de cada entidad, derribados, lo que pierden por segundo, quien
+    // les derribo, cuantas veces han caido y quien les esta reanimando (cada paso lo confirma).
+    u8 m_team[kMaxBots + 1] = {};
+    bool m_downed[kMaxBots + 1] = {};
+    float m_bleedRate[kMaxBots + 1] = {};
+    short m_downedBy[kMaxBots + 1] = {};
+    u8 m_downCount[kMaxBots + 1] = {};
+    short m_reviver[kMaxBots + 1] = {};
+    float m_reviveTime[kMaxBots + 1] = {};
+    bool m_reviveSeen[kMaxBots + 1] = {};
+    int m_playerReviving = -1;
     ShotObserver m_shotObserver = nullptr;
     void* m_shotObserverContext = nullptr;
     // Modo zombi.
@@ -764,6 +940,22 @@ private:
     bool m_bpFound[kBlueprintCount] = {};
     bool m_bpDone[kBlueprintCount] = {};
     short m_bpWall[kBlueprintCount][kMaxBlueprintPieces];
+    // v0.15.
+    float m_food = 100.0f, m_rest = 100.0f;
+    int m_hungerStage = 0, m_tiredStage = 0;   // ultimo aviso dado (0: ninguno)
+    float m_needsTimer = 0.0f;                 // dano por hambre / agotamiento
+    int m_sleeping = 0;
+    int m_sleepBed = -1;
+    float m_fumbleTimer = 20.0f;
+    float m_stumbleTimer = 0.0f;               // > 0: tropieza (mas lento)
+    bool m_siteFound[world::zsites::kSiteCount] = {};
+    int m_siteGuardDay[world::zsites::kSiteCount] = {};
+    Objective m_objectives[kActiveObjectives];
+    int m_objectivesDone = 0;
+    ObjectiveType m_lastObjective = ObjectiveType::Count;
+    int m_rescuedTotal = 0;
+    float m_allyBuildTimer = 0.0f;
+    float m_sleepRested = 0.0f;                // descanso ganado en este sueno (objetivo)
 };
 
 // Duena de las piezas de los planos: no cuentan en el limite de piezas del jugador.

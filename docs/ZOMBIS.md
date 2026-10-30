@@ -1,4 +1,8 @@
-# Supervivencia zombi (v0.14)
+# Supervivencia zombi (v0.14, ampliado en v0.15 y v0.16)
+
+Lo nuevo de la v0.15 (lugares de interés, hambre y sueño, camas, partida guardada, aliados,
+mochilas, objetivos y miedo) está resumido en [ACTUALIZACION_0_15.md](ACTUALIZACION_0_15.md) y
+explicado aquí en su sección.
 
 Modo nuevo del lobby (**CUADRADO** → modo → **SUPERVIVENCIA ZOMBI**). No hay autobús, ni
 tormenta que se cierre, ni bots del battle royale: solo tú, los zombis y unos pocos
@@ -35,8 +39,8 @@ la base un cofre.
 
 | | Duración | Zombis a la vez | Velocidad | Vista de los zombis |
 |---|---|---|---|---|
-| Día | 150 s | 7 + 2 por día | normal | 16 m |
-| Noche | 95 s | 13 + 2 por día | ×1,3 | 26 m |
+| Día | 300 s (v0.15) | 7 + 2 por día | normal | 16 m |
+| Noche | 180 s (v0.15) | 13 + 2 por día | ×1,3 | 26 m |
 
 - Al **anochecer** suena un cuerno, aparece el aviso "ANOCHECE: viene una horda" y llega
   una **horda** (6 + 2 por día) desde ~45 m que va directa a por ti. Desde la segunda noche
@@ -100,6 +104,7 @@ banco); las armas traen un cargador de reserva.
 | Vendas ×5 | 30 | | |
 | Botiquín | 40 | 20 | |
 | Munición ×2 (del arma en la mano) | | | 15 |
+| Cama (v0.15) | 50 | | 15 |
 
 En el botín del modo solo hay **escopetas** (de corredera y táctica), **pistolas** (y
 revólver) y **curativos**; ni granadas ni trampas. Los materiales salen del pico y de los
@@ -110,7 +115,7 @@ zombis.
 4 planos repartidos por el mapa (rollo azul con haz de luz). Al recogerlos aparecen sus
 **piezas fantasma azules** en la base (y en el mapa grande). Junto a una, **CUADRADO** la
 construye por 10 de material (el elegido para construir o el que haya). Son **reforzadas**
-(el doble de vida) y no cuentan en tu límite de piezas.
+(el doble de vida). v0.15: en este modo no hay límite de piezas (solo el técnico, 128).
 
 | Plano | Piezas |
 |---|---|
@@ -126,18 +131,131 @@ Si los zombis rompen una pieza, su fantasma vuelve a aparecer y se puede reconst
 La partida acaba cuando caes: resultados con las **noches sobrevividas**, zombis abatidos,
 rescatados, planos completados y objetos fabricados, y el récord.
 
-- **Pavos:** 25 por noche sobrevivida y 15 por plano completado.
+- **Pavos:** 25 por noche sobrevivida, 15 por plano completado y 10 por objetivo cumplido.
+- Al caer (o al abandonar desde la pausa) la partida guardada se borra.
 - **Logros nuevos:** Primera noche, Tres noches, Una semana (récord de noches seguidas),
   Cazazombis (100 zombis), Rescatador (5 supervivientes), Fortaleza (4 planos), Artesano
   (10 objetos fabricados).
 - En `perfil.txt`: `zombis_record_noches`, `zombis_abatidos`, `supervivientes`, `planos` y
   `fabricados`. Las bajas de zombis no cuentan como las del battle royale.
 
+## v0.15: lugares de interés
+
+| Lugar | Dónde | Guardianes | Contenedores |
+|---|---|---|---|
+| La Casona | x 39..53, z 47..59 | 6 (+ bruto desde el día 2) | 2 neveras, despensa, 2 cofres, munición |
+| Almacén del Polvorín | x -2..18, z -74..-58 | 7 (+ bruto desde el día 2) | 3 despensas, 2 cajas de munición, 2 cofres, nevera |
+| Casa del guarda | x 12..20, z 29..37 | 2 | nevera, cofre |
+| Casa del lago | x -20..-12, z 74..82 | 2 | nevera, munición |
+| Granja abandonada | x 68..76, z 12..20 | 3 | nevera, despensa |
+| Cabaña del bosque | x -60..-52, z 20..28 | 2 | nevera, despensa |
+| Puestos norte, este y del bosque | (34, -80), (78, 56), (-66, -56) | 3 | munición y despensa o cofre |
+| Gasolinera | tienda x 48..56, z -20..-15 | 3 | nevera de bebidas, despensa, munición |
+
+- Los guardianes salen al acercarse (a 10 m del borde del lugar), una vez al día, y van
+  ganando uno cada dos días. Hasta un 40 % están **tumbados entre las ruinas** como
+  cadáveres: se levantan si te acercas a 5,5 m o si les haces daño.
+- Al entrar en un lugar se descubre (su nombre en pantalla y una marca en el mapa).
+- Al amanecer, un 35 % de los cofres, cajas, neveras y despensas abiertos se rellenan.
+
+## v0.15: hambre y sueño
+
+- **Hambre** (barra naranja): empieza en 80 y se vacía en ~720 s (un día y medio). Por
+  debajo de 25, aviso; a 0, se pierden 0,7 de vida por segundo. **Lata** +30, **ración** +65
+  (y +10 de vida). Sin hambre no se come.
+- **Sueño** (barra morada): empieza en 75 y se vacía en ~1440 s (tres días). Por debajo de
+  33 se falla: más dispersión, de vez en cuando tropiezas, se te escapa un tiro o se te caen
+  balas, microsueños, susurros y figuras que no están. A 0, se pierden 0,5 de vida por
+  segundo.
+- **Dormir:** R con el **saco de dormir** (se empieza con él) o CUADRADO junto a una
+  **cama** colocada. No con un zombi a menos de 18 m; uno a 11 m o un golpe te despierta.
+  Durmiendo el tiempo pasa ×8. La cama llena el sueño en media noche (90 s de reloj) y el
+  saco en una noche (180 s). CÍRCULO o X despiertan.
+- Hasta 8 camas. De noche, con el jugador en la base (30 m), cada aliado con cama libre se
+  acuesta: fuera de guardia, los zombis no le atacan. Se levanta al amanecer o si el jugador
+  se va.
+
+## v0.15: aliados
+
+- **CUADRADO** junto a un aliado: su inventario (arriba el tuyo, abajo el suyo). X le da un
+  arma, curativo o granada, o se lo quita (las armas, con un cargador de su munición).
+- **En la base, de día:** levantan una pieza cada 6 s. Las de los planos encontrados (con tu
+  material; reforzadas) y, aunque no tengas planos, las del **muro del perímetro** (las de los
+  planos de las murallas: sin material, con lo que rapiñan y el triple de lento, sin
+  reforzar). Reconstruyen lo que rompen los zombis.
+- **Si caen**, a los 4 s se levantan como **zombi armado** (170 de vida, con sus armas y su
+  aspecto) que dispara a todos. Abatido, suelta su inventario y una **mochila**.
+
+## v0.16: aliados inteligentes
+
+- **125 de vida y hasta 125 de escudo.** Sus barras salen arriba a la izquierda.
+- **Qué hacen, por orden:**
+  1. De noche, si tienen **cama asignada**, a dormir pase lo que pase.
+  2. Con poca vida (vida + escudo por debajo de 70): huyen hacia ti, se cubren con lo que
+     construyen y se curan. Solo pelean si el zombi está encima.
+  3. Si te alejas más de 15 m lo dejan todo y van contigo, disparando de camino.
+  4. Si ven un zombi, pelean sin perseguirlo.
+  5. Si estás en lo alto de una rampa construida, suben detrás.
+  6. Si no: fabrican, recogen botín, fortifican su cama y levantan la base.
+- **Botín:** armas (solo si son mejores o les falta alguna; sueltan la que sustituyen), curas,
+  mochilas y materiales, a 12 m. Si van cortos de material pican lo que tengan cerca, nunca lo
+  de la base ni lo de los lugares. Abren cofres, pero no neveras ni despensas: la comida es
+  para ti.
+- **Crafteo:** con un centro de crafteo a 14 m y material propio, se fabrican un arma mejor
+  que la mejor que llevan o, si no tienen curas, curas. Traen 30 de madera al unirse.
+- **Camas:** **L** junto a una cama abre la lista de aliados. Sin asignar no duermen en ella,
+  y tú no puedes dormir en la de un aliado. Salen con tiempo para llegar al anochecer; si a
+  los 30 s de noche no han llegado, se acuestan directamente. Durmiendo no reciben daño. Se
+  levantan al amanecer.
+- **Refugio:** de día, con el jugador a menos de 30 m, levantan junto a su cama tres paredes y
+  un techo en la celda de la rejilla donde está. El lado desde el que colocaste la cama queda
+  libre para entrar. Pagan con su material, luego con el tuyo y, sin nada, con lo que rapiñan
+  (el triple de lento).
+
+Sustituye a lo que decía la v0.15 sobre las camas: ya no se reparten solas.
+
+## v0.15: mochilas y botín
+
+- Los **brutos** y los aliados caídos sueltan una **mochila**: +3 ranuras (hasta 11).
+- Las **cajas de munición** dan los 5 tipos (medio paquete de cada uno).
+- Comida: neveras (latas y a veces una ración), despensas (latas, raciones, vendas o
+  munición), cofres (30 %) y algún zombi (5 %).
+
+## v0.15: objetivos
+
+Dos a la vez, distintos: abatir zombis (8 + 2 por día), corredores, un bruto (desde el día
+2), registrar 3 neveras o despensas, comer 2 veces, fabricar 2 objetos, construir 8 piezas,
+ir a un lugar (sin descubrir si queda alguno), picar 150 de material, dormir hasta descansar
+y tiros a la cabeza. Cumplido: recompensa (materiales, munición de todo, comida o curas) y
+10 pavos; a los 4 s llega otro.
+
+## v0.15: partida guardada
+
+- **Pausa:** GUARDAR PARTIDA, GUARDAR Y SALIR (al lobby, sin que cuente como terminada) y
+  VOLVER AL LOBBY (abandonar: cuenta y borra la guardada). También se guarda **al amanecer**.
+- **Lobby:** CUADRADO (modo) > fila de abajo: ← → entre "Continuar: día N" y "Partida
+  nueva".
+- `partida_zombis.txt` (junto al EBOOT, escrito en un temporal y renombrado): semilla, día y
+  hora, jugador, inventario, munición, materiales, planos, lugares, objetivos, piezas,
+  supervivientes con su inventario, lo abierto, camas, objetos del suelo y lo derruido. Los
+  zombis no se guardan: al seguir, el mapa se vuelve a poblar.
+
+## v0.15: miedo
+
+- Más oscuro (penumbra y noche) y una viñeta que se cierra con el sueño.
+- **Ojos rojos** de los zombis de noche, sin niebla: se ven antes que ellos.
+- **Latido** (y bordes rojos) con un zombi a menos de 14 m (un bruto, 28) o con poca vida.
+- **Gritos lejanos** de noche cada 22-55 s.
+- Zombis **tumbados** que se levantan con un golpe de sonido; los aliados caídos vuelven.
+- Con sueño: susurros, una figura al borde de la vista que desaparece y microsueños.
+
 ## Código
 
-- `game/zombies.h/.cpp`: tipos de zombi, recetas, planos y `ZombieConfig`.
-- `game/match_zombies.cpp`: día y noche, aparición, IA de zombis y supervivientes,
-  crafteo, planos y el estado del mapa (`Match::applyMapState`).
+- `game/zombies.h/.cpp`: tipos de zombi, recetas, planos, objetivos y `ZombieConfig`.
+- `game/zombie_save.cpp` (v0.15): la partida guardada.
+- `game/match_zombies.cpp`: día y noche, aparición, IA de zombis, crafteo, planos y el
+  estado del mapa (`Match::applyMapState`).
+- `game/match_allies.cpp` (v0.16): la IA de los aliados, las camas asignadas y sus refugios.
 - `world/zombie_sites.h`: la base, campamentos, centros de crafteo y planos; los objetos,
   en `world_layout.cpp` (`zombieSites`).
 - `app/app_zombies.cpp`: HUD, avisos, menú de crafteo, noche, minimapa en ruinas, cielo y

@@ -28,9 +28,14 @@ enum class ItemType : u8 {
     BurstRifle, ScopedRifle, SubmachineGun, TacticalShotgun, Pistol, Revolver, SemiAutoSniper,
     RocketLauncher, GrenadeLauncher, Grenade,
     SpikeTrap,  // trampa de pinchos: no ocupa ranura, va a la barra de construccion
+    // v0.15 (modo zombi): comida (quita el hambre) y muebles para dormir.
+    CannedFood, Ration,
+    Bed,          // R la coloca delante (despues se duerme en ella con CUADRADO)
+    SleepingBag,  // R: dormir donde se esta (mas lento que en una cama; no se gasta)
     Count
 };
-enum class ItemKind : u8 { Empty, Weapon, Consumable, Throwable, Trap };
+// Furniture (v0.15): no se consume al usarlo; R lo coloca (cama) o duerme en el (saco).
+enum class ItemKind : u8 { Empty, Weapon, Consumable, Throwable, Trap, Furniture };
 // Rareza (color del fondo de la ranura y del haz de luz del botin).
 enum class Rarity : u8 { Common, Uncommon, Rare, Epic, Legendary, Count };
 // Municion comun por tipo (Rockets: lanzacohetes y lanzagranadas).
@@ -48,6 +53,7 @@ struct ItemDef {
     float healthCap;   // ...sin pasar de este valor
     float shield;      // escudo que da
     float shieldCap;
+    float food = 0.0f; // v0.15: hambre que quita (0..100)
 };
 
 const ItemDef& itemDef(ItemType type);
@@ -56,6 +62,8 @@ const char* itemName(ItemType type);
 const char* rarityName(Rarity rarity);
 const char* ammoName(AmmoType type);
 bool isWeapon(ItemType type);
+// Comida del modo zombi (v0.15).
+bool isFood(ItemType type);
 WeaponClass weaponClass(ItemType type);
 // Armas con mirilla (L mira por ella): francotiradores y fusil con mira.
 bool hasScope(ItemType type);
@@ -88,7 +96,10 @@ struct Materials {
 
 class Inventory {
 public:
-    static constexpr int kSlots = 5;
+    static constexpr int kSlots = 5;  // ranuras de partida
+    // v0.15 (modo zombi): cada mochila da kBackpackSlots ranuras mas, hasta kMaxSlots.
+    static constexpr int kBackpackSlots = 3;
+    static constexpr int kMaxSlots = kSlots + 2 * kBackpackSlots;
     static constexpr int kMaxAmmo = 999;
 
     void clear();
@@ -114,8 +125,13 @@ public:
     const InventorySlot& slot(int i) const { return m_slots[i]; }
     InventorySlot& mutableSlot(int i) { return m_slots[i]; }
     bool full() const;
+    // Ranuras utilizables (kSlots + las de las mochilas). clear() vuelve a kSlots.
+    int slotCount() const { return m_capacity; }
+    // Una mochila mas: false si ya se lleva el maximo.
+    bool addBackpack();
+    void setSlotCount(int n) { m_capacity = n < kSlots ? kSlots : (n > kMaxSlots ? kMaxSlots : n); }
 
-    // Ranura seleccionada (0..4) y si se lleva el pico en la mano en su lugar.
+    // Ranura seleccionada (0..slotCount()-1) y si se lleva el pico en la mano en su lugar.
     int selected() const { return m_selected; }
     bool pickaxe() const { return m_pickaxe; }
     void select(int index);
@@ -140,7 +156,8 @@ public:
     void setAmmo(AmmoType type, int n) { m_ammo[static_cast<int>(type)] = n; }
 
 private:
-    InventorySlot m_slots[kSlots];
+    InventorySlot m_slots[kMaxSlots];
+    int m_capacity = kSlots;
     int m_ammo[static_cast<int>(AmmoType::Count)] = {};
     int m_selected = 0;
     bool m_pickaxe = false;
